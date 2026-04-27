@@ -80,8 +80,8 @@ class WebsocketObserver:
         self,
         *,
         recorder: RunRecorder,
-        user_id: int,
-        store_id: int,
+        user_id: int | str,
+        store_id: int | str,
     ) -> None:
         self.recorder = recorder
         root = _websocket_root()

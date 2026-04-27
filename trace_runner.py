@@ -1,11 +1,17 @@
-"""Deterministic trace-mode orchestration."""
+"""
+Deterministic trace-mode orchestration.
+
+Bootstraps its own auth and fixtures via user_sim / store_sim modules,
+then drives each scenario step-by-step using polling for verification.
+"""
 
 from __future__ import annotations
+
+import asyncio
 
 import httpx
 from rich.console import Console
 
-import auth
 import config
 import robot_sim
 from reporting import RunRecorder
@@ -30,10 +36,118 @@ def _poll_attempts(profile: TimingProfile, default_attempts: int) -> int:
     return default_attempts
 
 
+async def _poll_for_status(
+    client: httpx.AsyncClient,
+    *,
+    token: str,
+    token_source: str,
+    auth_header: str,
+    auth_scheme: str,
+    order_db_id: int,
+    order_ref: str,
+    recorder: RunRecorder,
+    actor: str,
+    expected_statuses: set[str],
+    terminal_statuses: set[str] | None = None,
+    scenario: str,
+    step: str,
+    action: str,
+    poll_interval: float,
+    max_attempts: int,
+    timeout_code: str,
+    timeout_message: str,
+) -> dict | None:
+    from transport import RequestError, api_data, request_json
+
+    terminal_statuses = terminal_statuses or {"rejected", "cancelled", "refunded"}
+
+    def _order_identity(payload):
+        from transport import api_data as _ad
+        raw = _ad(payload)
+        if isinstance(raw, list):
+            raw = raw[0] if raw else {}
+        if not isinstance(raw, dict):
+            return None, None, None
+        oid = raw.get("id")
+        try:
+            oid = int(oid) if oid is not None else None
+        except (TypeError, ValueError):
+            oid = None
+        oref = raw.get("order_id")
+        st = raw.get("status")
+        return oid, str(oref) if oref is not None else None, str(st) if st else None
+
+    for attempt in range(max_attempts):
+        await asyncio.sleep(poll_interval)
+        try:
+            result = await request_json(
+                client,
+                recorder=recorder,
+                actor=actor,
+                action=action,
+                category="verification",
+                scenario=scenario,
+                step=step,
+                order_db_id=order_db_id,
+                order_ref=order_ref,
+                method="GET",
+                url=f"{config.LASTMILE_BASE_URL}/v1/core/orders/",
+                endpoint="/v1/core/orders/",
+                params={"order_id": str(order_db_id)},
+                headers={
+                    "Content-Type": "application/json",
+                    auth_header: f"{auth_scheme} {token}" if auth_scheme else token,
+                },
+                auth_header_name=auth_header,
+                auth_token=token,
+                auth_source=token_source,
+                auth_scheme=auth_scheme if auth_scheme else None,
+                response_order_info=_order_identity,
+                poll_attempt=attempt + 1,
+            )
+        except RequestError as exc:
+            recorder.record_issue(
+                severity="warning",
+                code=f"{timeout_code}_poll_error",
+                actor=actor,
+                scenario=scenario,
+                step=step,
+                order_db_id=order_db_id,
+                order_ref=order_ref,
+                related_event_id=exc.event["id"] if exc.event else None,
+                message=f"Poll attempt {attempt + 1} failed: {exc}",
+            )
+            continue
+
+        raw = api_data(result.payload)
+        if isinstance(raw, list):
+            raw = raw[0] if raw else {}
+        if not isinstance(raw, dict):
+            continue
+        status = str(raw.get("status") or "")
+        if status in expected_statuses:
+            return raw
+        if status in terminal_statuses:
+            return raw
+
+    recorder.record_issue(
+        severity="error",
+        code=timeout_code,
+        actor=actor,
+        scenario=scenario,
+        step=step,
+        order_db_id=order_db_id,
+        order_ref=order_ref,
+        message=timeout_message,
+    )
+    return None
+
+
 async def _verify_receive_code(
     client: httpx.AsyncClient,
     *,
-    user_session: auth.UserSession,
+    user_token: str,
+    token_source: str,
     order_db_id: int,
     order_ref: str,
     recorder: RunRecorder,
@@ -41,8 +155,8 @@ async def _verify_receive_code(
 ) -> None:
     order = await user_sim.fetch_order(
         client,
-        user_token=user_session.token,
-        token_source=user_session.token_source,
+        user_token=user_token,
+        token_source=token_source,
         order_db_id=order_db_id,
         order_ref=order_ref,
         recorder=recorder,
@@ -79,9 +193,9 @@ async def _verify_receive_code(
 async def _run_completed(
     client: httpx.AsyncClient,
     *,
-    user_session: auth.UserSession,
-    store_session: auth.StoreSession,
-    fixtures,
+    user_session: user_sim.UserSession,
+    store_session: store_sim.StoreSession,
+    fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
 ) -> None:
@@ -96,7 +210,6 @@ async def _run_completed(
         recorder=recorder,
         scenario=scenario,
         step="place_order",
-        enqueue=False,
     )
     if order is None:
         recorder.finish_scenario(
@@ -138,13 +251,16 @@ async def _run_completed(
         )
         return
 
-    accepted_state = await user_sim.wait_for_status(
+    accepted_state = await _poll_for_status(
         client,
-        user_token=user_session.token,
+        token=user_session.token,
         token_source=user_session.token_source,
+        auth_header="Authorization",
+        auth_scheme="Token",
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
         recorder=recorder,
+        actor="user",
         expected_statuses={"payment_processing"},
         scenario=scenario,
         step="verify_store_acceptance",
@@ -199,17 +315,20 @@ async def _run_completed(
         )
         return
 
-    processing_state = await store_sim.wait_for_status(
+    processing_state = await _poll_for_status(
         client,
-        store_token=store_session.last_mile_token,
+        token=store_session.last_mile_token,
         token_source=store_session.token_source,
+        auth_header="Fainzy-Token",
+        auth_scheme="",
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
         recorder=recorder,
+        actor="store",
+        expected_statuses={"order_processing"},
         scenario=scenario,
         step="verify_order_processing",
         action="verify_order_processing",
-        expected_statuses={"order_processing"},
         poll_interval=_poll_interval(timing, 1.0),
         max_attempts=_poll_attempts(timing, 30),
         timeout_code="trace_order_processing_timeout",
@@ -292,20 +411,24 @@ async def _run_completed(
         if status == "robot_arrived_for_delivery":
             await _verify_receive_code(
                 client,
-                user_session=user_session,
+                user_token=user_session.token,
+                token_source=user_session.token_source,
                 order_db_id=order["order_db_id"],
                 order_ref=order["order_ref"],
                 recorder=recorder,
                 scenario=scenario,
             )
 
-    final_state = await user_sim.wait_for_status(
+    final_state = await _poll_for_status(
         client,
-        user_token=user_session.token,
+        token=user_session.token,
         token_source=user_session.token_source,
+        auth_header="Authorization",
+        auth_scheme="Token",
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
         recorder=recorder,
+        actor="user",
         expected_statuses={"completed"},
         scenario=scenario,
         step="verify_completed",
@@ -329,9 +452,9 @@ async def _run_completed(
 async def _run_rejected(
     client: httpx.AsyncClient,
     *,
-    user_session: auth.UserSession,
-    store_session: auth.StoreSession,
-    fixtures,
+    user_session: user_sim.UserSession,
+    store_session: store_sim.StoreSession,
+    fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
 ) -> None:
@@ -346,7 +469,6 @@ async def _run_rejected(
         recorder=recorder,
         scenario=scenario,
         step="place_order",
-        enqueue=False,
     )
     if order is None:
         recorder.finish_scenario(
@@ -387,13 +509,16 @@ async def _run_rejected(
         )
         return
 
-    final_state = await user_sim.wait_for_status(
+    final_state = await _poll_for_status(
         client,
-        user_token=user_session.token,
+        token=user_session.token,
         token_source=user_session.token_source,
+        auth_header="Authorization",
+        auth_scheme="Token",
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
         recorder=recorder,
+        actor="user",
         expected_statuses={"rejected"},
         scenario=scenario,
         step="verify_rejected",
@@ -417,9 +542,9 @@ async def _run_rejected(
 async def _run_cancelled(
     client: httpx.AsyncClient,
     *,
-    user_session: auth.UserSession,
-    store_session: auth.StoreSession,
-    fixtures,
+    user_session: user_sim.UserSession,
+    store_session: store_sim.StoreSession,
+    fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
 ) -> None:
@@ -434,7 +559,6 @@ async def _run_cancelled(
         recorder=recorder,
         scenario=scenario,
         step="place_order",
-        enqueue=False,
     )
     if order is None:
         recorder.finish_scenario(
@@ -464,13 +588,16 @@ async def _run_cancelled(
         )
         return
 
-    final_state = await user_sim.wait_for_status(
+    final_state = await _poll_for_status(
         client,
-        user_token=user_session.token,
+        token=user_session.token,
         token_source=user_session.token_source,
+        auth_header="Authorization",
+        auth_scheme="Token",
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
         recorder=recorder,
+        actor="user",
         expected_statuses={"cancelled"},
         scenario=scenario,
         step="verify_cancelled_user_view",
@@ -481,17 +608,20 @@ async def _run_cancelled(
         timeout_message="Order never reached cancelled in trace mode.",
     )
     if final_state is not None and str(final_state.get("status") or "") == "cancelled":
-        await store_sim.wait_for_status(
+        await _poll_for_status(
             client,
-            store_token=store_session.last_mile_token,
+            token=store_session.last_mile_token,
             token_source=store_session.token_source,
+            auth_header="Fainzy-Token",
+            auth_scheme="",
             order_db_id=order["order_db_id"],
             order_ref=order["order_ref"],
             recorder=recorder,
+            actor="store",
+            expected_statuses={"cancelled"},
             scenario=scenario,
             step="observe_cancelled_store_view",
             action="observe_cancelled_store_view",
-            expected_statuses={"cancelled"},
             poll_interval=_poll_interval(timing, 1.0),
             max_attempts=_poll_attempts(timing, 10),
             timeout_code="trace_cancelled_store_timeout",
@@ -512,8 +642,8 @@ async def _run_cancelled(
 async def _run_auto_cancel(
     client: httpx.AsyncClient,
     *,
-    user_session: auth.UserSession,
-    fixtures,
+    user_session: user_sim.UserSession,
+    fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
 ) -> None:
@@ -532,7 +662,6 @@ async def _run_auto_cancel(
         recorder=recorder,
         scenario=scenario,
         step="place_order",
-        enqueue=False,
     )
     if order is None:
         recorder.finish_scenario(
@@ -618,9 +747,6 @@ async def _run_auto_cancel(
 
 async def run(
     *,
-    user_session: auth.UserSession,
-    store_session: auth.StoreSession,
-    fixtures,
     recorder: RunRecorder,
     suite: str | None,
     scenarios: list[str] | None,
@@ -632,6 +758,19 @@ async def run(
         f"[bold cyan]trace:[/] Running trace mode scenarios: {', '.join(resolved)} "
         f"(timing={timing.name})"
     )
+
+    console.print("[cyan]trace:[/] Bootstrapping auth for trace sims ...")
+    async with httpx.AsyncClient() as bootstrap_client:
+        user_session = await user_sim.bootstrap_auth(bootstrap_client, recorder)
+        store_session = await store_sim.bootstrap_auth(bootstrap_client, recorder)
+        fixtures = await user_sim.bootstrap_fixtures(
+            bootstrap_client,
+            session=user_session,
+            store_token=store_session.last_mile_token,
+            subentity=store_session.subentity,
+            recorder=recorder,
+        )
+
     async with httpx.AsyncClient() as client:
         for name in resolved:
             if name == "completed":

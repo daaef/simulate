@@ -9,21 +9,21 @@
 | `load` | Randomised multi-actor traffic simulation for churn, failure hunting, and live platform smoke tests |
 | `trace` | Deterministic proof-oriented scenarios for `completed`, `rejected`, `cancelled`, and optional `auto_cancel` |
 
-Shared components:
+Each simulator is **fully self-contained** — it owns its own auth, data seeding, and
+active websocket connection. There are no shared queues between simulators.
 
 | Component | Responsibility |
 |---|---|
-| `auth` | User/store auth, cached-token validation, OTP fallback, token-source proof |
-| `seed` | Real store/menu/location fixture lookup |
-| `user_sim` | Order placement, user-side polling, payment, cancellation |
-| `store_sim` | Store accept/reject, payment verification, mark ready |
-| `robot_sim` | Robot-owned delivery statuses until completion |
-| `trace_runner` | Deterministic end-to-end trace orchestration |
-| `websocket_observer` | User/store/stats socket observation and validation |
+| `__main__` | CLI parsing, config validation, launches sims, passive websocket observer, report writing |
+| `user_sim` | User auth (OTP/cached token), menu/location seeding, active WS `/ws/soc/<user_id>/`, order placement, payment, cancellation |
+| `store_sim` | Store auth (product auth + store login), active WS `/ws/soc/store_<id>/`, accept/reject, payment wait, mark ready |
+| `robot_sim` | Store token acquisition (independent), active WS `/ws/soc/store_<id>/`, delivery lifecycle to completed |
+| `trace_runner` | Deterministic scenarios; bootstraps own auth/fixtures, uses polling for verification |
+| `websocket_observer` | Passive user/store/stats socket observation for report validation |
 | `transport` | Masked request/response proof, auth proof, latency capture |
 | `reporting` | `events.json`, `report.md`, and `story.md` artifacts |
 
-REST remains the control-plane source of truth. Websockets are observed in parallel and validated per status transition instead of only being counted.
+REST remains the control-plane source of truth. Each sim listens on an active websocket for real-time order status changes that drive behaviour. The passive `WebsocketObserver` runs alongside for reporting validation.
 
 ## Status Ownership
 
@@ -58,13 +58,22 @@ Timing profiles:
 
 ## Auth And Token Reuse
 
-The simulator treats the user LastMile token as a cached credential in `simulate/.env`.
+Each simulator handles its own authentication inside its `run()` entrypoint (or `bootstrap_auth()` for trace mode).
 
-1. If `USER_LASTMILE_TOKEN` and `USER_ID` exist, startup validates them with `GET /v1/core/orders/?user=<USER_ID>`.
-2. If validation succeeds, the simulator reuses the cached token and records masked auth proof.
-3. If the backend rejects the token with `401/403`, the simulator clears the cached token fields, runs the OTP flow, and writes the fresh token and user id back into `.env`.
+**User auth** (`user_sim`):
+1. If `USER_LASTMILE_TOKEN` and `USER_ID` exist, validates via `GET /v1/core/orders/?user=<USER_ID>`.
+2. If validation succeeds, reuses the cached token.
+3. If rejected (`401/403`), clears cache, runs OTP flow, persists fresh token + user_id to `.env`.
 
-Store auth can either reuse `STORE_LASTMILE_TOKEN` from `.env` or fetch a fresh one from the product-auth endpoint. In every case the recorder stores masked auth proof only: header name, scheme, source, fingerprint, and short preview.
+**Store auth** (`store_sim`):
+- Reuses `STORE_LASTMILE_TOKEN` from `.env`, or fetches via product-auth endpoint.
+- Fetches store profile via `/v1/entities/store/login` and sets `SUBENTITY_ID`.
+
+**Robot auth** (`robot_sim`):
+- Independently acquires the same store token (env or product-auth).
+- No shared token provider — each sim authenticates on its own.
+
+Auth proof (masked header, scheme, source, fingerprint) is recorded in every case.
 
 ## Websocket Validation
 

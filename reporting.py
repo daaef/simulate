@@ -12,7 +12,7 @@ from typing import Any, TYPE_CHECKING
 import config
 
 if TYPE_CHECKING:
-    import seed
+    import user_sim
 
 
 def _utc_now() -> str:
@@ -95,12 +95,12 @@ class RunRecorder:
         )
 
     @classmethod
-    def create(cls, fixtures: "seed.SimulationFixtures") -> "RunRecorder":
+    def create(cls, fixtures: "user_sim.UserFixtures") -> "RunRecorder":
         recorder = cls.bootstrap()
         recorder.set_fixtures(fixtures)
         return recorder
 
-    def set_fixtures(self, fixtures: "seed.SimulationFixtures") -> None:
+    def set_fixtures(self, fixtures: "user_sim.UserFixtures") -> None:
         self.config_snapshot["user_id"] = fixtures.user_id
         self.config_snapshot["store_id"] = fixtures.store.get("id")
         self.config_snapshot["subentity_id"] = config.SUBENTITY_ID

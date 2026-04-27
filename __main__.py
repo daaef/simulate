@@ -1,9 +1,13 @@
 """
 Fainzy Order Simulation — Entry Point
 
-Modes:
-  load   Randomised actor simulation for traffic and churn testing.
-  trace  Deterministic scenario execution for proof-oriented QA artifacts.
+Responsibilities:
+  - Parse CLI arguments, validate config
+  - Launch independent sims (user, store, robot) and trace runner
+  - Start the passive WebsocketObserver for reporting
+  - Write run artifacts on exit
+
+Each simulator handles its own auth, seeding, and active websocket.
 """
 
 from __future__ import annotations
@@ -19,16 +23,13 @@ from rich.panel import Panel
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import auth
 import config
 from reporting import RunRecorder
 import robot_sim
-import seed
-import sim_queue as q
 import store_sim
 import trace_runner
 import user_sim
-from websocket_observer import WebsocketObserver, validate_websocket_events
+from websocket_observer import validate_websocket_events
 
 console = Console()
 
@@ -94,18 +95,6 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def _wait_for_terminal_orders(expected: int) -> list[dict]:
-    terminal_events = []
-    for _ in range(expected):
-        event = await q.terminal_orders_queue.get()
-        terminal_events.append(event)
-        console.print(
-            f"[green]main:[/] terminal order event: "
-            f"order={event.get('order_db_id')} status={event.get('status')}"
-        )
-    return terminal_events
-
-
 def _apply_args(args: argparse.Namespace) -> None:
     config.SIM_RUN_MODE = args.mode
     config.SIM_TRACE_SUITE = args.suite
@@ -143,34 +132,35 @@ def _validate_config() -> None:
         raise RuntimeError("--continuous is only supported in load mode.")
 
 
-async def _run_load_mode(
-    *,
-    user_session: auth.UserSession,
-    store_session: auth.StoreSession,
-    fixtures: seed.SimulationFixtures,
-    recorder: RunRecorder,
-) -> None:
-    store_task = asyncio.create_task(
-        store_sim.run(
+async def _run_load_mode(*, recorder: RunRecorder) -> None:
+    # Phase 1: bootstrap user auth + store auth + fixtures (sequential).
+    # This sets config.SUBENTITY_ID so store/robot sims can connect to the
+    # correct websocket channel.
+    console.print("[cyan]main:[/] Bootstrapping user + store auth ...")
+    async with httpx.AsyncClient() as bootstrap_client:
+        user_session = await user_sim.bootstrap_auth(bootstrap_client, recorder)
+        store_session = await store_sim.bootstrap_auth(bootstrap_client, recorder)
+        fixtures = await user_sim.bootstrap_fixtures(
+            bootstrap_client,
+            session=user_session,
             store_token=store_session.last_mile_token,
-            token_source=store_session.token_source,
+            subentity=store_session.subentity,
             recorder=recorder,
         )
+
+    # Robot needs a store token + SUBENTITY_ID (already set by store auth above).
+    async with httpx.AsyncClient() as bootstrap_client:
+        robot_session = await robot_sim.bootstrap_auth(bootstrap_client, recorder)
+
+    # Phase 2: launch all three sim workers concurrently.
+    user_task = asyncio.create_task(
+        user_sim.run(recorder=recorder, session=user_session, fixtures=fixtures)
+    )
+    store_task = asyncio.create_task(
+        store_sim.run(recorder=recorder, session=store_session)
     )
     robot_task = asyncio.create_task(
-        robot_sim.run(
-            store_token=store_session.last_mile_token,
-            token_source=store_session.token_source,
-            recorder=recorder,
-        )
-    )
-    user_task = asyncio.create_task(
-        user_sim.run(
-            user_token=user_session.token,
-            token_source=user_session.token_source,
-            fixtures=fixtures,
-            recorder=recorder,
-        )
+        robot_sim.run(recorder=recorder, session=robot_session)
     )
 
     try:
@@ -178,25 +168,17 @@ async def _run_load_mode(
             await asyncio.gather(user_task, store_task, robot_task)
             return
 
+        # In bounded mode, user_sim.run() returns when its order quota is met.
+        # After that, give store/robot sims a drain period to finish processing.
         await user_task
-        terminal_events = await _wait_for_terminal_orders(config.SIM_ORDERS)
+        console.print("[bold green]main:[/] User sim finished its order quota.")
         if config.SIM_WEBSOCKET_DRAIN_SECONDS > 0:
             await asyncio.sleep(config.SIM_WEBSOCKET_DRAIN_SECONDS)
-        completed = sum(
-            1 for event in terminal_events if event.get("status") == "completed"
-        )
-        rejected = sum(
-            1 for event in terminal_events if event.get("status") == "rejected"
-        )
-        console.print(
-            f"\n[bold green]main:[/] Bounded simulation finished. "
-            f"completed={completed} rejected={rejected} total={len(terminal_events)}"
-        )
     finally:
-        for task in (store_task, robot_task, user_task):
+        for task in (user_task, store_task, robot_task):
             if not task.done():
                 task.cancel()
-        await asyncio.gather(store_task, robot_task, user_task, return_exceptions=True)
+        await asyncio.gather(user_task, store_task, robot_task, return_exceptions=True)
 
 
 async def main() -> None:
@@ -221,46 +203,19 @@ async def main() -> None:
     )
 
     recorder = RunRecorder.bootstrap()
-    async with httpx.AsyncClient() as bootstrap_client:
-        console.print("[cyan]main:[/] Acquiring tokens ...")
-        user_session = await auth.fetch_user_session(bootstrap_client, recorder)
-        store_session = await auth.fetch_store_session(bootstrap_client, recorder)
-        fixtures = await seed.load_fixtures(
-            bootstrap_client,
-            user_session=user_session,
-            store_session=store_session,
-            recorder=recorder,
-        )
-    recorder.set_fixtures(fixtures)
 
-    observer = WebsocketObserver(
-        recorder=recorder,
-        user_id=user_session.user_id,
-        store_id=int(fixtures.store["id"]),
-    )
-
-    console.print("[bold green]main:[/] Tokens acquired. Launching flow ...\n")
-    await observer.start()
+    console.print("[bold green]main:[/] Launching simulation ...\n")
     try:
         if config.SIM_RUN_MODE == "trace":
             await trace_runner.run(
-                user_session=user_session,
-                store_session=store_session,
-                fixtures=fixtures,
                 recorder=recorder,
                 suite=config.SIM_TRACE_SUITE,
                 scenarios=config.SIM_TRACE_SCENARIOS,
                 timing_profile=config.SIM_TIMING_PROFILE,
             )
         else:
-            await _run_load_mode(
-                user_session=user_session,
-                store_session=store_session,
-                fixtures=fixtures,
-                recorder=recorder,
-            )
+            await _run_load_mode(recorder=recorder)
     finally:
-        await observer.stop()
         validate_websocket_events(recorder)
         events_path, report_path, story_path = recorder.write()
         console.print(f"[green]main:[/] events: {events_path}")
