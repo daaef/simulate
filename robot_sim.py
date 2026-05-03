@@ -154,8 +154,22 @@ async def bootstrap_auth(
     client: httpx.AsyncClient,
     recorder: RunRecorder | None = None,
     *,
+    store_token: str | None = None,
+    subentity_id: int | None = None,
     scenario: str | None = None,
 ) -> RobotSession:
+    # When explicit store_token + subentity_id are provided (multi-store mode),
+    # skip the product auth and just return a session for that store.
+    if store_token and subentity_id:
+        console.print(
+            f"[dim]robot:[/] Using provided store token for subentity_id={subentity_id}"
+        )
+        return RobotSession(
+            store_token=store_token,
+            store_id=subentity_id,
+            token_source="robot_store_provided",
+        )
+
     if config.STORE_LASTMILE_TOKEN:
         console.print("[dim]robot:[/] Using pre-set STORE_LASTMILE_TOKEN from .env")
         if recorder is not None:
@@ -304,6 +318,16 @@ class _RobotOrderWatcher:
         except (TypeError, ValueError):
             return
 
+        self.recorder.record_websocket(
+            source=f"robot_store_orders_{self.store_id}",
+            raw=raw,
+            payload=payload,
+            nested=nested,
+            order_db_id=order_db_id,
+            order_ref=str(order_ref) if order_ref else None,
+            status=str(status),
+        )
+
         if str(status) == "ready":
             self._ready_queue.put_nowait({
                 "order_db_id": order_db_id,
@@ -450,16 +474,15 @@ async def _deliver_order(
 # Run entrypoint
 # ---------------------------------------------------------------------------
 
-async def run(*, recorder: RunRecorder, session: RobotSession | None = None) -> None:
-    if session is None:
-        console.print("[cyan]robot_sim:[/] Bootstrapping auth ...")
-        async with httpx.AsyncClient() as bootstrap_client:
-            session = await bootstrap_auth(bootstrap_client, recorder)
-
+async def _run_single(*, recorder: RunRecorder, session: RobotSession) -> None:
+    """Run a single robot listener for one store."""
     watcher = _RobotOrderWatcher(session.store_id, recorder)
     await watcher.start()
 
-    console.print("[bold magenta]robot_sim:[/] Listening for ready orders via websocket ...")
+    console.print(
+        f"[bold magenta]robot_sim:[/] Listening for ready orders on "
+        f"store_{session.store_id} ..."
+    )
     tasks: set[asyncio.Task] = set()
 
     def _finish_task(task: asyncio.Task) -> None:
@@ -498,3 +521,28 @@ async def run(*, recorder: RunRecorder, session: RobotSession | None = None) -> 
             for task in pending:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def run(
+    *,
+    recorder: RunRecorder,
+    session: RobotSession | None = None,
+    sessions: list[RobotSession] | None = None,
+) -> None:
+    """Run robot delivery listeners.
+
+    If *sessions* (plural) is provided, launches one listener per store.
+    Otherwise falls back to *session* (single) or bootstraps from config.
+    """
+    if sessions:
+        await asyncio.gather(
+            *[_run_single(recorder=recorder, session=s) for s in sessions]
+        )
+        return
+
+    if session is None:
+        console.print("[cyan]robot_sim:[/] Bootstrapping auth ...")
+        async with httpx.AsyncClient() as bootstrap_client:
+            session = await bootstrap_auth(bootstrap_client, recorder)
+
+    await _run_single(recorder=recorder, session=session)

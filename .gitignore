@@ -3,3 +3,6 @@ __pycache__/
 runs/
 .venv
 .venv/
+web/.next/
+web/node_modules/
+web/.env.local

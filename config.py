@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
+
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
@@ -56,16 +58,62 @@ LOCATION_ID: int | None = _optional_int("LOCATION_ID")
 STORE_CURRENCY: str = _str("STORE_CURRENCY", "jpy")
 
 SIM_RUN_MODE: str = _str("SIM_RUN_MODE", "load").lower()
+SIM_FLOW: str = _str("SIM_FLOW", "").lower()
 SIM_TRACE_SUITE: str = _str("SIM_TRACE_SUITE", "core").lower()
 SIM_TRACE_SCENARIOS: list[str] = _csv("SIM_TRACE_SCENARIOS")
 SIM_TIMING_PROFILE: str = _str("SIM_TIMING_PROFILE", "fast").lower()
 
 SIM_PAYMENT_MODE: str = _str("SIM_PAYMENT_MODE", "stripe").lower()
+SIM_PAYMENT_CASE: str = _str("SIM_PAYMENT_CASE", "paid_no_coupon").lower()
 SIM_FREE_ORDER_AMOUNT: float = _float("SIM_FREE_ORDER_AMOUNT", 0.0)
 SIM_COUPON_ID: int | None = _optional_int("SIM_COUPON_ID")
 SIM_SAVE_CARD: bool = _bool("SIM_SAVE_CARD", False)
 STRIPE_SECRET_KEY: str = _str("STRIPE_SECRET_KEY")
 STRIPE_TEST_PAYMENT_METHOD: str = _str("STRIPE_TEST_PAYMENT_METHOD", "pm_card_visa")
+SIM_RUN_APP_PROBES: bool = _bool("SIM_RUN_APP_PROBES", True)
+SIM_RUN_STORE_DASHBOARD_PROBES: bool = _bool("SIM_RUN_STORE_DASHBOARD_PROBES", True)
+SIM_RUN_POST_ORDER_ACTIONS: bool = _bool("SIM_RUN_POST_ORDER_ACTIONS", False)
+SIM_STRICT_PLAN: bool = _bool("SIM_STRICT_PLAN", False)
+SIM_REVIEW_RATING: int = _int("SIM_REVIEW_RATING", 4)
+SIM_REVIEW_COMMENT: str = _str("SIM_REVIEW_COMMENT", "Simulator review")
+SIM_NEW_USER_FIRST_NAME: str = _str("SIM_NEW_USER_FIRST_NAME", "Fainzy")
+SIM_NEW_USER_LAST_NAME: str = _str("SIM_NEW_USER_LAST_NAME", "Simulator")
+SIM_NEW_USER_EMAIL: str = _str("SIM_NEW_USER_EMAIL")
+SIM_NEW_USER_PASSWORD: str = _str("SIM_NEW_USER_PASSWORD", "Password123!")
+SIM_APP_AUTOPILOT: bool = _bool("SIM_APP_AUTOPILOT", True)
+SIM_AUTO_SELECT_STORE: bool = _bool("SIM_AUTO_SELECT_STORE", SIM_APP_AUTOPILOT)
+SIM_AUTO_SELECT_COUPON: bool = _bool("SIM_AUTO_SELECT_COUPON", SIM_APP_AUTOPILOT)
+SIM_SELECTED_COUPON: dict[str, Any] | None = None
+SIM_AUTO_PROVISION_FIXTURES: bool = _bool("SIM_AUTO_PROVISION_FIXTURES", True)
+SIM_MUTATE_STORE_SETUP: bool = _bool("SIM_MUTATE_STORE_SETUP", False)
+SIM_MUTATE_MENU_SETUP: bool = _bool("SIM_MUTATE_MENU_SETUP", False)
+SIM_AUTO_TOGGLE_STORE_STATUS: bool = _bool("SIM_AUTO_TOGGLE_STORE_STATUS", SIM_APP_AUTOPILOT)
+SIM_STORE_OPEN_STATUS: int = _int("SIM_STORE_OPEN_STATUS", 1)
+SIM_STORE_CLOSED_STATUS: int = _int("SIM_STORE_CLOSED_STATUS", 3)
+SIM_STORE_SETUP_NAME: str = _str("SIM_STORE_SETUP_NAME", "Fainzy Simulator Store")
+SIM_STORE_SETUP_BRANCH: str = _str("SIM_STORE_SETUP_BRANCH", "Simulator")
+SIM_STORE_SETUP_DESCRIPTION: str = _str(
+    "SIM_STORE_SETUP_DESCRIPTION",
+    "Store profile created by simulator setup flow.",
+)
+SIM_STORE_SETUP_MOBILE: str = _str("SIM_STORE_SETUP_MOBILE", USER_PHONE_NUMBER)
+SIM_STORE_SETUP_START_TIME: str = _str("SIM_STORE_SETUP_START_TIME", "07:00")
+SIM_STORE_SETUP_CLOSING_TIME: str = _str("SIM_STORE_SETUP_CLOSING_TIME", "23:59")
+SIM_STORE_SETUP_STATUS: int = _int("SIM_STORE_SETUP_STATUS", 1)
+SIM_STORE_SETUP_ADDRESS: str = _str("SIM_STORE_SETUP_ADDRESS", "Simulator address")
+SIM_STORE_SETUP_CITY: str = _str("SIM_STORE_SETUP_CITY", "")
+SIM_STORE_SETUP_STATE: str = _str("SIM_STORE_SETUP_STATE", "")
+SIM_STORE_SETUP_COUNTRY: str = _str("SIM_STORE_SETUP_COUNTRY", "")
+SIM_MENU_CATEGORY_NAME: str = _str("SIM_MENU_CATEGORY_NAME", "Simulator")
+SIM_MENU_NAME: str = _str("SIM_MENU_NAME", "Simulator item")
+SIM_MENU_DESCRIPTION: str = _str(
+    "SIM_MENU_DESCRIPTION",
+    "Menu item created by simulator.",
+)
+SIM_MENU_PRICE: float = _float("SIM_MENU_PRICE", 100.0)
+SIM_MENU_INGREDIENTS: str = _str("SIM_MENU_INGREDIENTS", "simulator ingredients")
+SIM_MENU_DISCOUNT: float = _float("SIM_MENU_DISCOUNT", 0.0)
+SIM_MENU_DISCOUNT_PRICE: float = _float("SIM_MENU_DISCOUNT_PRICE", 0.0)
 SIM_LAT: float | None = _optional_float("SIM_LAT")
 SIM_LNG: float | None = _optional_float("SIM_LNG")
 SIM_LOCATION_RADIUS: int = _int("SIM_LOCATION_RADIUS", 1)
@@ -91,3 +139,141 @@ SIM_WEBSOCKET_DRAIN_SECONDS: float = _float("SIM_WEBSOCKET_DRAIN_SECONDS", 3.0)
 SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS: float = _float(
     "SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS", 20.0
 )
+
+ALL_USERS: bool = False
+SIM_STORE_EXPLICIT: bool = False
+SIM_ACTORS: dict[str, Any] = {"defaults": {}, "users": [], "stores": []}
+
+# ---------------------------------------------------------------------------
+# sim_actors.json loader
+# ---------------------------------------------------------------------------
+
+SIM_ACTORS_PATH: Path = Path(__file__).parent / "sim_actors.json"
+
+
+def actor_gps(actor: dict[str, Any] | None) -> tuple[float | None, float | None]:
+    if not actor:
+        return None, None
+    lat = actor.get("lat")
+    lng = actor.get("lng")
+    gps = actor.get("gps")
+    if isinstance(gps, dict):
+        lat = lat if lat is not None else gps.get("lat", gps.get("latitude"))
+        lng = lng if lng is not None else gps.get("lng", gps.get("longitude"))
+    if lat in {None, "", 0, 0.0, "0", "0.0"} or lng in {None, "", 0, 0.0, "0", "0.0"}:
+        return None, None
+    return float(lat), float(lng)
+
+
+def _find_actor_user(
+    users: list[dict[str, Any]],
+    role: str | None,
+    phone: str | None = None,
+) -> dict[str, Any] | None:
+    if role:
+        for user in users:
+            if str(user.get("role", "")).lower() == role:
+                return user
+    if phone:
+        for user in users:
+            if str(user.get("phone", "")) == phone:
+                return user
+    return users[0] if users else None
+
+
+def _find_actor_store(
+    stores: list[dict[str, Any]],
+    store_id: str | None,
+) -> dict[str, Any] | None:
+    if store_id:
+        for store in stores:
+            if str(store.get("store_id", "")) == store_id:
+                return store
+    return stores[0] if stores else None
+
+
+def apply_actor_selection(
+    actors: dict[str, Any],
+    *,
+    user_role: str | None = None,
+    store_id: str | None = None,
+) -> None:
+    """Apply actor defaults from sim_actors.json to config globals."""
+    global USER_PHONE_NUMBER, STORE_ID, SUBENTITY_ID, STORE_CURRENCY, SIM_LAT, SIM_LNG
+    global SIM_LOCATION_RADIUS, SIM_COUPON_ID
+
+    defaults: dict[str, Any] = actors.get("defaults", {})
+    users: list[dict[str, Any]] = actors.get("users", [])
+    stores: list[dict[str, Any]] = actors.get("stores", [])
+
+    requested_user_phone = USER_PHONE_NUMBER or defaults.get("user_phone")
+    selected_user = _find_actor_user(
+        users,
+        user_role,
+        str(requested_user_phone) if requested_user_phone else None,
+    )
+    if selected_user and user_role:
+        USER_PHONE_NUMBER = str(selected_user.get("phone") or USER_PHONE_NUMBER)
+    elif not USER_PHONE_NUMBER and defaults.get("user_phone"):
+        USER_PHONE_NUMBER = str(defaults["user_phone"])
+    elif selected_user and not USER_PHONE_NUMBER:
+        USER_PHONE_NUMBER = str(selected_user.get("phone") or USER_PHONE_NUMBER)
+
+    user_lat, user_lng = actor_gps(selected_user)
+    if user_lat is not None and user_lng is not None:
+        SIM_LAT = user_lat
+        SIM_LNG = user_lng
+
+    requested_store_id = store_id or STORE_ID or defaults.get("store_id")
+    selected_store = _find_actor_store(stores, str(requested_store_id) if requested_store_id else None)
+    if selected_store:
+        STORE_ID = str(selected_store.get("store_id") or STORE_ID)
+        if selected_store.get("subentity_id") is not None:
+            SUBENTITY_ID = int(selected_store["subentity_id"])
+        if selected_store.get("currency"):
+            STORE_CURRENCY = str(selected_store["currency"]).lower()
+    elif not STORE_ID and defaults.get("store_id"):
+        STORE_ID = str(defaults["store_id"])
+
+    if defaults.get("location_radius") is not None:
+        SIM_LOCATION_RADIUS = int(defaults["location_radius"])
+    if SIM_COUPON_ID is None and defaults.get("coupon_id") not in {None, ""}:
+        SIM_COUPON_ID = int(defaults["coupon_id"])
+
+
+def _resolve_sim_path(path: str | Path) -> Path:
+    candidate = Path(path).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    cwd_candidate = Path.cwd() / candidate
+    if cwd_candidate.exists():
+        return cwd_candidate
+    return Path(__file__).parent / candidate
+
+
+def set_sim_actors_path(path: str | Path) -> None:
+    global SIM_ACTORS_PATH
+    SIM_ACTORS_PATH = _resolve_sim_path(path)
+
+
+def load_sim_actors(path: str | Path | None = None) -> dict[str, Any]:
+    """Load actors from sim_actors.json and apply defaults to config globals.
+
+    Returns ``{"users": [...], "stores": [...]}``.
+    If the file does not exist, returns empty lists and leaves globals untouched.
+    """
+    actor_path = _resolve_sim_path(path) if path is not None else SIM_ACTORS_PATH
+    global SIM_ACTORS
+    if not actor_path.exists():
+        SIM_ACTORS = {"defaults": {}, "users": [], "stores": []}
+        return {"users": [], "stores": []}
+
+    from run_plan import PlanValidationError, load_run_plan
+
+    try:
+        actors = load_run_plan(actor_path, strict=SIM_STRICT_PLAN).to_actors()
+    except PlanValidationError as exc:
+        raise RuntimeError(f"Invalid simulator plan {actor_path}: {exc}") from exc
+    SIM_ACTORS = actors
+    apply_actor_selection(actors)
+    return actors

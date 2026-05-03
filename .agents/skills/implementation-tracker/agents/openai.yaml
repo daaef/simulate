@@ -1,0 +1,8 @@
+interface:
+  display_name: "Implementation Tracker"
+  short_description: "Creates and maintains restartable implementation tracker markdown files."
+  brand_color: "#2563EB"
+  default_prompt: "Use the implementation-tracker skill. Before changing code, create or update implementation/tracker and keep it current."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,11 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+runs
+docs
+implementation
+node_modules
+web/node_modules
+

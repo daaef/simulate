@@ -25,6 +25,7 @@ import websockets
 from rich.console import Console
 
 import config
+from interaction_catalog import LEGACY_AVAILABLE_STATUSES, MENU_AVAILABLE
 import stripe_sim
 from reporting import RunRecorder
 from transport import RequestError, api_data, build_auth_proof, request_json
@@ -120,6 +121,15 @@ def _otp_response(payload: Any) -> Any:
     if isinstance(payload, dict):
         return {"data": "[redacted]"}
     return "[redacted]"
+
+
+def _new_user_email(phone_number: str) -> str:
+    if config.SIM_NEW_USER_EMAIL:
+        return config.SIM_NEW_USER_EMAIL
+    safe = "".join(ch.lower() for ch in phone_number if ch.isalnum())
+    if not safe:
+        safe = uuid.uuid4().hex[:12]
+    return f"sim-{safe}@example.test"
 
 
 async def _auth_request(
@@ -232,13 +242,76 @@ async def _validate_cached_user_token(
     return True
 
 
+async def _create_last_mile_user(
+    client: httpx.AsyncClient,
+    *,
+    phone_number: str,
+    recorder: RunRecorder | None,
+    scenario: str | None,
+) -> UserSession:
+    body = {
+        "first_name": config.SIM_NEW_USER_FIRST_NAME,
+        "last_name": config.SIM_NEW_USER_LAST_NAME,
+        "password": config.SIM_NEW_USER_PASSWORD,
+        "email": _new_user_email(phone_number),
+        "phone_number": phone_number,
+    }
+    payload = await _auth_request(
+        client,
+        recorder=recorder,
+        actor="user",
+        action="create_user_account",
+        method="POST",
+        url=f"{config.LASTMILE_BASE_URL}/v1/auth/users/create/",
+        endpoint="/v1/auth/users/create/",
+        scenario=scenario,
+        step="auth_create_user_account",
+        json_body=body,
+    )
+    data = api_data(payload)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"User create response had an invalid shape: {payload}")
+
+    token = data.get("token")
+    user = data.get("user")
+    user_id = user.get("id") if isinstance(user, dict) else None
+    if not token:
+        raise RuntimeError(f"User create response did not contain a token: {payload}")
+    if not user_id:
+        raise RuntimeError(f"User create response did not contain user.id: {payload}")
+
+    _persist_user_token(token=str(token), user_id=int(user_id))
+    if recorder is not None:
+        recorder.record_event(
+            actor="user",
+            action="new_user_account_created",
+            category="ui_flow",
+            scenario=scenario,
+            step="auth_create_user_account",
+            details={
+                "phone_setup_complete_before_create": False,
+                "requires_location_selection": True,
+            },
+            track_order=False,
+        )
+    return UserSession(
+        token=str(token),
+        user_id=int(user_id),
+        user=user,
+        token_source="user_new_account_create",
+    )
+
+
 async def bootstrap_auth(
     client: httpx.AsyncClient,
     recorder: RunRecorder | None = None,
     *,
+    phone: str | None = None,
     scenario: str | None = None,
 ) -> UserSession:
-    if config.USER_LASTMILE_TOKEN:
+    effective_phone = phone or config.USER_PHONE_NUMBER
+
+    if config.USER_LASTMILE_TOKEN and not phone and scenario != "new_user_setup":
         if config.USER_ID is None:
             console.print(
                 "[yellow]user:[/] USER_LASTMILE_TOKEN was set without USER_ID; "
@@ -272,12 +345,12 @@ async def bootstrap_auth(
                 else:
                     raise
 
-    if not config.USER_PHONE_NUMBER:
+    if not effective_phone:
         raise RuntimeError(
             "Either USER_LASTMILE_TOKEN or USER_PHONE_NUMBER must be set in .env"
         )
 
-    console.print(f"[dim]user:[/] Requesting OTP for {config.USER_PHONE_NUMBER} ...")
+    console.print(f"[dim]user:[/] Requesting OTP for {effective_phone} ...")
     otp_payload = await _auth_request(
         client,
         recorder=recorder,
@@ -288,7 +361,7 @@ async def bootstrap_auth(
         endpoint="/v1/auth/otp/send/",
         scenario=scenario,
         step="auth_request_user_otp",
-        json_body={"phone_number": config.USER_PHONE_NUMBER},
+        json_body={"phone_number": effective_phone},
         response_transform=_otp_response,
     )
     otp = api_data(otp_payload)
@@ -306,15 +379,18 @@ async def bootstrap_auth(
         endpoint="/v1/auth/otp/verify/",
         scenario=scenario,
         step="auth_verify_user_otp",
-        json_body={"phone_number": config.USER_PHONE_NUMBER, "otp": str(otp)},
+        json_body={"phone_number": effective_phone, "otp": str(otp)},
     )
     verify_data = api_data(verify_payload)
     if not isinstance(verify_data, dict):
         raise RuntimeError(f"OTP verify response had an invalid shape: {verify_payload}")
     if verify_data.get("setup_complete") is not True:
-        raise RuntimeError(
-            "The configured phone number is not setup_complete=true. "
-            "Use an already-registered test user before running the simulation."
+        console.print("[dim]user:[/] Creating new LastMile user account ...")
+        return await _create_last_mile_user(
+            client,
+            phone_number=effective_phone,
+            recorder=recorder,
+            scenario=scenario,
         )
     if verify_data.get("is_active") is False:
         raise RuntimeError("The configured user is inactive; reactivate it before simulation.")
@@ -330,7 +406,7 @@ async def bootstrap_auth(
         endpoint="/v1/auth/users/auth/",
         scenario=scenario,
         step="auth_fetch_user_token",
-        json_body={"phone_number": config.USER_PHONE_NUMBER},
+        json_body={"phone_number": effective_phone},
     )
     auth_data = api_data(auth_payload)
     if not isinstance(auth_data, dict):
@@ -498,8 +574,15 @@ async def bootstrap_fixtures(
     store_token: str,
     subentity: dict[str, Any] | None = None,
     recorder: RunRecorder | None = None,
+    lat: float | None = None,
+    lng: float | None = None,
+    subentity_id: int | None = None,
 ) -> UserFixtures:
-    if config.SIM_LAT is None or config.SIM_LNG is None:
+    effective_lat = lat if lat is not None else config.SIM_LAT
+    effective_lng = lng if lng is not None else config.SIM_LNG
+    effective_subentity_id = subentity_id or config.SUBENTITY_ID
+
+    if effective_lat is None or effective_lng is None:
         raise RuntimeError(
             "SIM_LAT and SIM_LNG are required so the simulator can fetch a real "
             "delivery location from /v1/entities/locations/<lng>/<lat>/."
@@ -507,13 +590,13 @@ async def bootstrap_fixtures(
 
     menu_data = await _seed_get_json(
         client,
-        f"{config.FAINZY_BASE_URL}/v1/core/subentities/{config.SUBENTITY_ID}/menu",
+        f"{config.FAINZY_BASE_URL}/v1/core/subentities/{effective_subentity_id}/menu",
         token=store_token,
         auth_scheme="",
         auth_header_name="Fainzy-Token",
         recorder=recorder,
         action="load_store_menu",
-        endpoint=f"/v1/core/subentities/{config.SUBENTITY_ID}/menu",
+        endpoint=f"/v1/core/subentities/{effective_subentity_id}/menu",
     )
     if not isinstance(menu_data, list):
         raise RuntimeError(f"Menu response had an invalid shape: {menu_data}")
@@ -523,24 +606,41 @@ async def bootstrap_fixtures(
         for item in menu_data
         if isinstance(item, dict)
         and item.get("id")
-        and item.get("status") == "available"
+        and item.get("status") == MENU_AVAILABLE
         and _as_float(item.get("price")) is not None
     ]
+    legacy_available = [
+        item.get("id")
+        for item in menu_data
+        if isinstance(item, dict) and item.get("status") in LEGACY_AVAILABLE_STATUSES
+    ]
+    if recorder is not None and legacy_available:
+        recorder.record_issue(
+            severity="warning",
+            code="legacy_menu_status_contract_risk",
+            actor="backend",
+            step="load_store_menu",
+            message=(
+                "Menu payload contains legacy status '1'. Store app counts it as "
+                "available, but user app requires status 'available'."
+            ),
+            details={"menu_ids": legacy_available[:20]},
+        )
     if not usable_menu:
         raise RuntimeError(
-            f"No available priced menu items found for subentity_id={config.SUBENTITY_ID}."
+            f"No available priced menu items found for subentity_id={effective_subentity_id}."
         )
 
     location_data = await _seed_get_json(
         client,
-        f"{config.FAINZY_BASE_URL}/v1/entities/locations/{config.SIM_LNG}/{config.SIM_LAT}/",
+        f"{config.FAINZY_BASE_URL}/v1/entities/locations/{effective_lng}/{effective_lat}/",
         params={"search_radius": str(config.SIM_LOCATION_RADIUS)},
         token=store_token,
         auth_scheme="",
         auth_header_name="Fainzy-Token",
         recorder=recorder,
         action="load_delivery_locations",
-        endpoint=f"/v1/entities/locations/{config.SIM_LNG}/{config.SIM_LAT}/",
+        endpoint=f"/v1/entities/locations/{effective_lng}/{effective_lat}/",
     )
     if not isinstance(location_data, list):
         raise RuntimeError(f"Location response had an invalid shape: {location_data}")
@@ -554,7 +654,26 @@ async def bootstrap_fixtures(
             "or SIM_LOCATION_RADIUS."
         )
 
+    location_required = (
+        session.token_source == "user_new_account_create" or config.LOCATION_ID is None
+    )
+    if recorder is not None:
+        recorder.record_event(
+            actor="user",
+            action="location_selection_gate",
+            category="ui_flow",
+            step="location_selection_gate",
+            details={
+                "is_new_user": session.token_source == "user_new_account_create",
+                "saved_location_missing": config.LOCATION_ID is None,
+                "region_selection_allowed": location_required,
+                "radius_km": config.SIM_LOCATION_RADIUS,
+            },
+            track_order=False,
+        )
+
     location = None
+    location_selection_recorded = False
     if config.LOCATION_ID is not None:
         location = next(
             (item for item in active_locations if item.get("id") == config.LOCATION_ID),
@@ -568,8 +687,36 @@ async def bootstrap_fixtures(
     else:
         location = active_locations[0]
         config.LOCATION_ID = int(location["id"])
+        if recorder is not None:
+            recorder.record_event(
+                actor="user",
+                action="select_delivery_location",
+                category="ui_flow",
+                step="select_delivery_location",
+                details={
+                    "location_id": config.LOCATION_ID,
+                    "reason": "new_user_or_missing_saved_location"
+                    if location_required
+                    else "bootstrap_default",
+                },
+                track_order=False,
+            )
+            location_selection_recorded = True
 
-    store = _normalise_store(subentity or {"id": config.SUBENTITY_ID})
+    if recorder is not None and location_required and not location_selection_recorded:
+        recorder.record_event(
+            actor="user",
+            action="select_delivery_location",
+            category="ui_flow",
+            step="select_delivery_location",
+            details={
+                "location_id": location.get("id") if isinstance(location, dict) else None,
+                "reason": "new_user_or_missing_saved_location",
+            },
+            track_order=False,
+        )
+
+    store = _normalise_store(subentity or {"id": effective_subentity_id})
     currency = str(store.get("currency") or config.STORE_CURRENCY).lower()
     config.STORE_CURRENCY = currency
 
@@ -584,6 +731,205 @@ async def bootstrap_fixtures(
         menu_items=usable_menu,
         currency=currency,
     )
+
+
+# ---------------------------------------------------------------------------
+# Realistic store discovery
+# ---------------------------------------------------------------------------
+
+async def discover_stores_for_area(
+    client: httpx.AsyncClient,
+    *,
+    store_token: str,
+    lat: float,
+    lng: float,
+    recorder: RunRecorder | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, int | None]:
+    """Discover open stores near (lat, lng) via the service-area API.
+
+    Returns (open_stores, delivery_location, service_area_id).
+    open_stores is a list of subentity dicts with status==1.
+    delivery_location is the first active location found, or None.
+    """
+    location_data = await _seed_get_json(
+        client,
+        f"{config.FAINZY_BASE_URL}/v1/entities/locations/{lng}/{lat}/",
+        params={"search_radius": str(config.SIM_LOCATION_RADIUS)},
+        token=store_token,
+        auth_scheme="",
+        auth_header_name="Fainzy-Token",
+        recorder=recorder,
+        action="discover_locations",
+        endpoint=f"/v1/entities/locations/{lng}/{lat}/",
+    )
+    if not isinstance(location_data, list) or not location_data:
+        return [], None, None
+
+    active_locs = _active_locations(
+        [item for item in location_data if isinstance(item, dict)]
+    )
+    if not active_locs:
+        return [], None, None
+
+    delivery_location = active_locs[0]
+    service_area_id = delivery_location.get("service_area")
+    if not service_area_id:
+        return [], delivery_location, None
+
+    stores_data = await _seed_get_json(
+        client,
+        f"{config.FAINZY_BASE_URL}/v1/entities/subentities/service-area/{service_area_id}/",
+        token=store_token,
+        auth_scheme="",
+        auth_header_name="Fainzy-Token",
+        recorder=recorder,
+        action="discover_stores",
+        endpoint=f"/v1/entities/subentities/service-area/{service_area_id}/",
+    )
+    if not isinstance(stores_data, list):
+        return [], delivery_location, int(service_area_id)
+
+    open_stores = []
+    for entry in stores_data:
+        sub = entry.get("subentity", entry) if isinstance(entry, dict) else entry
+        if isinstance(sub, dict) and sub.get("status") == 1:
+            open_stores.append(sub)
+
+    return open_stores, delivery_location, int(service_area_id)
+
+
+async def _discover_and_build_fixtures(
+    client: httpx.AsyncClient,
+    *,
+    user_session: UserSession,
+    store_sessions: list,  # list[store_sim.StoreSession]
+    recorder: RunRecorder,
+    worker_id: int,
+) -> UserFixtures | None:
+    """Per-order discovery: pick a random store GPS, call service-area API,
+    choose an open store, fetch its menu, and return fresh UserFixtures."""
+    import store_sim as _store_sim
+
+    shuffled = list(store_sessions)
+    random.shuffle(shuffled)
+
+    for ss in shuffled:
+        if ss.gps_lat is None or ss.gps_lng is None:
+            continue
+        if ss.gps_lat == 0.0 and ss.gps_lng == 0.0:
+            continue
+
+        console.print(
+            f"[dim]user[{worker_id}]:[/] Discovering stores near "
+            f"({ss.gps_lat:.4f}, {ss.gps_lng:.4f}) ..."
+        )
+
+        open_stores, delivery_location, service_area_id = await discover_stores_for_area(
+            client,
+            store_token=ss.last_mile_token,
+            lat=ss.gps_lat,
+            lng=ss.gps_lng,
+            recorder=recorder,
+        )
+
+        if not open_stores:
+            console.print(
+                f"[yellow]user[{worker_id}]:[/] No open stores found near "
+                f"({ss.gps_lat:.4f}, {ss.gps_lng:.4f}), trying next ..."
+            )
+            continue
+
+        if delivery_location is None:
+            console.print(
+                f"[yellow]user[{worker_id}]:[/] No delivery location found, trying next ..."
+            )
+            continue
+
+        # Constrain to stores we actually have a session for so the
+        # store listener can accept the order.
+        logged_in_ids = {s.store_id for s in store_sessions}
+        reachable = [s for s in open_stores if s.get("id") in logged_in_ids]
+        if not reachable:
+            console.print(
+                f"[yellow]user[{worker_id}]:[/] Discovered {len(open_stores)} open store(s) "
+                f"but none match logged-in sessions {logged_in_ids}, trying next ..."
+            )
+            continue
+
+        chosen_store = random.choice(reachable)
+        chosen_id = chosen_store.get("id")
+
+        console.print(
+            f"[green]user[{worker_id}]:[/] Discovered {len(open_stores)} open store(s) "
+            f"in service_area={service_area_id}. Chose store {chosen_store.get('name')!r} "
+            f"(subentity_id={chosen_id})"
+        )
+
+        menu_data = await _seed_get_json(
+            client,
+            f"{config.FAINZY_BASE_URL}/v1/core/subentities/{chosen_id}/menu",
+            token=ss.last_mile_token,
+            auth_scheme="",
+            auth_header_name="Fainzy-Token",
+            recorder=recorder,
+            action="load_store_menu",
+            endpoint=f"/v1/core/subentities/{chosen_id}/menu",
+        )
+        if not isinstance(menu_data, list):
+            console.print(
+                f"[yellow]user[{worker_id}]:[/] Menu fetch for store {chosen_id} failed, "
+                "trying next ..."
+            )
+            continue
+
+        usable_menu = [
+            item
+            for item in menu_data
+            if isinstance(item, dict)
+            and item.get("id")
+            and item.get("status") == MENU_AVAILABLE
+            and _as_float(item.get("price")) is not None
+        ]
+        legacy_available = [
+            item.get("id")
+            for item in menu_data
+            if isinstance(item, dict) and item.get("status") in LEGACY_AVAILABLE_STATUSES
+        ]
+        if legacy_available:
+            recorder.record_issue(
+                severity="warning",
+                code="legacy_menu_status_contract_risk",
+                actor="backend",
+                scenario="load",
+                step="load_store_menu",
+                message=(
+                    "Menu payload contains legacy status '1'. Store app counts it "
+                    "as available, but user app requires status 'available'."
+                ),
+                details={"menu_ids": legacy_available[:20], "store_id": chosen_id},
+            )
+        if not usable_menu:
+            console.print(
+                f"[yellow]user[{worker_id}]:[/] No available menu items for store "
+                f"{chosen_id}, trying next ..."
+            )
+            continue
+
+        store = _normalise_store(chosen_store)
+        currency = str(store.get("currency") or config.STORE_CURRENCY).lower()
+
+        return UserFixtures(
+            user_id=user_session.user_id,
+            store=store,
+            location=delivery_location,
+            menu_items=usable_menu,
+            currency=currency,
+        )
+
+    console.print(
+        f"[red]user[{worker_id}]:[/] Could not discover any open store with menu."
+    )
+    return None
 
 
 def generate_order_payload(fixtures: UserFixtures) -> dict[str, Any]:
@@ -693,6 +1039,15 @@ class _UserOrderWatcher:
         q = self._status_queues.get(order_db_id)
         if q is not None:
             q.put_nowait(str(status))
+        self.recorder.record_websocket(
+            source=f"user_orders_{self.user_id}",
+            raw=raw,
+            payload=payload,
+            nested=nested,
+            order_db_id=order_db_id,
+            order_ref=str(data.get("order_id")) if data.get("order_id") else None,
+            status=str(status),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -966,6 +1321,12 @@ async def complete_free_order(
     if config.SIM_COUPON_ID is not None:
         body["coupon"] = config.SIM_COUPON_ID
 
+    coupon_label = config.SIM_COUPON_ID if config.SIM_COUPON_ID is not None else "none"
+    console.print(
+        f"[cyan]user:[/] Completing free order {order_ref} "
+        f"(db_id={order_db_id}, amount={config.SIM_FREE_ORDER_AMOUNT:g}, "
+        f"{config.STORE_CURRENCY}, coupon={coupon_label}) ..."
+    )
     try:
         await request_json(
             client,
@@ -991,8 +1352,10 @@ async def complete_free_order(
             auth_source=token_source,
             auth_scheme="Token",
         )
+        console.print(f"[green]user:[/] Free order confirmed for {order_ref}.")
         return True
     except RequestError as exc:
+        console.print(f"[red]user:[/] Free order failed for {order_ref}: {exc}")
         recorder.record_issue(
             severity="error",
             code="free_order_http_error",
@@ -1126,6 +1489,8 @@ async def _worker(
     recorder: RunRecorder,
     watcher: _UserOrderWatcher,
     work_queue: asyncio.Queue[int] | None = None,
+    store_sessions: list | None = None,
+    user_session: UserSession | None = None,
 ) -> None:
     async with httpx.AsyncClient() as client:
         while True:
@@ -1135,12 +1500,30 @@ async def _worker(
                 except asyncio.QueueEmpty:
                     return
 
+            # Per-order discovery when store_sessions are available.
+            effective_fixtures = fixtures
+            if store_sessions and user_session is not None:
+                discovered = await _discover_and_build_fixtures(
+                    client,
+                    user_session=user_session,
+                    store_sessions=store_sessions,
+                    recorder=recorder,
+                    worker_id=worker_id,
+                )
+                if discovered is not None:
+                    effective_fixtures = discovered
+                else:
+                    console.print(
+                        f"[yellow]user[{worker_id}]:[/] Discovery failed; "
+                        "falling back to bootstrap fixtures."
+                    )
+
             order = await place_order(
                 client,
                 user_token=user_token,
                 token_source=token_source,
                 worker_id=worker_id,
-                fixtures=fixtures,
+                fixtures=effective_fixtures,
                 recorder=recorder,
                 scenario="load",
                 step="place_order",
@@ -1148,7 +1531,7 @@ async def _worker(
             if order is not None:
                 status_queue = watcher.subscribe(order["order_db_id"])
                 try:
-                    await handle_order_payment(
+                    completed = await handle_order_payment(
                         client,
                         user_token=user_token,
                         token_source=token_source,
@@ -1156,6 +1539,19 @@ async def _worker(
                         recorder=recorder,
                         status_queue=status_queue,
                     )
+                    if completed and config.SIM_RUN_POST_ORDER_ACTIONS:
+                        import post_order_actions
+
+                        await post_order_actions.run_post_order_actions(
+                            client,
+                            recorder=recorder,
+                            user_token=user_token,
+                            token_source=token_source,
+                            order_db_id=int(order["order_db_id"]),
+                            order_ref=str(order["order_ref"]),
+                            subentity=effective_fixtures.store,
+                            scenario="load",
+                        )
                 finally:
                     watcher.unsubscribe(order["order_db_id"])
 
@@ -1173,11 +1569,13 @@ async def run(
     recorder: RunRecorder,
     session: UserSession | None = None,
     fixtures: UserFixtures | None = None,
+    store_sessions: list | None = None,
 ) -> None:
     """Run the user simulation.
 
     If *session* and *fixtures* are provided the bootstrap phase is skipped
     (useful when __main__ pre-bootstraps to sequence store/robot startup).
+    *store_sessions* enables per-order realistic discovery when provided.
     """
     if session is None or fixtures is None:
         console.print("[cyan]user_sim:[/] Bootstrapping auth ...")
@@ -1210,7 +1608,12 @@ async def run(
     try:
         workers = [
             asyncio.create_task(
-                _worker(session.token, session.token_source, i + 1, fixtures, recorder, watcher, work_queue)
+                _worker(
+                    session.token, session.token_source, i + 1, fixtures,
+                    recorder, watcher, work_queue,
+                    store_sessions=store_sessions,
+                    user_session=session,
+                )
             )
             for i in range(config.N_USERS)
         ]

@@ -10,6 +10,8 @@ import time
 from typing import Any, TYPE_CHECKING
 
 import config
+from health import ascii_bar, build_health_summary
+from interaction_catalog import catalogue_payload
 
 if TYPE_CHECKING:
     import user_sim
@@ -17,6 +19,53 @@ if TYPE_CHECKING:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _build_run_folder_name(config_snapshot: dict[str, Any]) -> str:
+    """Build descriptive folder name: 20260502T204500-doctor-FZY_926025-user5609"""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+
+    # Determine flow/scenario identifier
+    flow = config_snapshot.get("flow") or ""
+    trace_scenarios = config_snapshot.get("trace_scenarios") or []
+    run_mode = config_snapshot.get("run_mode") or "load"
+
+    if flow:
+        flow_part = flow
+    elif trace_scenarios:
+        # Join multiple scenarios with underscore
+        flow_part = "_".join(str(s) for s in trace_scenarios[:3])  # Limit to first 3
+        if len(trace_scenarios) > 3:
+            flow_part += "_plus"
+    else:
+        flow_part = run_mode
+
+    # Sanitize flow_part: replace spaces and special chars
+    flow_part = flow_part.replace(" ", "_").replace(",", "_")
+
+    # Get store identifier
+    store_id = config_snapshot.get("store_id") or ""
+    auto_select_store = config_snapshot.get("auto_select_store", False)
+
+    if store_id:
+        store_part = store_id
+    elif auto_select_store:
+        store_part = "auto"
+    else:
+        store_part = "no-store"
+
+    # Get user phone last 4 digits
+    user_phone = config_snapshot.get("user_phone") or ""
+    if user_phone:
+        # Extract last 4 digits from phone number
+        digits_only = "".join(c for c in str(user_phone) if c.isdigit())
+        user_part = digits_only[-4:] if len(digits_only) >= 4 else digits_only
+        if not user_part:
+            user_part = "no-user"
+    else:
+        user_part = "no-user"
+
+    return f"{timestamp}-{flow_part}-{store_part}-user{user_part}"
 
 
 def _json_safe(value: Any) -> Any:
@@ -59,38 +108,68 @@ class RunRecorder:
         self.issues: list[dict[str, Any]] = []
         self.orders: dict[str, dict[str, Any]] = {}
         self.scenarios: dict[str, dict[str, Any]] = {}
+        self.identity_context: dict[str, dict[str, Any]] = {
+            "user": {
+                "id": config.USER_ID,
+                "name": "",
+                "phone": getattr(config, "USER_PHONE_NUMBER", "") or "",
+            },
+            "store": {
+                "subentity_id": config.SUBENTITY_ID,
+                "login_id": config.STORE_ID,
+                "name": "",
+                "branch": "",
+                "phone": "",
+            },
+        }
         self._next_event_id = 1
         self._next_issue_id = 1
 
     @classmethod
     def bootstrap(cls) -> "RunRecorder":
         root = Path(__file__).parent / "runs"
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+        # Build config snapshot first (needed for folder naming)
+        config_snapshot = {
+            "run_mode": getattr(config, "SIM_RUN_MODE", "load"),
+            "flow": getattr(config, "SIM_FLOW", ""),
+            "trace_suite": getattr(config, "SIM_TRACE_SUITE", ""),
+            "trace_scenarios": getattr(config, "SIM_TRACE_SCENARIOS", []),
+            "timing_profile": getattr(config, "SIM_TIMING_PROFILE", "fast"),
+            "lastmile_base_url": config.LASTMILE_BASE_URL,
+            "fainzy_base_url": config.FAINZY_BASE_URL,
+            "payment_mode": config.SIM_PAYMENT_MODE,
+            "payment_case": config.SIM_PAYMENT_CASE,
+            "stripe_test_payment_method": config.STRIPE_TEST_PAYMENT_METHOD,
+            "sim_save_card": config.SIM_SAVE_CARD,
+            "sim_coupon_id": config.SIM_COUPON_ID,
+            "sim_free_order_amount": config.SIM_FREE_ORDER_AMOUNT,
+            "app_autopilot": config.SIM_APP_AUTOPILOT,
+            "auto_select_store": config.SIM_AUTO_SELECT_STORE,
+            "auto_select_coupon": config.SIM_AUTO_SELECT_COUPON,
+            "auto_provision_fixtures": config.SIM_AUTO_PROVISION_FIXTURES,
+            "mutate_store_setup": config.SIM_MUTATE_STORE_SETUP,
+            "mutate_menu_setup": config.SIM_MUTATE_MENU_SETUP,
+            "users": config.N_USERS,
+            "orders": config.SIM_ORDERS,
+            "continuous": config.SIM_CONTINUOUS,
+            "interval_seconds": config.ORDER_INTERVAL_SECONDS,
+            "reject_rate": config.REJECT_RATE,
+            "user_id": config.USER_ID,
+            "user_phone": getattr(config, "USER_PHONE_NUMBER", ""),
+            "store_id": config.STORE_ID,
+            "subentity_id": config.SUBENTITY_ID,
+            "location_id": config.LOCATION_ID,
+            "websocket_timeout_seconds": config.SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS,
+            "interaction_catalogue": catalogue_payload(),
+        }
+
+        # Build descriptive folder name
+        stamp = _build_run_folder_name(config_snapshot)
+
         return cls(
             run_dir=root / stamp,
-            config_snapshot={
-                "run_mode": getattr(config, "SIM_RUN_MODE", "load"),
-                "trace_suite": getattr(config, "SIM_TRACE_SUITE", ""),
-                "trace_scenarios": getattr(config, "SIM_TRACE_SCENARIOS", []),
-                "timing_profile": getattr(config, "SIM_TIMING_PROFILE", "fast"),
-                "lastmile_base_url": config.LASTMILE_BASE_URL,
-                "fainzy_base_url": config.FAINZY_BASE_URL,
-                "payment_mode": config.SIM_PAYMENT_MODE,
-                "stripe_test_payment_method": config.STRIPE_TEST_PAYMENT_METHOD,
-                "sim_save_card": config.SIM_SAVE_CARD,
-                "sim_coupon_id": config.SIM_COUPON_ID,
-                "sim_free_order_amount": config.SIM_FREE_ORDER_AMOUNT,
-                "users": config.N_USERS,
-                "orders": config.SIM_ORDERS,
-                "continuous": config.SIM_CONTINUOUS,
-                "interval_seconds": config.ORDER_INTERVAL_SECONDS,
-                "reject_rate": config.REJECT_RATE,
-                "user_id": config.USER_ID,
-                "store_id": config.STORE_ID,
-                "subentity_id": config.SUBENTITY_ID,
-                "location_id": config.LOCATION_ID,
-                "websocket_timeout_seconds": config.SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS,
-            },
+            config_snapshot=config_snapshot,
             fixtures_summary={},
         )
 
@@ -105,12 +184,20 @@ class RunRecorder:
         self.config_snapshot["store_id"] = fixtures.store.get("id")
         self.config_snapshot["subentity_id"] = config.SUBENTITY_ID
         self.config_snapshot["location_id"] = fixtures.location.get("id")
+        self.set_user_identity(user_id=fixtures.user_id)
+        self.set_store_identity(
+            subentity_id=fixtures.store.get("id"),
+            name=fixtures.store.get("name"),
+            branch=fixtures.store.get("branch"),
+        )
         self.fixtures_summary = {
             "user_id": fixtures.user_id,
+            "user_phone": self.identity_context.get("user", {}).get("phone", ""),
             "store": {
                 "id": fixtures.store.get("id"),
                 "name": fixtures.store.get("name"),
                 "branch": fixtures.store.get("branch"),
+                "phone": self.identity_context.get("store", {}).get("phone", ""),
                 "currency": fixtures.store.get("currency"),
             },
             "location": {
@@ -122,6 +209,89 @@ class RunRecorder:
             "menu_items_available": len(fixtures.menu_items),
             "currency": fixtures.currency,
         }
+
+    def set_user_identity(
+        self,
+        *,
+        user_id: int | None = None,
+        name: str | None = None,
+        phone: str | None = None,
+        raw_user: dict[str, Any] | None = None,
+    ) -> None:
+        user = self.identity_context.setdefault("user", {})
+        if user_id is not None:
+            user["id"] = user_id
+        if phone:
+            user["phone"] = str(phone)
+            self.config_snapshot["user_phone"] = str(phone)
+        elif not user.get("phone"):
+            user["phone"] = str(self.config_snapshot.get("user_phone") or "")
+        resolved_name = name or self._user_name(raw_user)
+        if resolved_name:
+            user["name"] = resolved_name
+
+    def set_store_identity(
+        self,
+        *,
+        subentity_id: int | None = None,
+        login_id: str | None = None,
+        name: str | None = None,
+        branch: str | None = None,
+        phone: str | None = None,
+        raw_store: dict[str, Any] | None = None,
+    ) -> None:
+        store = self.identity_context.setdefault("store", {})
+        if subentity_id is not None:
+            store["subentity_id"] = subentity_id
+            self.config_snapshot["subentity_id"] = subentity_id
+        if login_id:
+            store["login_id"] = login_id
+            self.config_snapshot["store_id"] = login_id
+        if name:
+            store["name"] = str(name)
+        if branch:
+            store["branch"] = str(branch)
+        if phone:
+            store["phone"] = str(phone)
+        if raw_store:
+            resolved_name = raw_store.get("name")
+            resolved_branch = raw_store.get("branch")
+            resolved_phone = raw_store.get("mobile_number") or raw_store.get("phone_number")
+            if resolved_name and not store.get("name"):
+                store["name"] = str(resolved_name)
+            if resolved_branch and not store.get("branch"):
+                store["branch"] = str(resolved_branch)
+            if resolved_phone and not store.get("phone"):
+                store["phone"] = str(resolved_phone)
+
+    def _identity_snapshot(self) -> dict[str, Any]:
+        user = self.identity_context.get("user", {})
+        store = self.identity_context.get("store", {})
+        return {
+            "user": {
+                "id": user.get("id"),
+                "name": user.get("name") or "",
+                "phone": user.get("phone") or "",
+            },
+            "store": {
+                "subentity_id": store.get("subentity_id"),
+                "login_id": store.get("login_id") or "",
+                "name": store.get("name") or "",
+                "branch": store.get("branch") or "",
+                "phone": store.get("phone") or "",
+            },
+        }
+
+    @staticmethod
+    def _user_name(raw_user: dict[str, Any] | None) -> str:
+        if not isinstance(raw_user, dict):
+            return ""
+        full_name = str(raw_user.get("name") or "").strip()
+        if full_name:
+            return full_name
+        first = str(raw_user.get("first_name") or "").strip()
+        last = str(raw_user.get("last_name") or "").strip()
+        return " ".join(part for part in (first, last) if part).strip()
 
     def elapsed_ms(self) -> int:
         return int((time.perf_counter() - self.started_perf) * 1000)
@@ -145,12 +315,15 @@ class RunRecorder:
                 "order_db_id": None,
                 "order_ref": None,
                 "note": note,
+                "identity": self._identity_snapshot(),
             },
         )
         if expected_final_status is not None:
             scenario["expected_final_status"] = expected_final_status
         if note is not None:
             scenario["note"] = note
+        if not scenario.get("identity"):
+            scenario["identity"] = self._identity_snapshot()
 
     def finish_scenario(
         self,
@@ -213,6 +386,7 @@ class RunRecorder:
             "action": action,
             "category": category,
             "ok": ok,
+            "identity": self._identity_snapshot(),
         }
         self._next_event_id += 1
         if scenario is not None:
@@ -293,6 +467,7 @@ class RunRecorder:
             "severity": severity,
             "code": code,
             "message": message,
+            "identity": self._identity_snapshot(),
         }
         self._next_issue_id += 1
         if actor is not None:
@@ -371,10 +546,13 @@ class RunRecorder:
                 "order_ref": order_ref,
                 "statuses": [],
                 "final_status": None,
+                "identity": event.get("identity") or self._identity_snapshot(),
             },
         )
         if order_ref and not order.get("order_ref"):
             order["order_ref"] = order_ref
+        if not order.get("identity"):
+            order["identity"] = event.get("identity") or self._identity_snapshot()
         status = event.get("observed_status") or event.get("status")
         if status:
             statuses = order["statuses"]
@@ -431,6 +609,10 @@ class RunRecorder:
         base = scenario.get("base_verdict") or "unknown"
         if base == "unsupported":
             return "unsupported"
+        expected = scenario.get("expected_final_status")
+        actual = scenario.get("actual_final_status")
+        if base == "passed" and expected and actual != expected:
+            return "blocked"
         issues = self._issues_for_scenario(scenario)
         if any(item.get("severity") == "error" for item in issues):
             return "blocked"
@@ -462,6 +644,67 @@ class RunRecorder:
                 return event
         return None
 
+    def _identity_for_order(self, order: dict[str, Any] | None) -> dict[str, Any]:
+        if isinstance(order, dict):
+            identity = order.get("identity")
+            if isinstance(identity, dict):
+                return identity
+        return self._identity_snapshot()
+
+    def _identity_for_scenario(self, scenario: dict[str, Any]) -> dict[str, Any]:
+        identity = scenario.get("identity")
+        if isinstance(identity, dict):
+            return identity
+        order_db_id = scenario.get("order_db_id")
+        if order_db_id is not None:
+            order = self.orders.get(str(order_db_id))
+            if order:
+                return self._identity_for_order(order)
+        return self._identity_snapshot()
+
+    def _identity_for_issue(self, issue: dict[str, Any]) -> dict[str, Any]:
+        identity = issue.get("identity")
+        if isinstance(identity, dict):
+            return identity
+        order_db_id = issue.get("order_db_id")
+        if order_db_id is not None:
+            order = self.orders.get(str(order_db_id))
+            if order:
+                return self._identity_for_order(order)
+        if issue.get("scenario"):
+            scenario = self.scenarios.get(str(issue["scenario"]))
+            if scenario:
+                return self._identity_for_scenario(scenario)
+        return self._identity_snapshot()
+
+    @staticmethod
+    def _identity_user_text(identity: dict[str, Any]) -> str:
+        user = identity.get("user", {}) if isinstance(identity, dict) else {}
+        return " / ".join(
+            part
+            for part in [
+                str(user.get("id") or "").strip(),
+                str(user.get("name") or "").strip(),
+                str(user.get("phone") or "").strip(),
+            ]
+            if part
+        )
+
+    @staticmethod
+    def _identity_store_text(identity: dict[str, Any]) -> str:
+        store = identity.get("store", {}) if isinstance(identity, dict) else {}
+        return " / ".join(
+            part
+            for part in [
+                str(store.get("subentity_id") or "").strip(),
+                str(store.get("login_id") or "").strip(),
+                str(store.get("name") or "").strip(),
+                str(store.get("branch") or "").strip(),
+                str(store.get("phone") or "").strip(),
+            ]
+            if part
+        )
+
     def _render_markdown(self) -> str:
         actor_counts = Counter(event["actor"] for event in self.events)
         terminal = Counter(
@@ -471,6 +714,7 @@ class RunRecorder:
         lines = [
             "# Fainzy Simulation Run",
             "",
+            *self._render_health_sections(),
             "## Summary",
             _table_row(["Metric", "Value"]),
             _table_row(["---", "---"]),
@@ -497,13 +741,16 @@ class RunRecorder:
                             "Actual",
                             "Verdict",
                             "Order",
+                            "User",
+                            "Store",
                             "Note",
                         ]
                     ),
-                    _table_row(["---", "---", "---", "---", "---", "---"]),
+                    _table_row(["---", "---", "---", "---", "---", "---", "---", "---"]),
                 ]
             )
             for scenario in scenarios:
+                identity = self._identity_for_scenario(scenario)
                 lines.append(
                     _table_row(
                         [
@@ -512,6 +759,8 @@ class RunRecorder:
                             scenario.get("actual_final_status", ""),
                             self._scenario_effective_verdict(scenario),
                             scenario.get("order_db_id") or scenario.get("order_ref") or "",
+                            self._identity_user_text(identity),
+                            self._identity_store_text(identity),
                             scenario.get("note", "") or "",
                         ]
                     )
@@ -521,12 +770,13 @@ class RunRecorder:
         lines.extend(
             [
                 "## Order Lifecycle",
-                _table_row(["Order ID", "Reference", "Final", "Status path"]),
-                _table_row(["---", "---", "---", "---"]),
+                _table_row(["Order ID", "Reference", "Final", "User", "Store", "Status path"]),
+                _table_row(["---", "---", "---", "---", "---", "---"]),
             ]
         )
         if self.orders:
             for order in self.orders.values():
+                identity = self._identity_for_order(order)
                 path = " -> ".join(item["status"] for item in order["statuses"])
                 lines.append(
                     _table_row(
@@ -534,12 +784,14 @@ class RunRecorder:
                             order["order_db_id"],
                             order.get("order_ref") or "",
                             order.get("final_status") or "",
+                            self._identity_user_text(identity),
+                            self._identity_store_text(identity),
                             path,
                         ]
                     )
                 )
         else:
-            lines.append(_table_row(["none", "", "", ""]))
+            lines.append(_table_row(["none", "", "", "", "", ""]))
         lines.append("")
 
         lines.extend(
@@ -553,9 +805,11 @@ class RunRecorder:
                         "Matched",
                         "Source",
                         "Latency",
+                        "User",
+                        "Store",
                     ]
                 ),
-                _table_row(["---", "---", "---", "---", "---", "---"]),
+                _table_row(["---", "---", "---", "---", "---", "---", "---", "---"]),
             ]
         )
         expected_events = [
@@ -566,6 +820,7 @@ class RunRecorder:
         if expected_events:
             for event in expected_events:
                 match = event.get("websocket_match") or {}
+                identity = event.get("identity") or self._identity_snapshot()
                 lines.append(
                     _table_row(
                         [
@@ -578,11 +833,13 @@ class RunRecorder:
                             "yes" if match.get("matched") else "no",
                             match.get("source", ""),
                             f"{match['latency_ms']}ms" if "latency_ms" in match else "",
+                            self._identity_user_text(identity),
+                            self._identity_store_text(identity),
                         ]
                     )
                 )
         else:
-            lines.append(_table_row(["none", "", "", "", "", ""]))
+            lines.append(_table_row(["none", "", "", "", "", "", "", ""]))
         lines.append("")
 
         lines.extend(
@@ -595,15 +852,18 @@ class RunRecorder:
                         "Scenario",
                         "Code",
                         "Request",
+                        "User",
+                        "Store",
                         "Message",
                     ]
                 ),
-                _table_row(["---", "---", "---", "---", "---", "---"]),
+                _table_row(["---", "---", "---", "---", "---", "---", "---", "---"]),
             ]
         )
         if self.issues:
             for issue in self.issues:
                 related = self._lookup_event(issue.get("related_event_id"))
+                identity = self._identity_for_issue(issue)
                 request = ""
                 if related is not None:
                     request = " ".join(
@@ -626,12 +886,14 @@ class RunRecorder:
                             issue.get("scenario", ""),
                             issue["code"],
                             request,
+                            self._identity_user_text(identity),
+                            self._identity_store_text(identity),
                             issue["message"],
                         ]
                     )
                 )
         else:
-            lines.append(_table_row(["none", "", "", "", "", ""]))
+            lines.append(_table_row(["none", "", "", "", "", "", "", ""]))
         lines.append("")
 
         lines.append("## Technical Trace")
@@ -745,6 +1007,84 @@ class RunRecorder:
             lines.append(_table_row([key, value]))
 
         return "\n".join(lines) + "\n"
+
+    def _health_summary(self) -> dict[str, Any]:
+        scenarios = []
+        for scenario in self._scenario_records():
+            item = dict(scenario)
+            item["effective_verdict"] = self._scenario_effective_verdict(scenario)
+            scenarios.append(item)
+        return build_health_summary(
+            duration_ms=self.elapsed_ms(),
+            scenarios=scenarios,
+            orders=list(self.orders.values()),
+            events=self.events,
+            issues=self.issues,
+        )
+
+    def _render_health_sections(self) -> list[str]:
+        summary = self._health_summary()
+        issue_counts = summary["issue_counts"]
+        http = summary["http"]
+        websockets = summary["websockets"]
+        order_statuses = summary["order_final_statuses"]
+        max_bar = max(
+            [
+                http["count"],
+                websockets["expected"],
+                sum(issue_counts.values()),
+                summary["order_count"],
+                1,
+            ]
+        )
+        lines = [
+            "## Daily Doctor Summary",
+            _table_row(["Metric", "Value"]),
+            _table_row(["---", "---"]),
+            _table_row(["Verdict", str(summary["verdict"]).upper()]),
+            _table_row(["Duration", f"{summary['duration_seconds']}s"]),
+            _table_row(["Scenarios", summary["scenario_count"]]),
+            _table_row(["Orders", summary["order_count"]]),
+            _table_row(["Order final statuses", order_statuses or "none"]),
+            _table_row(["HTTP calls", http["count"]]),
+            _table_row(["HTTP status groups", http["status_groups"] or "none"]),
+            _table_row(["HTTP latency p50/p95/max", f"{http['latency_ms']['p50']}ms / {http['latency_ms']['p95']}ms / {http['latency_ms']['max']}ms"]),
+            _table_row(["Websocket matches", f"{websockets['matched']}/{websockets['expected']} ({websockets['match_rate']:.0%})"]),
+            _table_row(["Issues", issue_counts or "none"]),
+            "",
+            "## Graphical Summary",
+            _table_row(["Signal", "Count", "Bar"]),
+            _table_row(["---", "---", "---"]),
+            _table_row(["Orders", summary["order_count"], ascii_bar(summary["order_count"], maximum=max_bar)]),
+            _table_row(["HTTP calls", http["count"], ascii_bar(http["count"], maximum=max_bar)]),
+            _table_row(["Expected websocket events", websockets["expected"], ascii_bar(websockets["expected"], maximum=max_bar)]),
+            _table_row(["Matched websocket events", websockets["matched"], ascii_bar(websockets["matched"], maximum=max_bar)]),
+            _table_row(["Issues", sum(issue_counts.values()), ascii_bar(sum(issue_counts.values()), maximum=max_bar)]),
+            "",
+            "## Bottlenecks",
+            _table_row(["Method", "Endpoint", "Calls", "Errors", "Avg", "P95", "Max"]),
+            _table_row(["---", "---", "---", "---", "---", "---", "---"]),
+        ]
+        if http["endpoints"]:
+            for item in http["endpoints"][:10]:
+                latency = item["latency_ms"]
+                lines.append(
+                    _table_row(
+                        [
+                            item["method"],
+                            item["endpoint"],
+                            item["count"],
+                            item["errors"],
+                            f"{latency['avg']}ms",
+                            f"{latency['p95']}ms",
+                            f"{latency['max']}ms",
+                        ]
+                    )
+                )
+        else:
+            lines.append(_table_row(["none", "", "", "", "", "", ""]))
+        lines.append("")
+        return lines
 
     def _render_story(self) -> str:
         lines = [

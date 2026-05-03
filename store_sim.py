@@ -22,6 +22,7 @@ import websockets
 from rich.console import Console
 
 import config
+from interaction_catalog import MENU_STATUSES, WORKING_DAYS
 from reporting import RunRecorder
 from transport import RequestError, api_data, build_auth_proof, request_json
 
@@ -40,6 +41,9 @@ class StoreSession:
     subentity: dict[str, Any]
     store_id: int  # subentity_id — used for websocket channel
     token_source: str
+    store_login_id: str = ""  # original store_id used for login (e.g. "FZY_586940")
+    gps_lat: float | None = None
+    gps_lng: float | None = None
 
 
 class HttpApiError(RuntimeError):
@@ -197,13 +201,45 @@ async def fetch_store_token(
     return str(token), "store_product_auth"
 
 
+def _extract_gps(subentity: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Return (lat, lng) from subentity.gps_coordinates.coordinates [lng, lat]."""
+    gps = subentity.get("gps_coordinates") or subentity.get("gps_cordinates") or {}
+    coords = gps.get("coordinates")
+    if isinstance(coords, (list, tuple)) and len(coords) >= 2:
+        lng, lat = coords[0], coords[1]
+        return float(lat), float(lng)
+    return None, None
+
+
+def provisioning_preflight_enabled() -> bool:
+    return (
+        config.SIM_AUTO_PROVISION_FIXTURES
+        or config.SIM_MUTATE_STORE_SETUP
+        or config.SIM_MUTATE_MENU_SETUP
+    )
+
+
+def store_setup_provisioning_enabled() -> bool:
+    return config.SIM_AUTO_PROVISION_FIXTURES or config.SIM_MUTATE_STORE_SETUP
+
+
+def menu_provisioning_enabled() -> bool:
+    return config.SIM_AUTO_PROVISION_FIXTURES or config.SIM_MUTATE_MENU_SETUP
+
+
+def store_status_toggling_enabled() -> bool:
+    return config.SIM_AUTO_TOGGLE_STORE_STATUS and provisioning_preflight_enabled()
+
+
 async def bootstrap_auth(
     client: httpx.AsyncClient,
     recorder: RunRecorder | None = None,
     *,
+    store_id: str | None = None,
     scenario: str | None = None,
 ) -> StoreSession:
-    if not config.STORE_ID:
+    effective_store_id = store_id or config.STORE_ID
+    if not effective_store_id:
         raise RuntimeError("STORE_ID is required so fixtures can use a real store profile.")
 
     last_mile_token, token_source = await fetch_store_token(
@@ -212,7 +248,7 @@ async def bootstrap_auth(
         scenario=scenario,
     )
 
-    console.print(f"[dim]store:[/] Fetching store profile for store_id={config.STORE_ID} ...")
+    console.print(f"[dim]store:[/] Fetching store profile for store_id={effective_store_id} ...")
     payload = await _auth_request(
         client,
         recorder=recorder,
@@ -223,10 +259,10 @@ async def bootstrap_auth(
         endpoint="/v1/entities/store/login",
         scenario=scenario,
         step="auth_fetch_store_profile",
-        json_body={"store_id": config.STORE_ID},
+        json_body={"store_id": effective_store_id},
         headers={
             "Content-Type": "application/json",
-            "Store-Request": str(config.STORE_ID),
+            "Store-Request": str(effective_store_id),
         },
     )
     data = api_data(payload)
@@ -237,19 +273,26 @@ async def bootstrap_auth(
     if not isinstance(subentity, dict) or not subentity.get("id"):
         raise RuntimeError(f"Store login response did not contain subentity.id: {payload}")
 
-    config.SUBENTITY_ID = int(subentity["id"])
+    sub_id = int(subentity["id"])
+    config.SUBENTITY_ID = sub_id
     if subentity.get("currency"):
         config.STORE_CURRENCY = str(subentity["currency"]).lower()
 
+    gps_lat, gps_lng = _extract_gps(subentity)
+
     console.print(
-        f"[green]store:[/] Store profile acquired for subentity_id={config.SUBENTITY_ID}."
+        f"[green]store:[/] Store profile acquired for {effective_store_id} "
+        f"(subentity_id={sub_id}, lat={gps_lat}, lng={gps_lng})."
     )
     return StoreSession(
         last_mile_token=last_mile_token,
         fainzy_token=data.get("token"),
         subentity=subentity,
-        store_id=config.SUBENTITY_ID,
+        store_id=sub_id,
         token_source=token_source,
+        store_login_id=effective_store_id,
+        gps_lat=gps_lat,
+        gps_lng=gps_lng,
     )
 
 
@@ -348,6 +391,15 @@ class _StoreOrderWatcher:
             return
 
         status = str(status)
+        self.recorder.record_websocket(
+            source=f"store_orders_{self.store_id}",
+            raw=raw,
+            payload=payload,
+            nested=nested,
+            order_db_id=order_db_id,
+            order_ref=str(order_ref) if order_ref else None,
+            status=status,
+        )
 
         # If this is a new pending order, enqueue it for _handle_order
         if status == "pending":
@@ -390,6 +442,640 @@ def _order_identity(payload: Any) -> tuple[int | None, str | None, str | None]:
     except (TypeError, ValueError):
         order_db_id = None
     return order_db_id, str(order_ref) if order_ref is not None else None, str(status) if status else None
+
+
+def _store_api_token(session: StoreSession) -> tuple[str, str]:
+    if session.fainzy_token:
+        return str(session.fainzy_token), "store_fainzy_login_token"
+    return session.last_mile_token, session.token_source
+
+
+def _menu_identity(payload: Any) -> tuple[int | None, str | None, str | None]:
+    raw = api_data(payload)
+    if isinstance(raw, list):
+        raw = raw[0] if raw else {}
+    if not isinstance(raw, dict):
+        return None, None, None
+    menu_id = raw.get("id")
+    try:
+        menu_id = int(menu_id) if menu_id is not None else None
+    except (TypeError, ValueError):
+        menu_id = None
+    status = raw.get("status")
+    return menu_id, None, str(status) if status is not None else None
+
+
+def _menu_to_server(menu: dict[str, Any], *, status: str | None = None) -> dict[str, Any]:
+    images = []
+    for image in menu.get("images") or []:
+        if isinstance(image, dict) and image.get("id") is not None:
+            images.append({"id": image["id"]})
+
+    data: dict[str, Any] = {
+        "category": menu.get("category"),
+        "subentity": menu.get("subentity"),
+        "name": menu.get("name"),
+        "price": menu.get("price"),
+        "description": menu.get("description"),
+        "currency_symbol": menu.get("currency_symbol"),
+        "ingredients": menu.get("ingredients") or "",
+        "discount": menu.get("discount") or 0,
+        "discount_price": menu.get("discount_price"),
+        "status": status if status is not None else menu.get("status"),
+    }
+    if images:
+        data["images"] = images
+    if menu.get("sides"):
+        data["sides"] = menu["sides"]
+    return data
+
+
+def build_menu_create_payload(
+    *,
+    session: StoreSession,
+    category_id: int,
+    status: str,
+) -> dict[str, Any]:
+    return {
+        "category": category_id,
+        "subentity": session.store_id,
+        "name": config.SIM_MENU_NAME,
+        "price": config.SIM_MENU_PRICE,
+        "description": config.SIM_MENU_DESCRIPTION,
+        "currency_symbol": None,
+        "ingredients": config.SIM_MENU_INGREDIENTS,
+        "discount": config.SIM_MENU_DISCOUNT,
+        "discount_price": config.SIM_MENU_DISCOUNT_PRICE,
+        "status": status,
+    }
+
+
+def build_store_setup_payload(session: StoreSession) -> dict[str, Any]:
+    subentity = session.subentity
+    location = _store_location_source(subentity)
+    location_lat, location_lng = _extract_location_gps(location)
+    lat = (
+        session.gps_lat
+        if session.gps_lat is not None
+        else location_lat
+        if location_lat is not None
+        else config.SIM_LAT
+    )
+    lng = (
+        session.gps_lng
+        if session.gps_lng is not None
+        else location_lng
+        if location_lng is not None
+        else config.SIM_LNG
+    )
+    lat = 0.0 if lat is None else lat
+    lng = 0.0 if lng is None else lng
+    payload: dict[str, Any] = {
+        "id": session.store_id,
+        "name": subentity.get("name") or config.SIM_STORE_SETUP_NAME,
+        "branch": subentity.get("branch") or config.SIM_STORE_SETUP_BRANCH,
+        "description": subentity.get("description")
+        or config.SIM_STORE_SETUP_DESCRIPTION,
+        "opening_days": subentity.get("opening_days") or ",".join(WORKING_DAYS),
+        "start_time": subentity.get("start_time") or config.SIM_STORE_SETUP_START_TIME,
+        "closing_time": subentity.get("closing_time")
+        or config.SIM_STORE_SETUP_CLOSING_TIME,
+        "setup": True,
+        "mobile_number": subentity.get("mobile_number")
+        or config.SIM_STORE_SETUP_MOBILE,
+        "notification_id": subentity.get("notification_id") or "",
+        "currency": str(subentity.get("currency") or config.STORE_CURRENCY).lower(),
+        "rating": subentity.get("rating") or 0.0,
+        "status": _first_present(subentity.get("status"), config.SIM_STORE_SETUP_STATUS),
+        "location": [
+            {
+                "name": _first_present(
+                    location.get("name"),
+                    subentity.get("name"),
+                    config.SIM_STORE_SETUP_NAME,
+                ),
+                "country": _first_present(location.get("country"), config.SIM_STORE_SETUP_COUNTRY),
+                "post_code": _first_present(location.get("post_code"), ""),
+                "state": _first_present(location.get("state"), config.SIM_STORE_SETUP_STATE),
+                "city": _first_present(location.get("city"), config.SIM_STORE_SETUP_CITY),
+                "ward": _first_present(location.get("ward"), ""),
+                "village": _first_present(location.get("village"), ""),
+                "location_type": _first_present(location.get("location_type"), "pick_up"),
+                "gps_coordinates": {
+                    "latitude": str(lat),
+                    "longitude": str(lng),
+                },
+                "address_details": _first_present(
+                    location.get("address_details"),
+                    location.get("name"),
+                    config.SIM_STORE_SETUP_ADDRESS,
+                ),
+            }
+        ],
+    }
+    if subentity.get("image"):
+        payload["image"] = subentity["image"]
+    if subentity.get("carousel_uploads"):
+        payload["carousel_uploads"] = subentity["carousel_uploads"]
+    return payload
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return values[-1] if values else None
+
+
+def _store_location_source(subentity: dict[str, Any]) -> dict[str, Any]:
+    for key in ("location", "locations"):
+        value = subentity.get(key)
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            return value[0]
+        if isinstance(value, dict):
+            return value
+    for key in ("location_details", "address"):
+        value = subentity.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _extract_location_gps(location: dict[str, Any]) -> tuple[float | None, float | None]:
+    gps = location.get("gps_coordinates") or location.get("gps_cordinates") or {}
+    if not isinstance(gps, dict):
+        return None, None
+    if gps.get("latitude") is not None and gps.get("longitude") is not None:
+        return float(gps["latitude"]), float(gps["longitude"])
+    coords = gps.get("coordinates")
+    if isinstance(coords, (list, tuple)) and len(coords) >= 2:
+        lng, lat = coords[0], coords[1]
+        return float(lat), float(lng)
+    return None, None
+
+
+async def fetch_categories(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    recorder: RunRecorder,
+    scenario: str,
+    step: str = "fetch_categories",
+) -> list[dict[str, Any]]:
+    api_token, token_source = _store_api_token(session)
+    result = await request_json(
+        client,
+        recorder=recorder,
+        actor="store",
+        action="fetch_categories",
+        category="fixture",
+        scenario=scenario,
+        step=step,
+        method="GET",
+        url=f"{config.FAINZY_BASE_URL}/v1/core/subentities/{session.store_id}/categories",
+        endpoint=f"/v1/core/subentities/{session.store_id}/categories",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Token {api_token}",
+        },
+        auth_header_name="Authorization",
+        auth_token=api_token,
+        auth_source=token_source,
+        auth_scheme="Token",
+        track_order=False,
+    )
+    data = api_data(result.payload)
+    return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+
+async def fetch_menus(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    recorder: RunRecorder,
+    scenario: str,
+    category_id: int | None = None,
+    step: str = "fetch_menus",
+) -> list[dict[str, Any]]:
+    api_token, token_source = _store_api_token(session)
+    params = {"categoryId": str(category_id)} if category_id is not None else None
+    result = await request_json(
+        client,
+        recorder=recorder,
+        actor="store",
+        action="fetch_menus",
+        category="fixture",
+        scenario=scenario,
+        step=step,
+        method="GET",
+        url=f"{config.FAINZY_BASE_URL}/v1/core/subentities/{session.store_id}/menu",
+        endpoint=f"/v1/core/subentities/{session.store_id}/menu",
+        params=params,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Token {api_token}",
+        },
+        auth_header_name="Authorization",
+        auth_token=api_token,
+        auth_source=token_source,
+        auth_scheme="Token",
+        track_order=False,
+    )
+    data = api_data(result.payload)
+    return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+
+async def create_category(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    name: str,
+    recorder: RunRecorder,
+    scenario: str,
+    step: str = "create_category",
+) -> dict[str, Any]:
+    api_token, token_source = _store_api_token(session)
+    result = await request_json(
+        client,
+        recorder=recorder,
+        actor="store",
+        action="create_category",
+        category="store_setup",
+        scenario=scenario,
+        step=step,
+        method="POST",
+        url=f"{config.FAINZY_BASE_URL}/v1/core/subentities/{session.store_id}/categories",
+        endpoint=f"/v1/core/subentities/{session.store_id}/categories",
+        json_body={"name": name},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Token {api_token}",
+        },
+        auth_header_name="Authorization",
+        auth_token=api_token,
+        auth_source=token_source,
+        auth_scheme="Token",
+        track_order=False,
+    )
+    data = api_data(result.payload)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Category create response had invalid shape: {result.payload}")
+    return data
+
+
+async def create_menu(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    category_id: int,
+    status: str,
+    recorder: RunRecorder,
+    scenario: str,
+    step: str = "create_menu",
+) -> dict[str, Any]:
+    if status not in MENU_STATUSES:
+        raise RuntimeError(f"Unsupported menu status {status!r}")
+    api_token, token_source = _store_api_token(session)
+    body = build_menu_create_payload(
+        session=session,
+        category_id=category_id,
+        status=status,
+    )
+    result = await request_json(
+        client,
+        recorder=recorder,
+        actor="store",
+        action="create_menu",
+        category="store_setup",
+        scenario=scenario,
+        step=step,
+        method="POST",
+        url=f"{config.FAINZY_BASE_URL}/v1/core/subentities/{session.store_id}/menu",
+        endpoint=f"/v1/core/subentities/{session.store_id}/menu",
+        json_body=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Token {api_token}",
+        },
+        auth_header_name="Authorization",
+        auth_token=api_token,
+        auth_source=token_source,
+        auth_scheme="Token",
+        track_order=False,
+    )
+    data = api_data(result.payload)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Menu create response had invalid shape: {result.payload}")
+    return data
+
+
+async def update_menu_status(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    menu: dict[str, Any],
+    status: str,
+    recorder: RunRecorder,
+    scenario: str,
+    step: str = "update_menu_status",
+) -> dict[str, Any]:
+    if status not in MENU_STATUSES:
+        raise RuntimeError(f"Unsupported menu status {status!r}")
+    menu_id = menu.get("id")
+    if menu_id is None:
+        raise RuntimeError(f"Menu has no id: {menu}")
+    api_token, token_source = _store_api_token(session)
+    result = await request_json(
+        client,
+        recorder=recorder,
+        actor="store",
+        action="update_menu_status",
+        category="store_setup",
+        scenario=scenario,
+        step=step,
+        method="PATCH",
+        url=f"{config.FAINZY_BASE_URL}/v1/core/subentities/{session.store_id}/menu/{menu_id}",
+        endpoint=f"/v1/core/subentities/{session.store_id}/menu/{menu_id}",
+        json_body=_menu_to_server(menu, status=status),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Token {api_token}",
+        },
+        auth_header_name="Authorization",
+        auth_token=api_token,
+        auth_source=token_source,
+        auth_scheme="Token",
+        track_order=False,
+    )
+    data = api_data(result.payload)
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Menu update response had invalid shape: {result.payload}")
+    return data
+
+
+async def _submit_store_profile_patch(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    recorder: RunRecorder,
+    scenario: str,
+    action: str,
+    step: str,
+) -> dict[str, Any] | None:
+    api_token, token_source = _store_api_token(session)
+    result = await request_json(
+        client,
+        recorder=recorder,
+        actor="store",
+        action=action,
+        category="store_setup",
+        scenario=scenario,
+        step=step,
+        method="PATCH",
+        url=f"{config.FAINZY_BASE_URL}/v1/entities/subentities/{session.store_id}",
+        endpoint=f"/v1/entities/subentities/{session.store_id}",
+        json_body=build_store_setup_payload(session),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Token {api_token}",
+        },
+        auth_header_name="Authorization",
+        auth_token=api_token,
+        auth_source=token_source,
+        auth_scheme="Token",
+        track_order=False,
+    )
+    data = api_data(result.payload)
+    if not isinstance(data, dict):
+        return None
+    session.subentity.update(data)
+    return data
+
+
+async def ensure_store_setup(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    recorder: RunRecorder,
+    scenario: str,
+) -> bool:
+    setup_complete = session.subentity.get("setup") is True
+    recorder.record_event(
+        actor="store",
+        action="store_setup_gate",
+        category="ui_flow",
+        scenario=scenario,
+        step="store_setup_gate",
+        details={
+            "setup": session.subentity.get("setup"),
+            "menu_actions_allowed": setup_complete or store_setup_provisioning_enabled(),
+            "order_actions_allowed": setup_complete or store_setup_provisioning_enabled(),
+            "auto_provision_enabled": config.SIM_AUTO_PROVISION_FIXTURES,
+            "store_setup_mutation_enabled": config.SIM_MUTATE_STORE_SETUP,
+            "store_update_mutation_enabled": config.SIM_AUTO_PROVISION_FIXTURES,
+        },
+        track_order=False,
+    )
+    if setup_complete:
+        if config.SIM_AUTO_PROVISION_FIXTURES:
+            console.print(
+                f"[dim]store:[/] Store setup is already complete; submitting store update for subentity_id={session.store_id} ..."
+            )
+            data = await _submit_store_profile_patch(
+                client,
+                session=session,
+                recorder=recorder,
+                scenario=scenario,
+                action="submit_store_update",
+                step="submit_store_update",
+            )
+            if isinstance(data, dict):
+                console.print(
+                    f"[green]store:[/] Store profile update completed for subentity_id={session.store_id}."
+                )
+                return True
+            console.print(
+                f"[yellow]store:[/] Store profile update response had an unexpected shape for subentity_id={session.store_id}."
+            )
+            return False
+        console.print(
+            f"[dim]store:[/] Store setup already complete for subentity_id={session.store_id}."
+        )
+        return True
+    if not store_setup_provisioning_enabled():
+        console.print(
+            "[yellow]store:[/] Store setup is false and automatic provisioning is disabled."
+        )
+        recorder.record_issue(
+            severity="error",
+            code="store_setup_required",
+            actor="store",
+            scenario=scenario,
+            step="store_setup_gate",
+            message=(
+                "Store setup is false and automatic provisioning is disabled; "
+                "set SIM_AUTO_PROVISION_FIXTURES=true or SIM_MUTATE_STORE_SETUP=true "
+                "to PATCH the store profile through the setup flow."
+            ),
+        )
+        return False
+
+    console.print(
+        f"[dim]store:[/] Store setup is false; submitting store setup for subentity_id={session.store_id} ..."
+    )
+    data = await _submit_store_profile_patch(
+        client,
+        session=session,
+        recorder=recorder,
+        scenario=scenario,
+        action="submit_store_setup",
+        step="submit_store_setup",
+    )
+    if isinstance(data, dict):
+        if data.get("setup") is True:
+            console.print(
+                f"[green]store:[/] Store setup completed for subentity_id={session.store_id}."
+            )
+            return True
+        console.print(
+            f"[yellow]store:[/] Store setup response did not confirm setup=true for subentity_id={session.store_id}."
+        )
+        return False
+    console.print(
+        f"[yellow]store:[/] Store setup response had an unexpected shape for subentity_id={session.store_id}."
+    )
+    return False
+
+
+def _status_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _patch_store_status(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    status: int,
+    recorder: RunRecorder,
+    scenario: str,
+    action: str,
+    step: str,
+) -> dict[str, Any]:
+    api_token, token_source = _store_api_token(session)
+    result = await request_json(
+        client,
+        recorder=recorder,
+        actor="store",
+        action=action,
+        category="store_status",
+        scenario=scenario,
+        step=step,
+        method="PATCH",
+        url=f"{config.FAINZY_BASE_URL}/v1/entities/subentities/{session.store_id}",
+        endpoint=f"/v1/entities/subentities/{session.store_id}",
+        json_body={"status": status},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Token {api_token}",
+        },
+        auth_header_name="Authorization",
+        auth_token=api_token,
+        auth_source=token_source,
+        auth_scheme="Token",
+        track_order=False,
+    )
+    data = api_data(result.payload)
+    if isinstance(data, dict):
+        session.subentity.update(data)
+        return data
+    raise RuntimeError(f"Store status update response had invalid shape: {result.payload}")
+
+
+async def open_store_for_simulation(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    recorder: RunRecorder,
+    scenario: str,
+) -> int | None:
+    original_status = _status_int(session.subentity.get("status"))
+    recorder.record_event(
+        actor="store",
+        action="store_status_gate",
+        category="ui_flow",
+        scenario=scenario,
+        step="store_status_gate",
+        details={
+            "status": original_status,
+            "open_status": config.SIM_STORE_OPEN_STATUS,
+            "closed_status": config.SIM_STORE_CLOSED_STATUS,
+            "auto_toggle_enabled": config.SIM_AUTO_TOGGLE_STORE_STATUS,
+        },
+        track_order=False,
+    )
+    if not store_status_toggling_enabled():
+        console.print("[dim]store:[/] Store status auto-toggle is disabled.")
+        return None
+    if original_status == config.SIM_STORE_OPEN_STATUS:
+        console.print(
+            f"[dim]store:[/] Store already open for subentity_id={session.store_id}."
+        )
+        return None
+
+    console.print(
+        f"[dim]store:[/] Opening store for simulation "
+        f"(subentity_id={session.store_id}, previous_status={original_status}) ..."
+    )
+    await _patch_store_status(
+        client,
+        session=session,
+        status=config.SIM_STORE_OPEN_STATUS,
+        recorder=recorder,
+        scenario=scenario,
+        action="open_store_for_simulation",
+        step="open_store_status",
+    )
+    console.print(
+        f"[green]store:[/] Store opened for simulation "
+        f"(subentity_id={session.store_id})."
+    )
+    return original_status
+
+
+async def restore_store_status(
+    client: httpx.AsyncClient,
+    *,
+    session: StoreSession,
+    original_status: int | None,
+    recorder: RunRecorder,
+    scenario: str,
+) -> bool:
+    if original_status is None:
+        return False
+    current_status = _status_int(session.subentity.get("status"))
+    if current_status == original_status:
+        return False
+    console.print(
+        f"[dim]store:[/] Restoring store status "
+        f"(subentity_id={session.store_id}, status={original_status}) ..."
+    )
+    await _patch_store_status(
+        client,
+        session=session,
+        status=original_status,
+        recorder=recorder,
+        scenario=scenario,
+        action="restore_store_status",
+        step="restore_store_status",
+    )
+    console.print(
+        f"[green]store:[/] Store status restored "
+        f"(subentity_id={session.store_id}, status={original_status})."
+    )
+    return True
 
 
 async def patch_status(

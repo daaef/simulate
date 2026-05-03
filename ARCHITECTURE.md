@@ -2,12 +2,19 @@
 
 ## Overview
 
-`simulate` now supports two execution styles:
+`simulate` supports two execution styles plus friendly presets:
 
 | Mode | Purpose |
 |---|---|
 | `load` | Randomised multi-actor traffic simulation for churn, failure hunting, and live platform smoke tests |
 | `trace` | Deterministic proof-oriented scenarios for `completed`, `rejected`, `cancelled`, and optional `auto_cancel` |
+
+| Friendly preset | Purpose |
+|---|---|
+| `doctor` | Daily production health check: app probes, store setup/dashboard, menu gates, payments, store actions, robot completion, receipt/review/reorder |
+| `full` | Broadest suite including new-user setup and coupon scenarios |
+| `receipt-review` | Completed order plus receipt, review, and reorder probes |
+| `store-dashboard` | Store orders, statistics, and top-customer probes |
 
 Each simulator is **fully self-contained** — it owns its own auth, data seeding, and
 active websocket connection. There are no shared queues between simulators.
@@ -22,8 +29,14 @@ active websocket connection. There are no shared queues between simulators.
 | `websocket_observer` | Passive user/store/stats socket observation for report validation |
 | `transport` | Masked request/response proof, auth proof, latency capture |
 | `reporting` | `events.json`, `report.md`, and `story.md` artifacts |
+| `run_plan` | JSON run-plan parsing and validation for operator input |
+| `app_probes` | Real-app API probes outside the core order mutation |
+| `post_order_actions` | Receipt, review, and reorder probes after completed orders |
+| `health` | Daily doctor summary, latency, bottleneck, websocket, and issue metrics |
 
 REST remains the control-plane source of truth. Each sim listens on an active websocket for real-time order status changes that drive behaviour. The passive `WebsocketObserver` runs alongside for reporting validation.
+
+Before app-like order scenarios run, the simulator performs the same prerequisite gate the apps do. User auth creates a profile when OTP says `setup_complete=false`; store auth checks `setup`; and store/menu preflight creates or repairs missing store setup, categories, and menu items when `SIM_AUTO_PROVISION_FIXTURES=true`. Targeted negative checks can disable this flag to prove the backend reports missing prerequisites instead of repairing them.
 
 ## Status Ownership
 
@@ -48,6 +61,9 @@ Supported scenarios:
 | `rejected` | Store rejects before payment |
 | `cancelled` | Customer cancels while the order is still pending |
 | `auto_cancel` | Diagnostic check for backend timeout cancellation without store action |
+| `app_bootstrap` | Probe config, product auth, pricing, saved cards, coupons, active user orders |
+| `store_dashboard` | Probe store orders, store statistics, and top customers |
+| `receipt_review_reorder` | Full completed order plus receipt generation, review submission, and reorder fetch |
 
 Timing profiles:
 
@@ -106,6 +122,52 @@ Artifact roles:
 | `report.md` | Technical proof document with scenario verdicts, websocket assertions, developer findings, and full per-step trace |
 | `story.md` | Layman-friendly explanation of what happened and what went wrong |
 
+`report.md` starts with a daily doctor summary before the technical trace:
+
+| Section | Contents |
+|---|---|
+| Daily Doctor Summary | Verdict, duration, scenario/order/API/websocket/issue counts |
+| Graphical Summary | Plain-text bars for quick scanning in any markdown viewer |
+| Bottlenecks | Slowest endpoints grouped by method/path with average, p95, and max latency |
+| Scenario Verdicts | Expected vs actual result per scenario |
+| Websocket Assertions | Expected status messages matched to observed socket traffic |
+| Technical Trace | Full per-event proof with auth fingerprints, payload previews, and latency |
+
+## JSON Run Plan
+
+The public input is a JSON file. `sim_actors.json` remains valid, and richer plans can add GPS to each user:
+
+```json
+{
+  "defaults": {
+    "user_phone": "+2348166675609",
+    "store_id": "FZY_586940",
+    "location_radius": 1,
+    "coupon_id": null
+  },
+  "users": [
+    {
+      "phone": "+2349077777740",
+      "role": "returning",
+      "lat": 35.15494521954757,
+      "lng": 136.9663666561246,
+      "orders": 3
+    }
+  ],
+  "stores": [
+    {
+      "store_id": "FZY_586940",
+      "subentity_id": 6,
+      "currency": "jpy",
+      "lat": 35.15494521954757,
+      "lng": 136.9663666561246
+    }
+  ]
+}
+```
+
+Use `--strict-plan` when operators want the simulator to reject users without GPS coordinates or stores without IDs.
+
 ## CLI
 
 Examples:
@@ -115,6 +177,9 @@ python3 -m simulate --mode load --orders 1 --reject 0
 python3 -m simulate --mode load --continuous --users 5 --interval 20 --reject 0.2
 python3 -m simulate --mode trace --suite core --timing fast
 python3 -m simulate --mode trace --scenario completed --scenario cancelled --timing realistic
+python3 -m simulate doctor --plan sim_actors.json --timing fast
+python3 -m simulate receipt-review --plan sim_actors.json --post-order-actions
+python3 -m simulate store-dashboard --plan sim_actors.json
 ```
 
 ## Required Environment
@@ -141,6 +206,16 @@ SIM_TRACE_SCENARIOS=
 SIM_TIMING_PROFILE=fast
 
 SIM_PAYMENT_MODE=stripe
+SIM_PAYMENT_CASE=paid_no_coupon
+SIM_RUN_APP_PROBES=true
+SIM_RUN_STORE_DASHBOARD_PROBES=true
+SIM_RUN_POST_ORDER_ACTIONS=false
+SIM_STRICT_PLAN=false
+SIM_APP_AUTOPILOT=true
+SIM_AUTO_SELECT_STORE=true
+SIM_AUTO_SELECT_COUPON=true
+SIM_REVIEW_RATING=4
+SIM_REVIEW_COMMENT=Simulator review
 STRIPE_SECRET_KEY=
 STRIPE_TEST_PAYMENT_METHOD=pm_card_visa
 SIM_SAVE_CARD=false
@@ -165,6 +240,10 @@ SIM_WEBSOCKET_DRAIN_SECONDS=3
 SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS=20
 ```
 
+`SIM_LAT` and `SIM_LNG` are user delivery coordinates for `/v1/entities/locations/<lng>/<lat>/`. Store coordinates from the run plan are store metadata only and must not overwrite delivery-location search coordinates.
+
+`SIM_APP_AUTOPILOT=true` is the default operator mode. It lets doctor/trace flows behave like the apps: when no store is explicit, startup can try planned stores until one serves the selected user/location, and coupon scenarios can fetch/select a valid coupon automatically.
+
 ## Verification
 
 Static verification:
@@ -182,4 +261,5 @@ python3 -m simulate --mode trace --suite core --timing fast
 python3 -m simulate --mode load --orders 1 --reject 0
 python3 -m simulate --mode load --orders 1 --reject 1
 STRIPE_TEST_PAYMENT_METHOD=pm_card_chargeDeclined python3 -m simulate --mode load --orders 1 --reject 0
+python3 -m simulate doctor --plan sim_actors.json --timing fast
 ```

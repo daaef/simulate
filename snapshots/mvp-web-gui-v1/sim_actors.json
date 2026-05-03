@@ -1,0 +1,95 @@
+{
+  "defaults": {
+    "user_phone": "+2348166675609",
+    "new_user_phone": "+2347030766794",
+    "store_id": "FZY_586940",
+    "location_radius": 1,
+    "coupon_id": null
+  },
+  "users": [
+    {
+      "phone": "+2349077777740",
+      "role": "returning"
+    },
+    {
+      "phone": "+91636738389",
+      "role": "returning"
+    },
+    {
+      "phone": "+815683826552",
+      "role": "returning"
+    },
+    {
+      "phone": "+819081811938",
+      "role": "returning"
+    },
+    {
+      "phone": "+2348167147819",
+      "role": "returning"
+    },
+    {
+      "phone": "+447427199958",
+      "role": "returning"
+    },
+    {
+      "phone": "+3289403343",
+      "role": "returning"
+    },
+    {
+      "phone": "+2348166675609",
+      "role": "returning_default"
+    },
+    {
+      "phone": "+2348102894804",
+      "role": "returning"
+    },
+    {
+      "phone": "+819081811939",
+      "role": "returning"
+    },
+    {
+      "phone": "+234852142555",
+      "role": "returning"
+    },
+    {
+      "phone": "+2349095355158",
+      "role": "returning"
+    },
+    {
+      "phone": "+2347030766794",
+      "role": "new_user"
+    }
+  ],
+  "stores": [
+    {
+      "store_id": "FZY_926025",
+      "subentity_id": 7,
+      "name": "Ask Me Restaurant Jos",
+      "branch": "Ask me restaurant",
+      "currency": "jpy",
+      "status": 1,
+      "lat": 9.909435720196303,
+      "lng": 8.891228847205639
+    },
+    {
+      "store_id": "FZY_586940",
+      "subentity_id": 6,
+      "name": "Premium Cafe JP",
+      "branch": "Premium Cafe JP",
+      "currency": "jpy",
+      "status": 1,
+      "lat": 35.15494521954757,
+      "lng": 136.9663666561246
+    },
+    {
+      "store_id": "FZY_604840",
+      "subentity_id": 1,
+      "name": "Fainzy Cafe JP - Family Mart IB \u30d5\u30a1\u30df\u30ea\u30fc\u30de\u30fc\u30c8\u540d\u53e4\u5c4b\u5927\u5b66\uff29\uff22\u9928\u5e97",
+      "branch": "IB \u540d\u53e4\u5c4b\u5927\u5b66\uff29\uff22\u652f\u5e97",
+      "currency": "jpy",
+      "status": 1,
+      "lat": 0.0,
+      "lng": 0.0
+    }
+  ]
+}
