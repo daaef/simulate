@@ -21,9 +21,9 @@ JWT_ALGORITHM = "HS256"
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = 7
 
-ALLOWED_ROLES = {"admin", "operator", "runner", "viewer"}
-MUTATING_ROLES = {"admin", "operator", "runner"}
-DELETING_ROLES = {"admin", "operator"}
+ALLOWED_ROLES = {"admin", "user", "operator", "runner", "viewer"}
+MUTATING_ROLES = {"admin", "user", "operator", "runner"}
+DELETING_ROLES = {"admin", "user", "operator"}
 
 if SIM_ENV in {"production", "prod"} and not JWT_SECRET_KEY:
     raise RuntimeError("JWT_SECRET_KEY is required when SIM_ENV=production.")
@@ -182,7 +182,7 @@ class AuthManager:
                     cursor.execute(
                         """
                         INSERT INTO users (username, email, password_hash, role)
-                        VALUES (%s, %s, %s, 'operator')
+                        VALUES (%s, %s, %s, 'user')
                         RETURNING id, username, email, role, created_at
                         """,
                         (user_data.username, user_data.email, password_hash)

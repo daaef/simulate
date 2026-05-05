@@ -80,8 +80,8 @@ if AUTH_IMPORT_ERROR is not None and not AUTH_DISABLED:
     ) from AUTH_IMPORT_ERROR
 
 ALLOWED_ROLES = {"admin", "operator", "runner", "viewer"}
-RUN_CREATE_ROLES = {"admin", "operator", "runner"}
-RUN_DELETE_ROLES = {"admin", "operator"}
+RUN_CREATE_ROLES = {"admin", "user", "operator", "runner"}
+RUN_DELETE_ROLES = {"admin", "user", "operator"}
 ADMIN_ROLES = {"admin"}
 
 SIMULATOR_WORKDIR = os.getenv("SIMULATOR_WORKDIR", "/workspace")
