@@ -278,3 +278,73 @@ Run `python3 -m simulate full --plan sim_actors.json --timing fast` to confirm t
 ## Next Immediate Task
 
 Continue remaining platform features: profile/schedule CRUD and auth/alert/deployment hardening phases.
+
+### Phase 16: Contract-Driven Runtime/Docs Sync
+
+- [ ] Define and add canonical simulator contract file
+  - Dependency: Phase 15 baseline and current flow/flag behavior.
+  - Notes: Create `docs/contract/simulator_contract.yaml` with flow mappings, flag constraints, fallback/selection policy, and known failure signatures.
+  - Completion evidence: Contract file added and schema validation test passes.
+
+- [ ] Implement contract loader and runtime parity checks
+  - Dependency: Contract file exists.
+  - Notes: Add typed loader module and tests that assert contract entries match runtime mappings in CLI/API.
+  - Completion evidence: New `tests/test_contract_runtime.py` green.
+
+- [ ] Replace hardcoded command-guide data with contract-derived data
+  - Dependency: Contract loader implemented.
+  - Notes: Remove duplicated flow/flag matrices from frontend source and source it from backend contract endpoint or generated TS artifact.
+  - Completion evidence: GUI guide renders unchanged content sourced from contract data.
+
+- [ ] Generate operator/developer docs from contract
+  - Dependency: Contract schema finalized.
+  - Notes: Add `scripts/generate_simulator_docs.py` to render sections for `SIMULATOR_GUIDE.md` and `docs/reference/simulator_runtime_reference.md`.
+  - Completion evidence: Generated docs include flow matrix, command patterns, flags, combo rules, and selection policy.
+
+- [ ] Add release drift gate
+  - Dependency: Doc generation path implemented.
+### Phase 17: Auth + UI Reliability Check (2026-05-05)
+
+- [x] Validate auth endpoint request contracts used by GUI
+  - Dependency: Existing auth API routes and AuthContext client calls.
+  - Notes: Confirmed mismatch on `refresh/logout/reset-password` (frontend sends JSON body, backend expected query params) and fixed backend models to accept JSON payload.
+  - Completion evidence: `api/app/main.py` adds `RefreshTokenRequest` and `ResetPasswordRequest`, endpoints now parse body payloads.
+
+- [x] Fix optional-auth behavior for non-admin dashboard endpoints
+  - Dependency: Auth dependency wiring.
+  - Notes: `HTTPBearer` default `auto_error=True` blocked unauthenticated `/runs` requests; changed to `auto_error=False` and enforced explicit required-auth checks in `get_current_user`.
+  - Completion evidence: `/api/v1/runs` now responds without bearer token where optional auth is intended.
+
+- [x] Fix JWT verification and admin user update bugs in auth manager
+  - Dependency: `api/auth.py` token and DB helpers.
+  - Notes: Replaced invalid `jwt.JWTError` catch with `jwt.PyJWTError`; fixed `update_user` to use `DictCursor` so dict conversion is valid.
+  - Completion evidence: `api/auth.py` patched and API logs no longer show handler errors for invalid-token paths.
+
+- [x] Fix UI-side auth guard DOM side effect
+  - Dependency: Web auth guard component.
+  - Notes: Removed module-scope `document` usage and moved style injection into `useEffect` with cleanup.
+  - Completion evidence: `web/src/components/AuthGuard.tsx` patched; web build passes.
+
+- [x] Rebuild and verify containerized stack
+  - Dependency: Backend/frontend code fixes.
+  - Notes: Rebuilt `api/web/nginx` and ran auth/API smoke checks.
+  - Completion evidence: `docker compose up -d --build api web nginx`; curl checks show correct status semantics (`401` for invalid login/refresh, `200` on `/healthz`, `200` on unauthenticated `/api/v1/runs` optional path).
+
+### Phase 18: Enhanced Identity Logging & Debugging (2026-05-05)
+
+- [~] Ensure complete store and phone information in logs and GUI
+  - Dependency: Phase 15.
+  - Notes: Capture names and full phone numbers via JSON markers and expanded DB schema.
+  - Completion evidence: Web GUI shows names and full phones in "Recent Runs".
+- [x] Fix `NameError: name 'console' is not defined` in `reporting.py`
+  - Dependency: Initial Phase 18 changes.
+  - Notes: Imported/defined `console` in `reporting.py`.
+  - Completion evidence: `python3 -m py_compile reporting.py` passes and user reported crash is resolved.
+- [ ] Verify complete identity capture in web dashboard
+  - Dependency: Implementation and fix.
+  - Notes: Run a doctor simulation and check dashboard.
+  - Completion evidence: Run details show full identity.
+
+## Next Immediate Task
+
+Fix `NameError: name 'console' is not defined` in `reporting.py`.

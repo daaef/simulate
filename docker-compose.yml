@@ -1,4 +1,23 @@
 services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: simulator
+      POSTGRES_USER: simulator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-simulator123}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./api/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U simulator -d simulator"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -6,11 +25,23 @@ services:
     environment:
       SIMULATOR_WORKDIR: /workspace
       SIMULATOR_PROJECT_DIR: /workspace/simulate
+      # PostgreSQL connection
+      DATABASE_URL: postgresql://simulator:${POSTGRES_PASSWORD:-simulator123}@postgres:5432/simulator
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: simulator
+      POSTGRES_USER: simulator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-simulator123}
+      # Legacy SQLite fallback
       RUN_DB_PATH: /workspace/simulate/runs/web-gui.sqlite
       RUN_LOG_DIR: /workspace/simulate/runs/web-gui
       WEB_CORS_ORIGINS: "*"
     volumes:
       - ./:/workspace/simulate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
   web:
     build:
@@ -21,6 +52,7 @@ services:
     volumes:
       - ./web:/app
       - /app/node_modules
+    restart: unless-stopped
 
   nginx:
     image: nginx:1.27-alpine
@@ -31,4 +63,8 @@ services:
       - "8080:80"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
 

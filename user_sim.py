@@ -330,12 +330,23 @@ async def bootstrap_auth(
                 console.print(
                     f"[green]user:[/] Reusing cached user token for user_id={config.USER_ID}."
                 )
-                return UserSession(
+                session = UserSession(
                     token=config.USER_LASTMILE_TOKEN,
                     user_id=config.USER_ID,
                     user={"id": config.USER_ID},
                     token_source="user_cached_token",
                 )
+                # Fetch complete profile to ensure we have name and phone
+                try:
+                    profile = await fetch_user_profile(
+                        client, token=session.token, recorder=recorder, scenario=scenario
+                    )
+                    if profile:
+                        session.user.update(profile)
+                except Exception as exc:
+                    console.print(f"[yellow]user:[/] Profile fetch failed for cached token: {exc}")
+                
+                return session
             except HttpApiError as exc:
                 if exc.status_code in {401, 403}:
                     console.print(
@@ -434,6 +445,39 @@ async def bootstrap_auth(
 # Seeding helpers
 # ---------------------------------------------------------------------------
 
+async def fetch_user_profile(
+    client: httpx.AsyncClient,
+    *,
+    token: str,
+    recorder: RunRecorder | None = None,
+    scenario: str | None = None,
+) -> dict[str, Any]:
+    """Fetch the complete user profile from the backend."""
+    payload = await _auth_request(
+        client,
+        recorder=recorder,
+        actor="user",
+        action="fetch_user_profile",
+        method="GET",
+        url=f"{config.LASTMILE_BASE_URL}/v1/auth/users/auth/",
+        endpoint="/v1/auth/users/auth/",
+        scenario=scenario,
+        step="auth_fetch_user_profile",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Token {token}",
+        },
+        auth_header_name="Authorization",
+        auth_token=token,
+        auth_source="user_cached_token",
+        auth_scheme="Token",
+    )
+    data = api_data(payload)
+    if isinstance(data, dict):
+        return data.get("user") or data
+    return {}
+
+
 @dataclass(frozen=True)
 class UserFixtures:
     user_id: int
@@ -441,6 +485,7 @@ class UserFixtures:
     location: dict[str, Any]
     menu_items: list[dict[str, Any]]
     currency: str
+    user: dict[str, Any] | None = None
 
 
 def _as_float(value: Any) -> float | None:
@@ -730,6 +775,7 @@ async def bootstrap_fixtures(
         location=location,
         menu_items=usable_menu,
         currency=currency,
+        user=session.user,
     )
 
 

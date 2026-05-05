@@ -1334,3 +1334,101 @@ curl -sS -i http://localhost:8080/api/v1/flows
 
 1. Keep using `docker compose restart nginx` after Nginx config updates.
 2. Continue simulator GUI feature work.
+
+## 2026-05-03 12:50
+
+### Summary
+
+Committed all current repository changes as requested, then created a concrete follow-on implementation plan for contract-driven runtime/docs synchronization. Added a new plan section and a new tracker phase defining deliverables for a single source-of-truth contract, generated guides, parity tests, and release drift checks.
+
+### Files Created / Modified
+
+- `implementation/tracker/implementation_plan.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+git status --short
+git add -A
+git commit -m "feat: upgrade simulator flows, reporting, and web control plane"
+```
+
+### Results
+
+- Commit created: `5f0ceb6` with all current workspace changes.
+- New Phase 16 plan is now tracked and ready for execution.
+
+### Issues / Blockers
+
+- None.
+
+### Next Steps
+
+1. Define `simulator_contract.yaml` schema.
+2. Implement contract loader + schema/parity tests.
+
+## 2026-05-05 07:10
+
+### Summary
+
+Performed a focused auth-system and UI reliability check, then patched concrete contract bugs between GUI and API. The main fixes were request-shape compatibility for auth routes, optional-auth behavior for run listing, JWT exception handling correctness, and a client-side DOM side-effect bug in `AuthGuard`.
+
+### Files Created / Modified
+
+- `api/app/main.py`
+- `api/auth.py`
+- `web/src/components/AuthGuard.tsx`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+docker compose up -d --build api web nginx
+docker compose exec api python -m unittest discover -s tests
+docker compose exec web npm run build
+docker compose exec api python -m py_compile api/app/main.py api/auth.py
+curl -sS -i http://127.0.0.1:8080/healthz
+curl -sS -i -X POST http://127.0.0.1:8080/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"demo","password":"demo"}'
+curl -sS -i -X POST http://127.0.0.1:8080/api/v1/auth/refresh -H 'Content-Type: application/json' -d '{"refresh_token":"demo"}'
+curl -sS -i 'http://127.0.0.1:8080/api/v1/runs?limit=5&offset=0'
+curl -sS -i -X POST http://127.0.0.1:8080/api/v1/admin/users/1/reset-password -H 'Content-Type: application/json' -d '{"new_password":"abc12345"}'
+```
+
+### Results
+
+- Auth request payloads now match UI behavior for refresh/logout/reset-password.
+- Optional-auth endpoints no longer fail with `403 Not authenticated` when no bearer token is provided.
+- JWT verification now uses valid PyJWT exception hierarchy.
+- AuthGuard no longer uses `document` at module load; style injection is lifecycle-safe.
+- Containerized stack rebuild succeeded and API/web smoke checks returned expected status codes.
+
+### Issues / Blockers
+
+- `git diff --check` reports pre-existing trailing whitespace in several files outside this focused fix scope.
+
+### Next Steps
+
+1. If you want strict cleanup, run a targeted whitespace normalization pass on touched files before the next commit.
+2. Continue with the broader contract-driven docs/runtime sync phase.
+## 2026-05-05 09:57
+
+### Summary
+Fixed `NameError: name 'console' is not defined` in `reporting.py` by adding the missing import and initialization. This regression was introduced during the identity logging implementation.
+
+### Files Created / Modified
+- `reporting.py`
+
+### Tests / Commands Run
+```bash
+python3 -m py_compile reporting.py user_sim.py api/app/main.py
+```
+
+### Results
+- Compile check passed.
+- No more NameError in `reporting.py`.
+
+### Next Steps
+1. Verify complete identity capture in web dashboard by running a live simulation.

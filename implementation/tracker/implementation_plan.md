@@ -137,3 +137,90 @@ Recommended stack (best long-term fit here):
 - [ ] Retention and backup strategy is implemented and documented.
 - [ ] The solution passes end-to-end validation against at least one real doctor run.
 - [ ] Local PC bring-up requires only `docker compose up` with no Redis/Celery dependency.
+
+## Follow-on Initiative: Contract-Driven Runtime + Docs
+
+### Goal
+
+Eliminate drift between simulator behavior and guide documents by making one contract file the source of truth for flow semantics, default/fallback selection rules, flag constraints, and command mapping.
+
+### Target Behavior
+
+- CLI, web run builder, and published guide all derive from the same contract.
+- Behavior for blank `--store`/`--phone` is explicit and tested by mode.
+- Release verification fails when generated docs and runtime mappings diverge.
+
+### Proposed Design
+
+1. Add `docs/contract/simulator_contract.yaml` with:
+   - flow presets and resolved mode/suite/scenarios,
+   - supported flags and incompatibility rules,
+   - actor-selection policy by mode (`trace` deterministic, `load` optional random/round-robin strategy),
+   - artifact expectations and failure signature mappings.
+2. Add a lightweight contract loader module used by:
+   - CLI flow/flag validation path,
+   - web `Flow Planner & Command Guide` renderer,
+   - docs generation script.
+3. Generate guide sections from contract into:
+   - `SIMULATOR_GUIDE.md` (operator-focused),
+   - `docs/reference/simulator_runtime_reference.md` (developer-focused).
+4. Add guardrail tests:
+   - contract schema validation,
+   - contract-to-runtime mapping parity,
+   - selection behavior tests for no-phone/no-store paths by mode.
+5. Add release verification target:
+   - `make verify` runs backend tests, frontend type/build checks, contract doc generation, and fails on dirty git state.
+
+### Files to Add / Modify
+
+| File | Purpose of Change |
+|---|---|
+| `docs/contract/simulator_contract.yaml` | Canonical runtime/docs contract |
+| `docs/reference/simulator_runtime_reference.md` | Generated/derived developer reference |
+| `SIMULATOR_GUIDE.md` | Generated/updated operator guide sections |
+| `scripts/generate_simulator_docs.py` | Contract-to-doc generator |
+| `contract_runtime.py` (new module) | Contract parser + typed access helpers |
+| `__main__.py` | Consume contract mappings for flow/flag semantics |
+| `api/app/main.py` | Optional contract-driven guide endpoint payloads |
+| `web/src/lib/command-guide.ts` | Replace hardcoded guide data with contract-derived API data |
+| `tests/test_contract_runtime.py` | Contract schema/parity/selection tests |
+| `Makefile` | Add `verify` target including drift check |
+
+### Acceptance Criteria (Follow-on)
+
+- [ ] One contract file defines flows/flags/selection policy and validates in CI.
+- [ ] `SIMULATOR_GUIDE.md` and GUI guide sections are generated from contract data.
+- [ ] Trace mode default actor selection remains deterministic and explicitly documented.
+- [ ] Load mode selection policy is configurable and explicitly documented (deterministic/round-robin/random strategy).
+- [ ] `make verify` fails on docs/runtime drift.
+
+## Follow-on Initiative: Enhanced Identity Logging & Reliability (2026-05-05)
+
+### Goal
+Ensure that simulation run history and reports consistently capture complete identity information (names, phone numbers) for stores and users, and fix any regressions or bugs introduced during this process.
+
+### Target Behavior
+- Web GUI displays full store and user names and phone numbers in the "Recent Runs" table.
+- Simulation runs are reliable and do not crash with `NameError` or other basic regressions.
+- Complete identity markers are emitted in logs for API consumption.
+
+### Proposed Design
+1. Update `user_sim.py` to fetch full user profiles.
+2. Update `reporting.py` to propagate and log full identity snapshots in JSON.
+3. Update `api/app/main.py` to parse JSON markers and migrate database schema.
+4. Update web frontend to display enriched metadata.
+5. Fix `NameError: name 'console' is not defined` in `reporting.py`.
+
+### Files to Modify
+| File | Purpose of Change |
+|---|---|
+| `reporting.py` | Add console identity logging and fix NameError |
+| `user_sim.py` | Fetch full user profiles |
+| `api/app/main.py` | Expand schema and update parser |
+| `web/src/lib/api.ts` | Update RunRow types |
+| `web/src/app/page.tsx` | Update dashboard table |
+
+### Acceptance Criteria
+- [ ] Simulation runs successfully without crashing.
+- [ ] Web GUI shows full names and phone numbers for both user and store.
+- [ ] Database schema is correctly migrated.

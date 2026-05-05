@@ -10,11 +10,15 @@ import time
 from typing import Any, TYPE_CHECKING
 
 import config
+from rich.console import Console
 from health import ascii_bar, build_health_summary
 from interaction_catalog import catalogue_payload
 
 if TYPE_CHECKING:
     import user_sim
+
+
+console = Console()
 
 
 def _utc_now() -> str:
@@ -184,11 +188,15 @@ class RunRecorder:
         self.config_snapshot["store_id"] = fixtures.store.get("id")
         self.config_snapshot["subentity_id"] = config.SUBENTITY_ID
         self.config_snapshot["location_id"] = fixtures.location.get("id")
-        self.set_user_identity(user_id=fixtures.user_id)
+        self.set_user_identity(
+            user_id=fixtures.user_id,
+            raw_user=fixtures.user,
+        )
         self.set_store_identity(
             subentity_id=fixtures.store.get("id"),
             name=fixtures.store.get("name"),
             branch=fixtures.store.get("branch"),
+            raw_store=fixtures.store,
         )
         self.fixtures_summary = {
             "user_id": fixtures.user_id,
@@ -209,6 +217,17 @@ class RunRecorder:
             "menu_items_available": len(fixtures.menu_items),
             "currency": fixtures.currency,
         }
+        
+        # Emit identity marker for web-gui parsing
+        identity_snapshot = {
+            "user_phone": self.identity_context.get("user", {}).get("phone", ""),
+            "store_phone": self.identity_context.get("store", {}).get("phone", ""),
+            "user_name": self.identity_context.get("user", {}).get("name", ""),
+            "store_name": self.identity_context.get("store", {}).get("name", ""),
+        }
+        console.print(
+            f"[dim]main:[/] identity_context: {json.dumps(identity_snapshot)}"
+        )
 
     def set_user_identity(
         self,
