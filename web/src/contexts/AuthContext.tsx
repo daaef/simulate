@@ -60,19 +60,17 @@ const LOCAL_DEV_USER: User = {
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-const [user, setUser] = useState<User | null>(AUTH_DISABLED ? LOCAL_DEV_USER : null);
-const [isLoading, setIsLoading] = useState(!AUTH_DISABLED);
+  const [user, setUser] = useState<User | null>(AUTH_DISABLED ? LOCAL_DEV_USER : null);
+  const [isLoading, setIsLoading] = useState(!AUTH_DISABLED);
 
-// Check for existing auth on mount
+  // Check for existing auth on mount
   useEffect(() => {
     const initAuth = async () => {
       try {
-        const authDisabled = process.env.NEXT_PUBLIC_SIM_AUTH_DISABLED === "true";
-
         if (AUTH_DISABLED) {
-            localStorage.setItem(USER_KEY, JSON.stringify(LOCAL_DEV_USER));
-            return;
-          }
+          localStorage.setItem(USER_KEY, JSON.stringify(LOCAL_DEV_USER));
+          return;
+        }
 
         const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
         const userData = localStorage.getItem(USER_KEY);
