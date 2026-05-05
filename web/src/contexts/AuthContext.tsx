@@ -52,28 +52,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Check for existing auth on mount
+// Check for existing auth on mount
   useEffect(() => {
     const initAuth = async () => {
-      const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-      const userData = localStorage.getItem(USER_KEY);
+      try {
+        const authDisabled = process.env.NEXT_PUBLIC_SIM_AUTH_DISABLED === "true";
 
-      if (accessToken && userData) {
-        try {
-          const parsedUser = JSON.parse(userData);
-          setUser(parsedUser);
-          
-          // Check if token needs refresh
-          const tokenPayload = parseJWT(accessToken);
-          if (tokenPayload && isTokenExpired(tokenPayload)) {
-            await refreshToken();
-          }
-        } catch (error) {
-          console.error('Failed to parse stored user data:', error);
-          clearTokens();
+        if (authDisabled) {
+          const localDevUser: User = {
+            id: 0,
+            username: "local-dev",
+            email: "local-dev@simulator.local",
+            role: "admin",
+            created_at: new Date().toISOString(),
+            preferences: {},
+          };
+
+          setUser(localDevUser);
+          localStorage.setItem(USER_KEY, JSON.stringify(localDevUser));
+          return;
         }
+
+        const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+        const userData = localStorage.getItem(USER_KEY);
+
+        if (accessToken && userData) {
+          try {
+            const parsedUser = JSON.parse(userData);
+            setUser(parsedUser);
+
+            const tokenPayload = parseJWT(accessToken);
+            if (tokenPayload && isTokenExpired(tokenPayload)) {
+              await refreshToken();
+            }
+          } catch (error) {
+            console.error("Failed to parse stored user data:", error);
+            clearTokens();
+          }
+        }
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
 
     initAuth();

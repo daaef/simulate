@@ -50,6 +50,7 @@ services:
       dockerfile: web/Dockerfile
     environment:
       NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_SIM_AUTH_DISABLED: ${SIM_AUTH_DISABLED:-true}
     volumes:
       - ./web:/app
       - /app/node_modules
