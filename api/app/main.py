@@ -79,7 +79,7 @@ if AUTH_IMPORT_ERROR is not None and not AUTH_DISABLED:
         "Set SIM_AUTH_DISABLED=true only for local development."
     ) from AUTH_IMPORT_ERROR
 
-ALLOWED_ROLES = {"admin", "operator", "runner", "viewer"}
+ALLOWED_ROLES = {"admin", "user", "operator", "runner", "viewer"}
 RUN_CREATE_ROLES = {"admin", "user", "operator", "runner"}
 RUN_DELETE_ROLES = {"admin", "user", "operator"}
 ADMIN_ROLES = {"admin"}
