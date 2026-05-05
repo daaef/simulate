@@ -11,7 +11,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, List
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, HTTPException, Query, Request, Depends, Security
@@ -32,23 +32,6 @@ if USE_POSTGRES:
     except ImportError:
         DictCursor = None
 
-# Import authentication module
-try:
-    import sys
-    import os
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from auth import (
-        init_auth, get_auth_manager, UserCreate, UserLogin, TokenResponse, 
-        UserProfile as AuthUserProfile
-    )
-    AUTH_ENABLED = True
-except ImportError as e:
-    AUTH_ENABLED = False
-    logging.warning(f"Auth module not available, running without authentication: {e}")
-
-# JWT Configuration (fallback if auth module not available)
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 15
-
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -59,6 +42,47 @@ def _as_bool(value: str | None, default: bool = False) -> bool:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
+SIM_ENV = os.getenv("SIM_ENV", "development").strip().lower()
+AUTH_DISABLED = _as_bool(os.getenv("SIM_AUTH_DISABLED"), default=False)
+
+try:
+    import sys
+
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from auth import (
+        init_auth,
+        get_auth_manager,
+        UserCreate,
+        UserLogin,
+        TokenResponse,
+        UserProfile as AuthUserProfile,
+    )
+
+    AUTH_IMPORT_ERROR: Exception | None = None
+except ImportError as e:
+    init_auth = None  # type: ignore[assignment]
+    get_auth_manager = None  # type: ignore[assignment]
+    UserCreate = None  # type: ignore[assignment]
+    UserLogin = None  # type: ignore[assignment]
+    TokenResponse = None  # type: ignore[assignment]
+    AuthUserProfile = None  # type: ignore[assignment]
+    AUTH_IMPORT_ERROR = e
+
+AUTH_ENABLED = not AUTH_DISABLED and AUTH_IMPORT_ERROR is None
+
+if AUTH_DISABLED and SIM_ENV in {"production", "prod"}:
+    raise RuntimeError("SIM_AUTH_DISABLED=true is not allowed when SIM_ENV=production.")
+
+if AUTH_IMPORT_ERROR is not None and not AUTH_DISABLED:
+    raise RuntimeError(
+        "Authentication module could not be imported. "
+        "Set SIM_AUTH_DISABLED=true only for local development."
+    ) from AUTH_IMPORT_ERROR
+
+ALLOWED_ROLES = {"admin", "operator", "runner", "viewer"}
+RUN_CREATE_ROLES = {"admin", "operator", "runner"}
+RUN_DELETE_ROLES = {"admin", "operator"}
+ADMIN_ROLES = {"admin"}
 
 SIMULATOR_WORKDIR = os.getenv("SIMULATOR_WORKDIR", "/workspace")
 PROJECT_DIR = os.getenv("SIMULATOR_PROJECT_DIR", "/workspace/simulate")
@@ -185,10 +209,20 @@ class ResetPasswordRequest(BaseModel):
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
 ):
-    """Get current authenticated user"""
+    """Get current authenticated user."""
     if not AUTH_ENABLED:
-        # Return a default user for backward compatibility
-        return {"id": None, "username": "system", "role": "admin"}
+        if AUTH_DISABLED and SIM_ENV not in {"production", "prod"}:
+            return {
+                "id": None,
+                "username": "local-dev",
+                "role": "admin",
+                "is_active": True,
+            }
+
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication is not available.",
+        )
 
     if credentials is None:
         raise HTTPException(
@@ -196,7 +230,7 @@ async def get_current_user(
             detail="Missing authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     auth_manager = get_auth_manager()
     payload = auth_manager.verify_token(credentials.credentials)
     if not payload:
@@ -205,8 +239,24 @@ async def get_current_user(
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    user_id = int(payload.get("sub"))
+
+    raw_user_id = payload.get("sub")
+    if raw_user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token subject.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        user_id = int(raw_user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token subject.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     user = auth_manager.get_user_by_id(user_id)
     if not user:
         raise HTTPException(
@@ -214,19 +264,68 @@ async def get_current_user(
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
+    role = str(user.get("role") or "").strip().lower()
+    if role not in ALLOWED_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Unsupported user role: {role or 'unknown'}",
+        )
+
     return user
 
-async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security)):
-    """Get current user if authenticated, otherwise return None"""
-    if not AUTH_ENABLED or not credentials:
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
+):
+    """Get current user if authenticated, otherwise return None."""
+    if not AUTH_ENABLED:
+        if AUTH_DISABLED and SIM_ENV not in {"production", "prod"}:
+            return {
+                "id": None,
+                "username": "local-dev",
+                "role": "admin",
+                "is_active": True,
+            }
         return None
-    
+
+    if not credentials:
+        return None
+
     try:
         return await get_current_user(credentials)
     except HTTPException:
         return None
 
+def _user_role(user: dict[str, Any] | None) -> str:
+    if not user:
+        return ""
+    return str(user.get("role") or "").strip().lower()
+
+
+def _user_id(user: dict[str, Any] | None) -> int | None:
+    if not user:
+        return None
+    value = user.get("id")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_admin(user: dict[str, Any] | None) -> bool:
+    return _user_role(user) in ADMIN_ROLES
+
+
+def _require_role(user: dict[str, Any], allowed_roles: set[str], action: str) -> None:
+    role = _user_role(user)
+
+    if role not in allowed_roles:
+        raise HTTPException(
+            status_code=403,
+            detail=f"You do not have permission to {action}.",
+        )
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     payload = dict(row)
@@ -401,20 +500,20 @@ class ScheduledRun:
     flow: str
     plan: str
     timing: str
-    store_id: str | None = None
+    store_id: Optional[str] = None
 
 
 class RunCreateRequest(BaseModel):
     flow: str = Field(default="doctor")
     plan: str = Field(default="sim_actors.json")
     timing: Literal["fast", "realistic"] = "fast"
-    mode: Literal["trace", "load"] | None = None
-    store_id: str | None = None
-    phone: str | None = None
+    mode: Optional[Literal["trace", "load"]] = None
+    store_id: Optional[str] = None
+    phone: Optional[str] = None
     all_users: bool = False
     no_auto_provision: bool = False
-    post_order_actions: bool | None = None
-    extra_args: list[str] = Field(default_factory=list)
+    post_order_actions: Optional[bool] = None
+    extra_args: List[str] = Field(default_factory=list)
 
 
 def _build_command(request: RunCreateRequest) -> list[str]:

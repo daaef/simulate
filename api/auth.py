@@ -15,10 +15,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 # JWT Configuration
-JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
-JWT_ALGORITHM = 'HS256'
+SIM_ENV = os.getenv("SIM_ENV", "development").strip().lower()
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "").strip()
+JWT_ALGORITHM = "HS256"
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = 7
+
+ALLOWED_ROLES = {"admin", "operator", "runner", "viewer"}
+MUTATING_ROLES = {"admin", "operator", "runner"}
+DELETING_ROLES = {"admin", "operator"}
+
+if SIM_ENV in {"production", "prod"} and not JWT_SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY is required when SIM_ENV=production.")
+
+if SIM_ENV in {"production", "prod"} and JWT_SECRET_KEY in {
+    "your-secret-key-change-in-production",
+    "dev-only-change-me",
+}:
+    raise RuntimeError("JWT_SECRET_KEY must be changed before production use.")
 
 # Pydantic models for authentication
 class UserCreate(BaseModel):
@@ -168,7 +182,7 @@ class AuthManager:
                     cursor.execute(
                         """
                         INSERT INTO users (username, email, password_hash, role)
-                        VALUES (%s, %s, %s, 'user')
+                        VALUES (%s, %s, %s, 'operator')
                         RETURNING id, username, email, role, created_at
                         """,
                         (user_data.username, user_data.email, password_hash)
@@ -319,9 +333,17 @@ class AuthManager:
                     values = []
                     
                     for field in ['username', 'email', 'role', 'is_active']:
-                        if field in user_data:
-                            update_fields.append(f"{field} = %s")
-                            values.append(user_data[field])
+                        if field not in user_data:
+                            continue
+
+                        if field == "role":
+                            role = str(user_data[field]).strip().lower()
+                            if role not in ALLOWED_ROLES:
+                                raise ValueError(f"Unsupported role: {role}")
+                            user_data[field] = role
+
+                        update_fields.append(f"{field} = %s")
+                        values.append(user_data[field])
                     
                     if not update_fields:
                         raise ValueError("No valid fields to update")

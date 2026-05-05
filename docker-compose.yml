@@ -25,14 +25,15 @@ services:
     environment:
       SIMULATOR_WORKDIR: /workspace
       SIMULATOR_PROJECT_DIR: /workspace/simulate
-      # PostgreSQL connection
+      SIM_ENV: ${SIM_ENV:-development}
+      SIM_AUTH_DISABLED: ${SIM_AUTH_DISABLED:-false}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-change-me}
       DATABASE_URL: postgresql://simulator:${POSTGRES_PASSWORD:-simulator123}@postgres:5432/simulator
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: simulator
       POSTGRES_USER: simulator
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-simulator123}
-      # Legacy SQLite fallback
       RUN_DB_PATH: /workspace/simulate/runs/web-gui.sqlite
       RUN_LOG_DIR: /workspace/simulate/runs/web-gui
       WEB_CORS_ORIGINS: "*"
