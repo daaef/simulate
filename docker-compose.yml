@@ -26,7 +26,7 @@ services:
       SIMULATOR_WORKDIR: /workspace
       SIMULATOR_PROJECT_DIR: /workspace/simulate
       SIM_ENV: ${SIM_ENV:-development}
-      SIM_AUTH_DISABLED: ${SIM_AUTH_DISABLED:-true}
+      SIM_AUTH_DISABLED: ${SIM_AUTH_DISABLED:-false}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-change-me}
       DATABASE_URL: postgresql://simulator:${POSTGRES_PASSWORD:-simulator123}@postgres:5432/simulator
       POSTGRES_HOST: postgres
@@ -50,7 +50,7 @@ services:
       dockerfile: web/Dockerfile
     environment:
       NEXT_TELEMETRY_DISABLED: "1"
-      NEXT_PUBLIC_SIM_AUTH_DISABLED: ${SIM_AUTH_DISABLED:-true}
+      NEXT_PUBLIC_SIM_AUTH_DISABLED: ${SIM_AUTH_DISABLED:-false}
     volumes:
       - ./web:/app
       - /app/node_modules

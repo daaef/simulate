@@ -1,8 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
 
-// Types for authentication
 export interface User {
   id: number;
   username: string;
@@ -43,81 +42,37 @@ export interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Storage keys
-const ACCESS_TOKEN_KEY = 'simulator_access_token';
-const REFRESH_TOKEN_KEY = 'simulator_refresh_token';
-const USER_KEY = 'simulator_user';
+const ACCESS_TOKEN_KEY = "simulator_access_token";
+const REFRESH_TOKEN_KEY = "simulator_refresh_token";
+const USER_KEY = "simulator_user";
 
-const AUTH_DISABLED = process.env.NEXT_PUBLIC_SIM_AUTH_DISABLED === "true";
+function parseJWT(token: string) {
+  try {
+    const base64Url = token.split(".")[1];
+    if (!base64Url) return null;
 
-const LOCAL_DEV_USER: User = {
-  id: 0,
-  username: "local-dev",
-  email: "local-dev@simulator.local",
-  role: "admin",
-  created_at: new Date().toISOString(),
-  preferences: {},
-};
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => `%${`00${c.charCodeAt(0).toString(16)}`.slice(-2)}`)
+        .join("")
+    );
+
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+}
+
+function isTokenExpired(payload: any) {
+  if (!payload?.exp) return false;
+  return Date.now() >= payload.exp * 1000;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(AUTH_DISABLED ? LOCAL_DEV_USER : null);
-  const [isLoading, setIsLoading] = useState(!AUTH_DISABLED);
-
-  // Check for existing auth on mount
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (AUTH_DISABLED) {
-          localStorage.setItem(USER_KEY, JSON.stringify(LOCAL_DEV_USER));
-          return;
-        }
-
-        const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-        const userData = localStorage.getItem(USER_KEY);
-
-        if (accessToken && userData) {
-          try {
-            const parsedUser = JSON.parse(userData);
-            setUser(parsedUser);
-
-            const tokenPayload = parseJWT(accessToken);
-            if (tokenPayload && isTokenExpired(tokenPayload)) {
-              await refreshToken();
-            }
-          } catch (error) {
-            console.error("Failed to parse stored user data:", error);
-            clearTokens();
-          }
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    initAuth();
-  }, []);
-
-  const parseJWT = (token: string) => {
-    try {
-      const base64Url = token.split('.')[1];
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const jsonPayload = decodeURIComponent(
-        atob(base64)
-          .split('')
-          .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('')
-      );
-      return JSON.parse(jsonPayload);
-    } catch (error) {
-      console.error('Failed to parse JWT:', error);
-      return null;
-    }
-  };
-
-  const isTokenExpired = (payload: any) => {
-    if (!payload.exp) return false;
-    return Date.now() >= payload.exp * 1000;
-  };
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const setTokens = (tokenResponse: TokenResponse, userData: User) => {
     localStorage.setItem(ACCESS_TOKEN_KEY, tokenResponse.access_token);
@@ -133,48 +88,106 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const refreshToken = async () => {
+    const storedRefreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+
+    if (!storedRefreshToken) {
+      clearTokens();
+      return;
+    }
+
+    const response = await fetch("/api/v1/auth/refresh", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refresh_token: storedRefreshToken }),
+    });
+
+    if (!response.ok) {
+      clearTokens();
+      return;
+    }
+
+    const tokenResponse: TokenResponse = await response.json();
+
+    const userResponse = await fetch("/api/v1/auth/me", {
+      headers: {
+        Authorization: `Bearer ${tokenResponse.access_token}`,
+      },
+    });
+
+    if (!userResponse.ok) {
+      clearTokens();
+      return;
+    }
+
+    const userData: User = await userResponse.json();
+    setTokens(tokenResponse, userData);
+  };
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+        const userData = localStorage.getItem(USER_KEY);
+
+        if (!accessToken || !userData) {
+          clearTokens();
+          return;
+        }
+
+        const tokenPayload = parseJWT(accessToken);
+
+        if (tokenPayload && isTokenExpired(tokenPayload)) {
+          await refreshToken();
+          return;
+        }
+
+        const parsedUser = JSON.parse(userData);
+        setUser(parsedUser);
+      } catch (error) {
+        console.error("Auth bootstrap failed:", error);
+        clearTokens();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initAuth();
+  }, []);
+
   const login = async (credentials: LoginCredentials) => {
     setIsLoading(true);
+
     try {
-      const response = await fetch('/api/v1/auth/login', {
-        method: 'POST',
+      const response = await fetch("/api/v1/auth/login", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify(credentials),
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Login failed');
+        const error = await response.json().catch(() => null);
+        throw new Error(error?.detail || "Login failed");
       }
 
       const tokenResponse: TokenResponse = await response.json();
-      
-      // Get user profile
-      const userResponse = await fetch('/api/v1/auth/me', {
+
+      const userResponse = await fetch("/api/v1/auth/me", {
         headers: {
-          'Authorization': `Bearer ${tokenResponse.access_token}`,
+          Authorization: `Bearer ${tokenResponse.access_token}`,
         },
       });
 
-      if (userResponse.ok) {
-        const userData = await userResponse.json();
-        setTokens(tokenResponse, userData);
-      } else {
-        // Fallback for backward compatibility
-        const fallbackUser: User = {
-          id: 0,
-          username: credentials.username,
-          role: 'user',
-          created_at: new Date().toISOString(),
-          preferences: {},
-        };
-        setTokens(tokenResponse, fallbackUser);
+      if (!userResponse.ok) {
+        throw new Error("Failed to load user profile");
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      throw error;
+
+      const userData: User = await userResponse.json();
+      setTokens(tokenResponse, userData);
     } finally {
       setIsLoading(false);
     }
@@ -182,86 +195,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (userData: RegisterData) => {
     setIsLoading(true);
+
     try {
-      const response = await fetch('/api/v1/auth/register', {
-        method: 'POST',
+      const response = await fetch("/api/v1/auth/register", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify(userData),
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Registration failed');
+        const error = await response.json().catch(() => null);
+        throw new Error(error?.detail || "Registration failed");
       }
 
-      // Auto-login after registration
       await login({
         username: userData.username,
         password: userData.password,
       });
-    } catch (error) {
-      console.error('Registration error:', error);
-      throw error;
     } finally {
       setIsLoading(false);
     }
   };
 
   const logout = async () => {
-    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-    
-    if (refreshToken) {
+    const storedRefreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+
+    if (storedRefreshToken) {
       try {
-        await fetch('/api/v1/auth/logout', {
-          method: 'POST',
+        await fetch("/api/v1/auth/logout", {
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
-          body: JSON.stringify({ refresh_token: refreshToken }),
+          body: JSON.stringify({ refresh_token: storedRefreshToken }),
         });
       } catch (error) {
-        console.error('Logout error:', error);
+        console.error("Logout error:", error);
       }
     }
 
     clearTokens();
-  };
-
-  const refreshToken = async () => {
-    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-    
-    if (!refreshToken) {
-      clearTokens();
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/v1/auth/refresh', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Token refresh failed');
-      }
-
-      const tokenResponse: TokenResponse = await response.json();
-      const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-      const userData = localStorage.getItem(USER_KEY);
-      
-      if (accessToken && userData) {
-        const parsedUser = JSON.parse(userData);
-        setTokens(tokenResponse, parsedUser);
-      }
-    } catch (error) {
-      console.error('Token refresh error:', error);
-      clearTokens();
-    }
   };
 
   const value: AuthContextType = {
@@ -279,9 +254,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
+
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
+
   return context;
 }
-
