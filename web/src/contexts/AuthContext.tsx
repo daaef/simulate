@@ -48,9 +48,20 @@ const ACCESS_TOKEN_KEY = 'simulator_access_token';
 const REFRESH_TOKEN_KEY = 'simulator_refresh_token';
 const USER_KEY = 'simulator_user';
 
+const AUTH_DISABLED = process.env.NEXT_PUBLIC_SIM_AUTH_DISABLED === "true";
+
+const LOCAL_DEV_USER: User = {
+  id: 0,
+  username: "local-dev",
+  email: "local-dev@simulator.local",
+  role: "admin",
+  created_at: new Date().toISOString(),
+  preferences: {},
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+const [user, setUser] = useState<User | null>(AUTH_DISABLED ? LOCAL_DEV_USER : null);
+const [isLoading, setIsLoading] = useState(!AUTH_DISABLED);
 
 // Check for existing auth on mount
   useEffect(() => {
@@ -58,20 +69,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const authDisabled = process.env.NEXT_PUBLIC_SIM_AUTH_DISABLED === "true";
 
-        if (authDisabled) {
-          const localDevUser: User = {
-            id: 0,
-            username: "local-dev",
-            email: "local-dev@simulator.local",
-            role: "admin",
-            created_at: new Date().toISOString(),
-            preferences: {},
-          };
-
-          setUser(localDevUser);
-          localStorage.setItem(USER_KEY, JSON.stringify(localDevUser));
-          return;
-        }
+        if (AUTH_DISABLED) {
+            localStorage.setItem(USER_KEY, JSON.stringify(LOCAL_DEV_USER));
+            return;
+          }
 
         const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
         const userData = localStorage.getItem(USER_KEY);

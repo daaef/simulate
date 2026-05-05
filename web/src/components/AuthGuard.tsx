@@ -1,89 +1,34 @@
 "use client";
 
-import { ReactNode, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import LoginForm from './LoginForm';
+import React from "react";
+import LoginForm from "./LoginForm";
+import { useAuth } from "../contexts/AuthContext";
 
 interface AuthGuardProps {
-  children: ReactNode;
-  fallback?: ReactNode;
+  children: React.ReactNode;
 }
 
-export default function AuthGuard({ children, fallback }: AuthGuardProps) {
-  const { isAuthenticated, isLoading } = useAuth();
+export default function AuthGuard({ children }: AuthGuardProps) {
+  const { isLoading, isAuthenticated } = useAuth();
+  const authDisabled = process.env.NEXT_PUBLIC_SIM_AUTH_DISABLED === "true";
 
-  useEffect(() => {
-    const style = document.createElement("style");
-    style.textContent = `
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-    `;
-    document.head.appendChild(style);
-    return () => {
-      document.head.removeChild(style);
-    };
-  }, []);
+  if (authDisabled) {
+    return <>{children}</>;
+  }
 
   if (isLoading) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        backgroundColor: 'var(--bg-primary)',
-        color: 'var(--text-primary)',
-        flexDirection: 'column',
-        gap: '16px'
-      }}>
-        <div style={{
-          width: '40px',
-          height: '40px',
-          border: '3px solid var(--border-primary)',
-          borderTop: '3px solid var(--button-primary)',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite'
-        }} />
-        <div>Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm text-slate-900">Loading...</p>
+        </div>
       </div>
     );
   }
 
   if (!isAuthenticated) {
-    return fallback || (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        backgroundColor: 'var(--bg-primary)',
-        padding: '20px'
-      }}>
-        <div style={{
-          textAlign: 'center',
-          maxWidth: '400px',
-          width: '100%'
-        }}>
-          <h1 style={{
-            marginBottom: '8px',
-            color: 'var(--text-primary)',
-            fontSize: '24px'
-          }}>
-            Fainzy Simulator
-          </h1>
-          <p style={{
-            marginBottom: '32px',
-            color: 'var(--text-secondary)',
-            fontSize: '16px'
-          }}>
-            Please sign in to access the simulator control panel
-          </p>
-          <LoginForm />
-        </div>
-      </div>
-    );
+    return <LoginForm />;
   }
 
   return <>{children}</>;
