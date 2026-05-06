@@ -1,6 +1,15 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  ReactNode,
+} from "react";
 
 export interface User {
   id: number;
@@ -30,6 +39,7 @@ export interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
 const SESSION_BOOTSTRAP_TIMEOUT_MS = 5000;
 
 function isSessionReplaced(detail: string | null): boolean {
@@ -46,6 +56,7 @@ async function parseError(response: Response): Promise<Error> {
         : typeof payload?.message === "string"
           ? payload.message
           : "Request failed";
+
     return new Error(detail);
   } catch {
     return new Error("Request failed");
@@ -56,11 +67,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionState, setSessionState] = useState<SessionState>("loading");
+  const mountedRef = useRef(true);
+
+  const setAnonymous = useCallback((state: SessionState = "anonymous") => {
+    if (!mountedRef.current) return;
+
+    setUser(null);
+    setSessionState(state);
+  }, []);
+
+  const setAuthenticatedUser = useCallback((nextUser: User) => {
+    if (!mountedRef.current) return;
+
+    setUser(nextUser);
+    setSessionState("authenticated");
+  }, []);
 
   const refreshSession = useCallback(async () => {
+    if (!mountedRef.current) return;
+
     setIsLoading(true);
+
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), SESSION_BOOTSTRAP_TIMEOUT_MS);
+    const timeoutId = window.setTimeout(() => {
+      controller.abort();
+    }, SESSION_BOOTSTRAP_TIMEOUT_MS);
+
     try {
       const response = await fetch("/api/v1/auth/session", {
         credentials: "include",
@@ -71,8 +103,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.status === 401) {
         const payload = await response.json().catch(() => null);
         const detail = typeof payload?.detail === "string" ? payload.detail : null;
-        setUser(null);
-        setSessionState(isSessionReplaced(detail) ? "replaced" : "anonymous");
+
+        setAnonymous(isSessionReplaced(detail) ? "replaced" : "anonymous");
         return;
       }
 
@@ -81,24 +113,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const currentUser = (await response.json()) as User;
-      setUser(currentUser);
-      setSessionState("authenticated");
+      setAuthenticatedUser(currentUser);
     } catch (error) {
       console.error("Failed to refresh auth session:", error);
-      setUser(null);
-      setSessionState("anonymous");
+      setAnonymous("anonymous");
     } finally {
       window.clearTimeout(timeoutId);
-      setIsLoading(false);
+
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, []);
+  }, [setAnonymous, setAuthenticatedUser]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void refreshSession();
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, [refreshSession]);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
+    if (!mountedRef.current) return;
+
     setIsLoading(true);
+
     try {
       const response = await fetch("/api/v1/auth/login", {
         method: "POST",
@@ -114,18 +155,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const payload = await response.json();
-      if (payload?.user) {
-        setUser(payload.user as User);
-        setSessionState("authenticated");
+
+      if (!payload?.user) {
+        throw new Error("Login succeeded but no user profile was returned");
       }
-      await refreshSession();
+
+      setAuthenticatedUser(payload.user as User);
+    } catch (error) {
+      setAnonymous("anonymous");
+      throw error;
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [refreshSession]);
+  }, [setAnonymous, setAuthenticatedUser]);
 
   const logout = useCallback(async () => {
+    if (!mountedRef.current) return;
+
     setIsLoading(true);
+
     try {
       await fetch("/api/v1/auth/logout", {
         method: "POST",
@@ -134,11 +184,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error("Logout failed:", error);
     } finally {
-      setUser(null);
-      setSessionState("anonymous");
-      setIsLoading(false);
+      setAnonymous("anonymous");
+
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, []);
+  }, [setAnonymous]);
 
   const value = useMemo<AuthContextType>(
     () => ({
@@ -150,7 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refreshSession,
     }),
-    [isLoading, login, logout, refreshSession, sessionState, user],
+    [isLoading, login, logout, refreshSession, sessionState, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -158,8 +210,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
+
   if (context === undefined) {
     throw new Error("useAuth must be used within an AuthProvider");
   }
+
   return context;
 }
