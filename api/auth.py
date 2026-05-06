@@ -6,7 +6,7 @@ import bcrypt
 import jwt
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Set
 from pydantic import BaseModel, EmailStr
 import psycopg2
 from psycopg2.extras import DictCursor
@@ -15,17 +15,58 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# JWT Configuration
-JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
-JWT_ALGORITHM = 'HS256'
+# Runtime/auth configuration
+SIM_ENV = os.getenv("SIM_ENV", "development").strip().lower()
+
+# JWT is retained for legacy refresh-token compatibility. Browser auth uses
+# HTTP-only opaque session cookies via create_session().
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+JWT_ALGORITHM = "HS256"
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = 7
+
+ALLOWED_ROLES: Set[str] = {"admin", "operator", "runner", "viewer", "auditor"}
+LEGACY_ROLE_ALIASES: Dict[str, str] = {
+    "user": "operator",
+}
+
+if SIM_ENV in {"production", "prod"} and JWT_SECRET_KEY in {
+    "",
+    "your-secret-key-change-in-production",
+    "dev-only-change-me",
+}:
+    raise RuntimeError("JWT_SECRET_KEY must be set to a strong secret in production.")
+
+
+def normalize_role(role: Optional[str]) -> str:
+    value = (role or "viewer").strip().lower()
+    return LEGACY_ROLE_ALIASES.get(value, value)
+
+
+def validate_role(role: Optional[str]) -> str:
+    normalized = normalize_role(role)
+
+    if normalized not in ALLOWED_ROLES:
+        allowed = ", ".join(sorted(ALLOWED_ROLES))
+        raise ValueError(f"Unsupported role: {role!r}. Expected one of: {allowed}")
+
+    return normalized
+
+
+def normalize_user_payload(user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not user:
+        return None
+
+    payload = dict(user)
+    payload["role"] = normalize_role(payload.get("role"))
+    return payload
 
 # Pydantic models for authentication
 class UserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
+    role: str = "operator"
 
 class UserLogin(BaseModel):
     username: str
@@ -158,7 +199,7 @@ class AuthManager:
                         (username,)
                     )
                     user = cursor.fetchone()
-                    return dict(user) if user else None
+                    return normalize_user_payload(dict(user)) if user else None
         except Exception as e:
             logger.error(f"Failed to get user by username: {e}")
             return None
@@ -178,7 +219,7 @@ class AuthManager:
                         (user_id,)
                     )
                     user = cursor.fetchone()
-                    return dict(user) if user else None
+                    return normalize_user_payload(dict(user)) if user else None
         except Exception as e:
             logger.error(f"Failed to get user by ID: {e}")
             return None
@@ -201,40 +242,39 @@ class AuthManager:
                         (session_token,),
                     )
                     user = cursor.fetchone()
-                    return dict(user) if user else None
+                    return normalize_user_payload(dict(user)) if user else None
         except Exception as e:
             logger.error(f"Failed to get user by session token: {e}")
             return None
     
     def create_user(self, user_data: UserCreate) -> Dict[str, Any]:
-        """Create new user"""
-        # Check if user already exists
+        """Create new user."""
         if self.get_user_by_username(user_data.username):
             raise ValueError("Username already exists")
-        
-        # Hash password
+
+        role = validate_role(user_data.role)
         password_hash = self.hash_password(user_data.password)
-        
+
         try:
             with self.get_db_connection() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(
                         """
                         INSERT INTO users (username, email, password_hash, role)
-                        VALUES (%s, %s, %s, 'user')
+                        VALUES (%s, %s, %s, %s)
                         RETURNING id, username, email, role, created_at
                         """,
-                        (user_data.username, user_data.email, password_hash)
+                        (user_data.username, user_data.email, password_hash, role)
                     )
                     user = cursor.fetchone()
                     conn.commit()
-                    
+
                     return {
                         "id": user[0],
                         "username": user[1],
                         "email": user[2],
-                        "role": user[3],
-                        "created_at": user[4]
+                        "role": normalize_role(user[3]),
+                        "created_at": user[4],
                     }
         except Exception as e:
             logger.error(f"Failed to create user: {e}")
@@ -263,7 +303,7 @@ class AuthManager:
         
         # Remove password hash from response
         user.pop('password_hash', None)
-        return user
+        return normalize_user_payload(user)
     
     def refresh_access_token(self, refresh_token: str) -> Optional[TokenResponse]:
         """Refresh access token using refresh token"""
@@ -361,39 +401,50 @@ class AuthManager:
                         FROM users 
                         ORDER BY created_at DESC
                     """)
-                    return [dict(row) for row in cursor.fetchall()]
+                    return [normalize_user_payload(dict(row)) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Failed to list users: {e}")
             return []
 
     def update_user(self, user_id: int, user_data: dict) -> dict:
-        """Update user information (admin only)"""
+        """Update user information (admin only)."""
         try:
             with self.get_db_connection() as conn:
                 with conn.cursor(cursor_factory=DictCursor) as cursor:
-                    # Build dynamic update query
                     update_fields = []
                     values = []
-                    
-                    for field in ['username', 'email', 'role', 'is_active']:
-                        if field in user_data:
-                            update_fields.append(f"{field} = %s")
-                            values.append(user_data[field])
-                    
+
+                    for field in ["username", "email", "role", "is_active"]:
+                        if field not in user_data:
+                            continue
+
+                        value = user_data[field]
+
+                        if field == "role":
+                            value = validate_role(value)
+
+                        update_fields.append(f"{field} = %s")
+                        values.append(value)
+
                     if not update_fields:
                         raise ValueError("No valid fields to update")
-                    
+
                     values.append(user_id)
-                    query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s RETURNING id, username, email, role, is_active, created_at, last_login"
-                    
+                    query = f"""
+                        UPDATE users
+                        SET {", ".join(update_fields)}
+                        WHERE id = %s
+                        RETURNING id, username, email, role, is_active, created_at, last_login
+                    """
+
                     cursor.execute(query, values)
                     conn.commit()
-                    
+
                     result = cursor.fetchone()
                     if not result:
                         raise ValueError("User not found")
-                        
-                    return dict(result)
+
+                    return normalize_user_payload(dict(result))
         except Exception as e:
             logger.error(f"Failed to update user: {e}")
             raise ValueError(f"Failed to update user: {e}")
@@ -414,21 +465,25 @@ class AuthManager:
             return False
 
     def reset_password(self, user_id: int, new_password: str) -> bool:
-        """Reset user password (admin only)"""
+        """Reset user password (admin only)."""
         try:
             with self.get_db_connection() as conn:
                 with conn.cursor() as cursor:
-                    # Hash new password
-                    password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-                    
-                    # Update password and invalidate all sessions
+                    password_hash = bcrypt.hashpw(
+                        new_password.encode("utf-8"),
+                        bcrypt.gensalt()
+                    ).decode("utf-8")
+
                     cursor.execute(
                         "UPDATE users SET password_hash = %s WHERE id = %s",
                         (password_hash, user_id)
                     )
+                    updated_count = cursor.rowcount
+
                     cursor.execute("DELETE FROM user_sessions WHERE user_id = %s", (user_id,))
                     conn.commit()
-                    return cursor.rowcount > 0
+
+                    return updated_count > 0
         except Exception as e:
             logger.error(f"Failed to reset password: {e}")
             return False

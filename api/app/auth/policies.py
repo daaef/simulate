@@ -8,6 +8,14 @@ from .dependencies import get_current_user
 
 Role = str
 
+FINAL_ROLES: set[Role] = {
+    "admin",
+    "operator",
+    "runner",
+    "viewer",
+    "auditor",
+}
+
 LEGACY_ROLE_ALIASES: dict[str, Role] = {
     "user": "operator",
 }
@@ -19,30 +27,49 @@ ROLE_PERMISSIONS: dict[Role, set[tuple[str, str]]] = {
         ("users", "update"),
         ("users", "delete"),
         ("users", "reset_password"),
+
         ("runs", "create"),
         ("runs", "read"),
+        ("runs", "update"),
         ("runs", "cancel"),
         ("runs", "delete"),
+
         ("dashboard", "read"),
+
         ("archives", "read"),
+        ("archives", "delete"),
+
         ("retention", "read"),
+        ("retention", "update"),
+
+        ("system", "read"),
+        ("system", "configure"),
     },
     "operator": {
         ("runs", "create"),
         ("runs", "read"),
         ("runs", "cancel"),
+
         ("dashboard", "read"),
+
         ("archives", "read"),
         ("retention", "read"),
+    },
+    "runner": {
+        ("runs", "create"),
+        ("runs", "read"),
+
+        ("dashboard", "read"),
     },
     "viewer": {
         ("runs", "read"),
+
         ("dashboard", "read"),
         ("archives", "read"),
-        ("retention", "read"),
     },
     "auditor": {
         ("runs", "read"),
+
         ("dashboard", "read"),
         ("archives", "read"),
         ("retention", "read"),
@@ -53,7 +80,9 @@ ROLE_PERMISSIONS: dict[Role, set[tuple[str, str]]] = {
 def normalize_role(role: str | None) -> Role:
     if not role:
         return "viewer"
-    return LEGACY_ROLE_ALIASES.get(role, role)
+
+    value = role.strip().lower()
+    return LEGACY_ROLE_ALIASES.get(value, value)
 
 
 def has_permission(user: dict, resource: str, action: str) -> bool:
@@ -72,11 +101,12 @@ def require_permission(resource: str, action: str):
 
 def require_roles(*roles: Iterable[str] | str):
     allowed: set[str] = set()
+
     for role in roles:
         if isinstance(role, str):
-            allowed.add(role)
+            allowed.add(normalize_role(role))
         else:
-            allowed.update(role)
+            allowed.update(normalize_role(item) for item in role)
 
     async def dependency(current_user: dict = Depends(get_current_user)) -> dict:
         if normalize_role(current_user.get("role")) not in allowed:

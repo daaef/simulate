@@ -41,10 +41,10 @@ export default function AdminDashboard() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [formData, setFormData] = useState<CreateUserData>({
-    username: '',
-    email: '',
-    password: '',
-    role: 'user'
+    username: "",
+    email: "",
+    password: "",
+    role: "operator",
   });
 
   useEffect(() => {
@@ -85,7 +85,7 @@ export default function AdminDashboard() {
 
       await fetchUsers();
       setShowCreateModal(false);
-      setFormData({ username: '', email: '', password: '', role: 'user' });
+      setFormData({ username: "", email: "", password: "", role: "operator" });
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create user');
@@ -230,8 +230,22 @@ export default function AdminDashboard() {
                       padding: '4px 8px',
                       borderRadius: '4px',
                       fontSize: '12px',
-                      backgroundColor: user.role === 'admin' ? '#e3f2fd' : '#f3e5f5',
-                      color: user.role === 'admin' ? '#1976d2' : '#7b1fa2',
+                      backgroundColor:
+                        user.role === "admin"
+                          ? "#e3f2fd"
+                          : user.role === "operator"
+                            ? "#e8f5e9"
+                            : user.role === "runner"
+                              ? "#fff8e1"
+                              : "#f3e5f5",
+                      color:
+                        user.role === "admin"
+                          ? "#1976d2"
+                          : user.role === "operator"
+                            ? "#2e7d32"
+                            : user.role === "runner"
+                              ? "#f57f17"
+                              : "#7b1fa2",
                     }}>
                       {user.role}
                     </span>
@@ -388,9 +402,11 @@ export default function AdminDashboard() {
                   color: 'var(--text-primary)',
                 }}
               >
-                <option value="user">User</option>
-                <option value="admin">Admin</option>
+                <option value="operator">Operator</option>
+                <option value="runner">Runner</option>
                 <option value="viewer">Viewer</option>
+                <option value="auditor">Auditor</option>
+                <option value="admin">Admin</option>
               </select>
             </div>
             <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
@@ -411,7 +427,7 @@ export default function AdminDashboard() {
               <button
                 onClick={() => {
                   setShowCreateModal(false);
-                  setFormData({ username: '', email: '', password: '', role: 'user' });
+                  setFormData({ username: "", email: "", password: "", role: "operator" });
                 }}
                 style={{
                   flex: 1,
@@ -490,9 +506,11 @@ export default function AdminDashboard() {
                   color: 'var(--text-primary)',
                 }}
               >
-                <option value="user">User</option>
-                <option value="admin">Admin</option>
+                <option value="operator">Operator</option>
+                <option value="runner">Runner</option>
                 <option value="viewer">Viewer</option>
+                <option value="auditor">Auditor</option>
+                <option value="admin">Admin</option>
               </select>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <input

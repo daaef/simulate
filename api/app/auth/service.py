@@ -1,8 +1,21 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from pydantic import BaseModel
+
+LOGGER = logging.getLogger("simulate.web_api.auth")
+
+
+def _as_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+SIM_ENV = os.getenv("SIM_ENV", "development").strip().lower()
+AUTH_DISABLED = _as_bool(os.getenv("SIM_AUTH_DISABLED"), default=False)
 
 try:
     from ...auth import UserCreate, UserLogin, TokenResponse, get_auth_manager, init_auth
@@ -11,6 +24,7 @@ except ImportError as exc:  # pragma: no cover - fallback for partial local envi
         username: str
         email: str
         password: str
+        role: str = "operator"
 
     class UserLogin(BaseModel):
         username: str
@@ -32,17 +46,34 @@ except ImportError as exc:  # pragma: no cover - fallback for partial local envi
 else:
     FALLBACK_IMPORT_ERROR = None
 
-LOGGER = logging.getLogger("simulate.web_api.auth")
-AUTH_ENABLED = FALLBACK_IMPORT_ERROR is None
+AUTH_ENABLED = False
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 15
 
 
 def init_auth_system(postgres_url: str, use_postgres: bool) -> bool:
     global AUTH_ENABLED
-    if not AUTH_ENABLED or not use_postgres:
-        return AUTH_ENABLED and use_postgres
+
+    if AUTH_DISABLED and SIM_ENV in {"production", "prod"}:
+        raise RuntimeError("SIM_AUTH_DISABLED=true is not allowed in production.")
+
+    if AUTH_DISABLED:
+        LOGGER.warning("Authentication is explicitly disabled via SIM_AUTH_DISABLED=true.")
+        AUTH_ENABLED = False
+        return False
+
+    if FALLBACK_IMPORT_ERROR is not None:
+        LOGGER.error("Authentication module import failed: %s", FALLBACK_IMPORT_ERROR)
+        AUTH_ENABLED = False
+        return False
+
+    if not use_postgres:
+        LOGGER.error("Authentication requires PostgreSQL. Auth is disabled because PostgreSQL is not enabled.")
+        AUTH_ENABLED = False
+        return False
+
     try:
         init_auth(postgres_url)
+        AUTH_ENABLED = True
         LOGGER.info("Authentication system initialized")
         return True
     except Exception as exc:
@@ -55,6 +86,14 @@ def is_auth_enabled() -> bool:
     return AUTH_ENABLED
 
 
+def is_auth_disabled_explicitly() -> bool:
+    return AUTH_DISABLED
+
+
+def is_production() -> bool:
+    return SIM_ENV in {"production", "prod"}
+
+
 __all__ = [
     "AUTH_ENABLED",
     "JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
@@ -64,4 +103,6 @@ __all__ = [
     "get_auth_manager",
     "init_auth_system",
     "is_auth_enabled",
+    "is_auth_disabled_explicitly",
+    "is_production",
 ]

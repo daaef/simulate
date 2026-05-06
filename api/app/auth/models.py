@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RefreshTokenRequest(BaseModel):
@@ -14,4 +14,4 @@ class SessionUserResponse(BaseModel):
     role: str
     created_at: str | object
     last_login: str | object | None = None
-    preferences: dict[str, object] = {}
+    preferences: dict[str, object] = Field(default_factory=dict)
