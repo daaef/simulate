@@ -7,13 +7,11 @@ import { useAuth } from "../contexts/AuthContext";
 interface AuthGuardProps {
   children: ReactNode;
   redirectTo?: string;
-  hasSessionCookieHint?: boolean;
 }
 
 export default function AuthGuard({
   children,
   redirectTo = "/auth/login",
-  hasSessionCookieHint = false,
 }: AuthGuardProps) {
   const router = useRouter();
   const { isAuthenticated, isLoading } = useAuth();
@@ -24,31 +22,35 @@ export default function AuthGuard({
     }
   }, [isAuthenticated, isLoading, redirectTo, router]);
 
-  if (isLoading && !hasSessionCookieHint) {
+  if (isLoading) {
     return (
-      <div style={{
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        minHeight: "100vh",
-        backgroundColor: "var(--bg-primary)",
-        color: "var(--text-primary)",
-      }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "100vh",
+          backgroundColor: "var(--bg-primary)",
+          color: "var(--text-primary)",
+        }}
+      >
         Loading...
       </div>
     );
   }
 
-  if (!isLoading && !isAuthenticated) {
+  if (!isAuthenticated) {
     return (
-      <div style={{
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        minHeight: "100vh",
-        backgroundColor: "var(--bg-primary)",
-        color: "var(--text-primary)",
-      }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "100vh",
+          backgroundColor: "var(--bg-primary)",
+          color: "var(--text-primary)",
+        }}
+      >
         Redirecting...
       </div>
     );
