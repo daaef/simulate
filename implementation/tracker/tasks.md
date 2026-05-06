@@ -352,11 +352,167 @@ Continue remaining platform features: profile/schedule CRUD and auth/alert/deplo
   - Notes: Locked decisions include admin-created users only, single active session, cookie-based sessions, overview landing, route-first app shell, structured scheduling, campaign mode, rerun-exact execution, and active/archive/purge lifecycle.
   - Completion evidence: `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md`
 
-- [~] Wait for user review of the written redesign spec
+- [x] Wait for user review of the written redesign spec
   - Dependency: Spec file written and self-reviewed.
   - Notes: No implementation should begin until the user reviews and approves the spec document.
   - Completion evidence: User explicitly approves the spec file.
 
+### Phase 20: Operations Platform Redesign Implementation Plan (2026-05-06)
+
+- [x] Write execution-ready redesign plan for study
+  - Dependency: Approved redesign spec.
+  - Notes: Plan should sequence auth/session foundation first, then route migration, runs split, overview, schedules/campaigns, archive/retention, and admin/alerts.
+  - Completion evidence: `docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md`
+
+- [x] Update tracker canonical plan to align with redesign
+  - Dependency: New redesign plan written.
+  - Notes: `implementation/tracker/implementation_plan.md` and `README.md` should reflect the new operations-platform target rather than the older generic web-GUI plan.
+  - Completion evidence: tracker docs reference the 2026-05-06 redesign spec and plan.
+
+- [x] Wait for user study/review of the redesign implementation plan
+  - Dependency: Plan file written and self-reviewed.
+  - Notes: No code implementation should start until the user studies and approves the plan.
+  - Completion evidence: User explicitly approves the plan or requests revisions.
+
+### Phase 21: Operations Platform Redesign Execution - Auth/Route Foundation (2026-05-06)
+
+- [x] Implement backend-owned session foundation and route-first auth entry
+  - Dependency: Approved redesign spec and approved redesign implementation plan.
+  - Notes: First slice covers cookie-backed auth session truth, single-session replacement mechanics, `/auth/login` entry flow, root redirect behavior, and removing frontend bearer-token ownership from the protected app surface.
+  - Completion evidence: `tests.test_web_api.CookieSessionAuthTests` and full `tests.test_web_api` pass in the API container, `docker compose exec web npm run build` passes, `/auth/login`, `/overview`, `/runs`, `/schedules`, `/archives`, `/retention`, and `/admin/users` routes now build under the protected app shell.
+
 ## Next Immediate Task
 
-User review of `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md`, then transition to implementation planning only after approval.
+Start backend route/service decomposition and RBAC normalization so auth/session ownership no longer lives as a thin layer on top of the monolithic `api/app/main.py`.
+
+### Phase 22: Backend Auth/Admin Decomposition + RBAC Base (2026-05-06)
+
+- [x] Extract auth and admin route logic out of `api/app/main.py`
+  - Dependency: Phase 21 auth/session foundation completed.
+  - Notes: Added dedicated auth dependencies, auth router, auth service wrapper, auth policy helpers, and admin router while keeping current runtime behavior intact.
+  - Completion evidence: `api/app/auth/*`, `api/app/admin/routes.py`, and slimmer `api/app/main.py` compile and route tests pass.
+
+- [x] Add backend RBAC regression coverage and permission gates
+  - Dependency: Extracted auth dependencies/policies.
+  - Notes: Added session-protected route tests for anonymous rejection plus viewer read/admin denial; moved protected runs/dashboard/admin endpoints onto backend permission helpers.
+  - Completion evidence: `tests.test_web_api` passes with 8 tests in the API container.
+
+- [x] Normalize role interpretation for current surfaces
+  - Dependency: Backend policy helpers.
+  - Notes: Backend treats legacy `user` as `operator`; frontend role context now recognizes `admin`, `operator`, `viewer`, and `auditor` while preserving `isUser` as a compatibility alias.
+  - Completion evidence: `web/src/contexts/RoleContext.tsx` updated and web production build passes.
+
+## Next Immediate Task
+
+Start the runs-domain decomposition: move runs endpoints/services out of `api/app/main.py`, then begin replacing the temporary `/runs` migration surface with the real workspace/detail split.
+
+### Phase 23: Runs-Domain Route Extraction (2026-05-06)
+
+- [x] Extract runs API route handlers out of `api/app/main.py`
+  - Dependency: Phase 22 backend auth/admin decomposition.
+  - Notes: Added `api/app/runs/routes.py`, `models.py`, and `service.py`; `main.py` now configures runtime callbacks and includes the runs router instead of owning all runs handlers directly.
+  - Completion evidence: `tests.test_web_api` passes after extraction and web production build still passes.
+
+- [x] Preserve compatibility for existing tests and runtime helpers during extraction
+  - Dependency: Runs route extraction.
+  - Notes: Re-exported route handler names through `api.app.main` imports, preserved `SESSION_COOKIE_NAME` on `main`, and configured runtime callbacks via late-binding lambdas so test patches against `web_api._get_run` and related helpers still work.
+  - Completion evidence: Existing `tests.test_web_api.EventsCacheTests` and `CookieSessionAuthTests` remain green without test rewrites.
+
+## Next Immediate Task
+
+Start the real `/runs` workspace decomposition on the frontend: split the migrated MVP page into focused run-table, launch, and inspector components, then move `/runs/[id]` toward the approved forensic tab model.
+
+### Phase 24: `/runs` Frontend Workspace Split - Part 1 (2026-05-06)
+
+- [x] Extract the migrated `/runs` workspace into focused components without changing behavior
+  - Dependency: Phase 23 runs-domain route extraction.
+  - Notes: Moved launch form, live console, flow planner guide, recent-runs table, statistics, and delete confirmation modal into dedicated `web/src/components/runs/*` components while keeping route behavior and polling logic in the page.
+  - Completion evidence: `web/src/app/(app)/runs/page.tsx` is materially slimmer and `docker compose exec web npm run build` passes.
+
+- [x] Preserve current run-launch, console, and recent-runs behavior during the split
+  - Dependency: Component extraction.
+  - Notes: The page still owns fetch/poll/state orchestration; extracted components are presentational and callback-driven to minimize regression risk before the next route-level redesign slice.
+  - Completion evidence: Build succeeds and existing `/runs` route output remains functionally unchanged.
+
+## Next Immediate Task
+
+Start `/runs/[id]` forensic decomposition: extract summary/tabs/artifact viewers into dedicated detail components, then move the route closer to the approved operator/forensics information architecture.
+
+### Phase 25: `/runs/[id]` Detail Decomposition - Part 1 (2026-05-06)
+
+- [x] Extract detail header, overview, and artifact/event/log surfaces into dedicated components
+  - Dependency: Phase 24 `/runs` frontend workspace split.
+  - Notes: Added `web/src/components/runs/detail/*` components for the header, overview, markdown artifact rendering, events panel, and log panel; the route still owns fetch and tab state to keep this slice low-risk.
+  - Completion evidence: `web/src/app/(app)/runs/[id]/page.tsx` is materially slimmer and `docker compose exec web npm run build` passes.
+
+- [x] Preserve current detail-page fetch behavior during the split
+  - Dependency: Detail component extraction.
+  - Notes: Existing metrics/report/story/events/log loading behavior remains in the page, with no route contract changes.
+  - Completion evidence: Web production build passes after extraction with no API changes required.
+
+## Next Immediate Task
+
+Start the actual forensic UX upgrade for `/runs/[id]`: replace the generic tab panel with a more explicit operator/engineering information hierarchy and prepare for execution-snapshot and identity-rich detail sections.
+
+### Phase 26: `/runs/[id]` Forensic UX Upgrade - Part 1 (2026-05-06)
+
+- [x] Replace generic detail tabs with explicit operator/forensics surfaces
+  - Dependency: Phase 25 `/runs/[id]` detail decomposition.
+  - Notes: Reframed the route into `Overview`, `Story`, `Technical Report`, `Traffic`, `Console`, and `Execution` surfaces with explicit descriptions instead of the previous generic tab labels.
+  - Completion evidence: `web/src/components/runs/detail/RunDetailTabNav.tsx` exists and `docker compose exec web npm run build` passes.
+
+- [x] Add execution-context detail section for replay/archive readiness
+  - Dependency: New detail information hierarchy.
+  - Notes: Added execution snapshot panel showing actor identity, resolved inputs, command string, and artifact availability/paths so the route now carries the frontend shape needed for future exact-rerun and archive-summary work.
+  - Completion evidence: `web/src/components/runs/detail/RunExecutionSnapshotPanel.tsx` exists and renders from current `RunRow` data.
+
+- [x] Enrich overview tab with top actor/action breakdowns
+  - Dependency: Existing metrics support.
+  - Notes: The overview now surfaces `top_actors` and `top_actions` from `RunMetrics`, making the page more useful for operator diagnosis without opening raw artifacts first.
+  - Completion evidence: `RunDetailOverview.tsx` renders top lists and build passes.
+
+## Next Immediate Task
+
+Move back to backend/platform entities: add saved run profiles and immutable execution-snapshot storage so the current frontend execution surface can be backed by real replay data instead of only the command string.
+
+### Phase 27: Close Remaining Partial Foundation Gaps (2026-05-06)
+
+- [x] Finish backend route-domain split for archives and retention
+  - Dependency: Prior auth/runs decomposition.
+  - Notes: Added `api/app/archives/*` and `api/app/retention/*` modules, wired them through `api/app/main.py`, and exposed summary endpoints guarded by backend permissions.
+  - Completion evidence: `/api/v1/archives/summary`, `/api/v1/archives/runs`, and `/api/v1/retention/summary` are routed through dedicated modules and `tests.test_web_api` passes.
+
+- [x] Persist execution snapshots on run creation
+  - Dependency: Existing run creation flow.
+  - Notes: Added `execution_snapshot` storage to the run record and runtime schema migrations for SQLite/PostgreSQL; execution tab now reads actual stored snapshot data where available.
+  - Completion evidence: `RunExecutionSnapshotTests.test_create_run_persists_execution_snapshot` passes.
+
+- [x] Upgrade `/overview` from placeholder to real monitoring cockpit
+  - Dependency: Archive/retention summary APIs and dashboard metrics.
+  - Notes: Overview now shows attention queue, active/failure/archive/purge counts, archive-window and retention-queue summaries, platform status, and flow distribution.
+  - Completion evidence: `web/src/app/(app)/overview/page.tsx` updated and `docker compose exec web npm run build` passes.
+
+## Next Immediate Task
+
+Start the first truly not-done platform block: saved run profiles and immutable execution-snapshot/replay APIs, then schedule entities on top of that.
+
+### Phase 28: Saved Profiles + Replay APIs (2026-05-06)
+
+- [x] Add backend persistence and APIs for saved run profiles
+  - Dependency: Phase 27 closed the route-domain and execution-snapshot foundation.
+  - Notes: Added `run_profiles` storage for SQLite/PostgreSQL, profile CRUD endpoints under the runs domain, and direct profile launch API support.
+  - Completion evidence: `RunProfilesApiTests.test_profile_crud_launch_and_replay` passes.
+
+- [x] Expose persisted execution snapshots through replay-oriented APIs
+  - Dependency: Existing `execution_snapshot` persistence on runs.
+  - Notes: Added execution snapshot fetch endpoint and exact replay endpoint that creates a new run from the stored snapshot payload instead of reconstructing from UI state.
+  - Completion evidence: `RunProfilesApiTests.test_profile_crud_launch_and_replay` covers snapshot fetch and replay.
+
+- [x] Add minimal runs-workspace UI for saved profiles and replay
+  - Dependency: Backend profile/replay APIs.
+  - Notes: `/runs` now includes a Saved Profiles panel to save/load/update/launch/delete reusable run definitions; `/runs/[id]` execution tab can replay the exact run from its stored snapshot.
+  - Completion evidence: `web/src/components/runs/RunProfilesPanel.tsx`, `web/src/app/(app)/runs/page.tsx`, `web/src/app/(app)/runs/[id]/page.tsx`, and `docker compose exec web npm run build` pass.
+
+## Next Immediate Task
+
+Start schedule and campaign persistence on top of the new profile and replay primitives, then replace the `/schedules` placeholder with real profile-backed schedule management.

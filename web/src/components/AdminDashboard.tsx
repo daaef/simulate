@@ -21,6 +21,17 @@ interface CreateUserData {
   role: string;
 }
 
+function withSession(init: RequestInit = {}): RequestInit {
+  return {
+    ...init,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init.headers ?? {}),
+    },
+  };
+}
+
 export default function AdminDashboard() {
   const { user: currentUser } = useAuth();
   const { isAdmin } = useRole();
@@ -44,13 +55,7 @@ export default function AdminDashboard() {
 
   const fetchUsers = async () => {
     try {
-      const token = localStorage.getItem('simulator_access_token');
-      const response = await fetch('/api/v1/admin/users', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await fetch('/api/v1/admin/users', withSession());
 
       if (!response.ok) {
         throw new Error('Failed to fetch users');
@@ -67,13 +72,9 @@ export default function AdminDashboard() {
 
   const handleCreateUser = async () => {
     try {
-      const token = localStorage.getItem('simulator_access_token');
       const response = await fetch('/api/v1/admin/users', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        ...withSession(),
         body: JSON.stringify(formData),
       });
 
@@ -93,13 +94,9 @@ export default function AdminDashboard() {
 
   const handleUpdateUser = async (userId: number, updates: Partial<User>) => {
     try {
-      const token = localStorage.getItem('simulator_access_token');
       const response = await fetch(`/api/v1/admin/users/${userId}`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        ...withSession(),
         body: JSON.stringify(updates),
       });
 
@@ -122,13 +119,9 @@ export default function AdminDashboard() {
     }
 
     try {
-      const token = localStorage.getItem('simulator_access_token');
       const response = await fetch(`/api/v1/admin/users/${userId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        ...withSession(),
       });
 
       if (!response.ok) {
@@ -145,13 +138,9 @@ export default function AdminDashboard() {
 
   const handleResetPassword = async (userId: number, newPassword: string) => {
     try {
-      const token = localStorage.getItem('simulator_access_token');
       const response = await fetch(`/api/v1/admin/users/${userId}/reset-password`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        ...withSession(),
         body: JSON.stringify({ new_password: newPassword }),
       });
 

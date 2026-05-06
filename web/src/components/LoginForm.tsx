@@ -1,286 +1,134 @@
 "use client";
 
-import { useState } from 'react';
-import { useAuth, LoginCredentials, RegisterData } from '../contexts/AuthContext';
+import { useState } from "react";
+import { useAuth, LoginCredentials } from "../contexts/AuthContext";
 
 interface LoginFormProps {
-  onClose?: () => void;
+  onSuccess?: () => void;
+  initialError?: string;
 }
 
-export default function LoginForm({ onClose }: LoginFormProps) {
-  const { login, register, isLoading } = useAuth();
-  const [isRegisterMode, setIsRegisterMode] = useState(false);
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-  });
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+export default function LoginForm({ onSuccess, initialError = "" }: LoginFormProps) {
+  const { login, sessionState } = useAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(initialError);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    setError('');
-    setSuccess('');
-  };
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
+    if (!username || !password) {
+      setError("Username and password are required");
+      return;
+    }
 
-    if (isRegisterMode) {
-      // Validate registration form
-      if (!formData.username || !formData.email || !formData.password) {
-        setError('All fields are required');
-        return;
-      }
-
-      if (formData.password !== formData.confirmPassword) {
-        setError('Passwords do not match');
-        return;
-      }
-
-      if (formData.password.length < 6) {
-        setError('Password must be at least 6 characters long');
-        return;
-      }
-
-      try {
-        const registerData: RegisterData = {
-          username: formData.username,
-          email: formData.email,
-          password: formData.password,
-        };
-        await register(registerData);
-        setSuccess('Registration successful! You are now logged in.');
-        if (onClose) setTimeout(onClose, 1500);
-      } catch (error: any) {
-        setError(error.message || 'Registration failed');
-      }
-    } else {
-      // Validate login form
-      if (!formData.username || !formData.password) {
-        setError('Username and password are required');
-        return;
-      }
-
-      try {
-        const credentials: LoginCredentials = {
-          username: formData.username,
-          password: formData.password,
-        };
-        await login(credentials);
-        setSuccess('Login successful!');
-        if (onClose) setTimeout(onClose, 1000);
-      } catch (error: any) {
-        setError(error.message || 'Login failed');
-      }
+    try {
+      setSubmitting(true);
+      const credentials: LoginCredentials = { username, password };
+      await login(credentials);
+      onSuccess?.();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Login failed");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const toggleMode = () => {
-    setIsRegisterMode(!isRegisterMode);
-    setError('');
-    setSuccess('');
-    setFormData({
-      username: '',
-      email: '',
-      password: '',
-      confirmPassword: '',
-    });
-  };
-
   return (
-    <div className="panel" style={{ maxWidth: '400px', margin: '0 auto', padding: '24px' }}>
-      <h2 style={{ textAlign: 'center', marginBottom: '24px', color: 'var(--text-primary)' }}>
-        {isRegisterMode ? 'Create Account' : 'Sign In'}
+    <div className="panel" style={{ maxWidth: "420px", margin: "0 auto", padding: "24px" }}>
+      <h2 style={{ textAlign: "center", marginBottom: "12px", color: "var(--text-primary)" }}>
+        Sign In
       </h2>
-      
-      {error && (
-        <div className="error-banner" style={{ marginBottom: '16px', padding: '12px' }}>
+      <p style={{ textAlign: "center", margin: "0 0 24px", color: "var(--text-secondary)" }}>
+        Admin-created accounts only.
+      </p>
+
+      {sessionState === "replaced" && !error ? (
+        <div className="error-banner" style={{ marginBottom: "16px", padding: "12px" }}>
+          Your last session was replaced by a newer login.
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="error-banner" style={{ marginBottom: "16px", padding: "12px" }}>
           {error}
         </div>
-      )}
-      
-      {success && (
-        <div style={{ 
-          backgroundColor: 'var(--method-get-bg)', 
-          color: 'var(--method-get-text)', 
-          padding: '12px', 
-          borderRadius: '6px', 
-          marginBottom: '16px',
-          textAlign: 'center'
-        }}>
-          {success}
-        </div>
-      )}
+      ) : null}
 
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <form
+        method="post"
+        action="/api/v1/auth/login"
+        onSubmit={handleSubmit}
+        style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+      >
         <div>
-          <label style={{ display: 'block', marginBottom: '4px', color: 'var(--text-secondary)' }}>
+          <label style={{ display: "block", marginBottom: "4px", color: "var(--text-secondary)" }}>
             Username
           </label>
           <input
             type="text"
             name="username"
-            value={formData.username}
-            onChange={handleInputChange}
-            disabled={isLoading}
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            disabled={submitting}
             required
             style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid var(--border-primary)',
-              borderRadius: '4px',
-              backgroundColor: 'var(--bg-secondary)',
-              color: 'var(--text-primary)',
-              fontSize: '14px',
+              width: "100%",
+              padding: "10px 12px",
+              border: "1px solid var(--border-primary)",
+              borderRadius: "6px",
+              backgroundColor: "var(--bg-secondary)",
+              color: "var(--text-primary)",
+              fontSize: "14px",
             }}
             placeholder="Enter your username"
           />
         </div>
 
-        {isRegisterMode && (
-          <div>
-            <label style={{ display: 'block', marginBottom: '4px', color: 'var(--text-secondary)' }}>
-              Email
-            </label>
-            <input
-              type="email"
-              name="email"
-              value={formData.email}
-              onChange={handleInputChange}
-              disabled={isLoading}
-              required
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: '1px solid var(--border-primary)',
-                borderRadius: '4px',
-                backgroundColor: 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-                fontSize: '14px',
-              }}
-              placeholder="Enter your email"
-            />
-          </div>
-        )}
-
         <div>
-          <label style={{ display: 'block', marginBottom: '4px', color: 'var(--text-secondary)' }}>
+          <label style={{ display: "block", marginBottom: "4px", color: "var(--text-secondary)" }}>
             Password
           </label>
           <input
             type="password"
             name="password"
-            value={formData.password}
-            onChange={handleInputChange}
-            disabled={isLoading}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            disabled={submitting}
             required
             style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid var(--border-primary)',
-              borderRadius: '4px',
-              backgroundColor: 'var(--bg-secondary)',
-              color: 'var(--text-primary)',
-              fontSize: '14px',
+              width: "100%",
+              padding: "10px 12px",
+              border: "1px solid var(--border-primary)",
+              borderRadius: "6px",
+              backgroundColor: "var(--bg-secondary)",
+              color: "var(--text-primary)",
+              fontSize: "14px",
             }}
             placeholder="Enter your password"
           />
         </div>
 
-        {isRegisterMode && (
-          <div>
-            <label style={{ display: 'block', marginBottom: '4px', color: 'var(--text-secondary)' }}>
-              Confirm Password
-            </label>
-            <input
-              type="password"
-              name="confirmPassword"
-              value={formData.confirmPassword}
-              onChange={handleInputChange}
-              disabled={isLoading}
-              required
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: '1px solid var(--border-primary)',
-                borderRadius: '4px',
-                backgroundColor: 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-                fontSize: '14px',
-              }}
-              placeholder="Confirm your password"
-            />
-          </div>
-        )}
-
         <button
           type="submit"
-          disabled={isLoading}
+          disabled={submitting}
           style={{
-            padding: '12px 24px',
-            backgroundColor: 'var(--button-primary)',
-            color: 'var(--button-primary-text)',
-            border: 'none',
-            borderRadius: '4px',
-            fontSize: '16px',
-            fontWeight: '600',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-            opacity: isLoading ? 0.7 : 1,
-            transition: 'all 0.3s ease',
+            padding: "12px 24px",
+            backgroundColor: "var(--button-primary)",
+            color: "var(--button-primary-text)",
+            border: "none",
+            borderRadius: "6px",
+            fontSize: "16px",
+            fontWeight: 600,
+            cursor: submitting ? "not-allowed" : "pointer",
+            opacity: submitting ? 0.7 : 1,
           }}
         >
-          {isLoading ? 'Processing...' : (isRegisterMode ? 'Create Account' : 'Sign In')}
+          {submitting ? "Signing in..." : "Sign In"}
         </button>
       </form>
-
-      <div style={{ textAlign: 'center', marginTop: '20px' }}>
-        <span style={{ color: 'var(--text-secondary)' }}>
-          {isRegisterMode ? 'Already have an account?' : "Don't have an account?"}
-        </span>
-        <button
-          type="button"
-          onClick={toggleMode}
-          disabled={isLoading}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--button-primary)',
-            cursor: 'pointer',
-            textDecoration: 'underline',
-            marginLeft: '4px',
-            fontSize: '14px',
-          }}
-        >
-          {isRegisterMode ? 'Sign In' : 'Create Account'}
-        </button>
-      </div>
-
-      {onClose && (
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={isLoading}
-          style={{
-            position: 'absolute',
-            top: '12px',
-            right: '12px',
-            background: 'none',
-            border: 'none',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontSize: '18px',
-            padding: '4px',
-          }}
-        >
-          ×
-        </button>
-      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ Authentication and authorization module for Fainzy Simulator API
 
 import bcrypt
 import jwt
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, EmailStr
@@ -100,6 +101,35 @@ class AuthManager:
             raise
         
         return refresh_token
+
+    def create_session(
+        self,
+        user_id: int,
+        *,
+        user_agent: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> str:
+        """Create a single active opaque session token for a user."""
+        expires_at = datetime.utcnow() + timedelta(days=JWT_REFRESH_TOKEN_EXPIRE_DAYS)
+        session_token = secrets.token_urlsafe(48)
+
+        try:
+            with self.get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("DELETE FROM user_sessions WHERE user_id = %s", (user_id,))
+                    cursor.execute(
+                        """
+                        INSERT INTO user_sessions (user_id, refresh_token, expires_at, user_agent, ip_address)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (user_id, session_token, expires_at, user_agent, ip_address),
+                    )
+                    conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to create session: {e}")
+            raise
+
+        return session_token
     
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
         """Verify JWT token and return payload"""
@@ -151,6 +181,29 @@ class AuthManager:
                     return dict(user) if user else None
         except Exception as e:
             logger.error(f"Failed to get user by ID: {e}")
+            return None
+
+    def get_user_by_session_token(self, session_token: str) -> Optional[Dict[str, Any]]:
+        """Resolve an active user from an opaque session token."""
+        try:
+            with self.get_db_connection() as conn:
+                with conn.cursor(cursor_factory=DictCursor) as cursor:
+                    cursor.execute(
+                        """
+                        SELECT u.id, u.username, u.email, u.role, u.created_at,
+                               u.last_login, u.preferences, u.is_active
+                        FROM user_sessions us
+                        JOIN users u ON u.id = us.user_id
+                        WHERE us.refresh_token = %s
+                          AND us.expires_at > NOW()
+                          AND u.is_active = TRUE
+                        """,
+                        (session_token,),
+                    )
+                    user = cursor.fetchone()
+                    return dict(user) if user else None
+        except Exception as e:
+            logger.error(f"Failed to get user by session token: {e}")
             return None
     
     def create_user(self, user_data: UserCreate) -> Dict[str, Any]:
@@ -278,6 +331,10 @@ class AuthManager:
         except Exception as e:
             logger.error(f"Failed to logout: {e}")
             return False
+
+    def invalidate_session(self, session_token: str) -> bool:
+        """Invalidate a single opaque session token."""
+        return self.logout(session_token)
     
     def cleanup_expired_sessions(self) -> int:
         """Clean up expired sessions"""

@@ -219,6 +219,253 @@ date '+%Y-%m-%d %H:%M'
 
 ### Issues / Blockers
 
+## 2026-05-06 04:16
+
+### Summary
+
+User approved the redesign implementation plan and implementation has started. Opened the first execution slice around backend-owned auth, single-active-session behavior, and route-first frontend entry points (`/auth/login` plus authenticated root redirect) before wider runs/overview/schedules work.
+
+### Files Created / Modified
+
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '...' implementation/tracker/tasks.md
+sed -n '...' implementation/tracker/implementation_plan.md
+sed -n '...' implementation/tracker/session_log.md
+sed -n '...' docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md
+sed -n '...' web/src/contexts/AuthContext.tsx
+sed -n '...' web/src/components/AuthGuard.tsx
+sed -n '...' web/src/app/page.tsx
+sed -n '...' web/src/app/layout.tsx
+sed -n '...' web/src/lib/api.ts
+sed -n '...' api/app/main.py
+sed -n '...' api/auth.py
+sed -n '...' tests/test_web_api.py
+```
+
+### Results
+
+- Planning wait state is closed; tracker now reflects active implementation.
+- Current frontend still owns auth tokens in `localStorage` and injects bearer headers globally.
+- Current backend still exposes token/refresh auth as the main truth and keeps optional backward-compatibility paths that are too loose for the approved platform model.
+- Existing backend test coverage is available in `tests/test_web_api.py`, making it practical to add session-auth regression coverage before implementation.
+
+### Issues / Blockers
+
+- Route-first redesign will need staged migration because `web/src/app/page.tsx` still owns most product UI.
+- Existing PostgreSQL auth schema is refresh-token based; single-session cookie semantics should be layered carefully without breaking current admin/user data.
+
+### Next Steps
+
+1. Add failing regression tests for cookie-backed current-session auth and single-session replacement.
+2. Implement backend session cookie issuance/validation/logout flow.
+3. Refactor frontend auth context and route entrypoints to use current-session state instead of `localStorage` bearer tokens.
+
+## 2026-05-06 05:09
+
+### Summary
+
+Completed the first redesign execution slice. Backend auth now issues and validates server-managed session cookies with single-session replacement semantics, self-service registration is disabled, protected operational API routes now depend on authenticated session state, and the frontend now uses a dedicated `/auth/login` entry plus a protected `(app)` route group with `/overview` landing and the existing MVP dashboard moved to `/runs` as a temporary migration surface.
+
+### Files Created / Modified
+
+- `api/auth.py`
+- `api/app/main.py`
+- `tests/test_web_api.py`
+- `web/src/contexts/AuthContext.tsx`
+- `web/src/components/AuthGuard.tsx`
+- `web/src/components/LoginForm.tsx`
+- `web/src/components/AdminDashboard.tsx`
+- `web/src/lib/api.ts`
+- `web/src/app/page.tsx`
+- `web/src/app/auth/login/page.tsx`
+- `web/src/app/(app)/layout.tsx`
+- `web/src/app/(app)/overview/page.tsx`
+- `web/src/app/(app)/runs/page.tsx`
+- `web/src/app/(app)/runs/[id]/page.tsx`
+- `web/src/app/(app)/schedules/page.tsx`
+- `web/src/app/(app)/archives/page.tsx`
+- `web/src/app/(app)/retention/page.tsx`
+- `web/src/app/(app)/admin/users/page.tsx`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+docker compose up -d postgres api web nginx
+docker compose exec api python -m unittest tests.test_web_api.CookieSessionAuthTests -v
+docker compose exec api python -m unittest tests.test_web_api -v
+docker compose exec web npm run build
+git diff --check
+```
+
+### Results
+
+- Added regression tests proving login sets the session cookie and a second login invalidates the prior session.
+- Backend web API tests pass in container: 6 tests.
+- Frontend production build passes with the new route structure.
+- Protected app routes now build under `/overview`, `/runs`, `/schedules`, `/archives`, `/retention`, and `/admin/users`.
+- `/runs/[id]` build regression was fixed by restoring the missing `fetchRun` API client helper and updating back-navigation to `/runs`.
+
+### Issues / Blockers
+
+- Backend auth/session/RBAC logic still lives inside a monolithic `api/app/main.py` and needs route/service decomposition next.
+- Database role model and frontend role model still reflect older `admin/user/viewer` semantics; approved `admin/operator/viewer/auditor` normalization is still pending.
+- `/runs` still hosts the older MVP workspace; the real runs split and overview depth will land in later slices.
+
+### Next Steps
+
+1. Split auth, runs, schedules, archives, retention, and admin responsibilities out of `api/app/main.py`.
+2. Normalize approved roles and move permission checks into backend policy helpers.
+3. Start the real `/runs` workspace and `/runs/[id]` forensic split on top of the new route shell.
+
+## 2026-05-06 05:42
+
+### Summary
+
+Completed the next backend structure slice. Auth and admin responsibilities were extracted out of `api/app/main.py` into dedicated modules, backend permission helpers now enforce read/create/cancel/delete/admin actions, anonymous access to protected ops routes is rejected, and current role interpretation now normalizes legacy `user` accounts to `operator` while recognizing the approved role set on the frontend.
+
+### Files Created / Modified
+
+- `api/app/auth/__init__.py`
+- `api/app/auth/models.py`
+- `api/app/auth/service.py`
+- `api/app/auth/dependencies.py`
+- `api/app/auth/policies.py`
+- `api/app/auth/routes.py`
+- `api/app/admin/__init__.py`
+- `api/app/admin/routes.py`
+- `api/app/main.py`
+- `tests/test_web_api.py`
+- `web/src/contexts/RoleContext.tsx`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+docker compose exec api python -m unittest tests.test_web_api -v
+docker compose exec web npm run build
+git diff --check
+```
+
+### Results
+
+- Backend route logic for auth/admin is now separated from app bootstrap and run helpers.
+- New regression coverage proves:
+  - login sets session cookie,
+  - second login invalidates the first session,
+  - anonymous access to `/api/v1/runs` gets `401`,
+  - viewer access can read runs but gets `403` on `/api/v1/admin/users`.
+- Backend permission helpers now gate flows, runs, dashboard summary, admin user routes, cancel, and delete actions.
+- Web production build still passes after role-context normalization.
+
+### Issues / Blockers
+
+- `api/app/main.py` still owns all runs-domain route handlers and related service logic.
+- The real database role model and admin CRUD validation still need a dedicated migration before `operator`/`auditor` can be created end-to-end instead of only normalized in policy/presentation layers.
+- `/runs` remains the temporary migrated MVP surface pending the real workspace/detail split.
+
+### Next Steps
+
+1. Extract runs endpoints/services out of `api/app/main.py`.
+2. Start the real `/runs` workspace split and continue reducing the monolithic page surface.
+3. Follow with saved profiles and schedule entities once runs-domain boundaries are clean.
+
+## 2026-05-06 06:18
+
+### Summary
+
+Debugged the `localhost:8080` loading hang. The root route was depending on client-side hydration plus auth bootstrap to leave the loading shell, and the login page was also rendering in a disabled submitting state during initial bootstrap; this was hardened by moving `/` to a server-side redirect, adding a timeout to session bootstrap, and decoupling login-button state from background session refresh.
+
+### Files Created / Modified
+
+- `web/src/app/page.tsx`
+- `web/src/contexts/AuthContext.tsx`
+- `web/src/components/LoginForm.tsx`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+curl -sS -i http://localhost:8080
+curl -sS -i http://localhost:8080/auth/login
+curl -sS -i http://localhost:8080/api/v1/auth/session
+docker compose logs --tail=120 nginx
+docker compose logs --tail=120 web
+docker compose logs --tail=120 api
+docker compose exec web npm run build
+git diff --check
+```
+
+### Results
+
+- `/` now returns `307 Temporary Redirect` to `/auth/login` instead of a client-only loading shell.
+- `/auth/login` now renders an immediately usable sign-in form without the disabled `Signing in...` state on first load.
+- Session bootstrap in `AuthContext` now times out after 5 seconds instead of leaving the app in an indefinite loading state when the client-side session request stalls.
+- Web production build passes and whitespace check remains clean.
+
+### Issues / Blockers
+
+- This fixes the immediate route/bootstrap loading hang, but it does not yet change the deeper `/runs` MVP surface or the remaining backend domain split work.
+
+### Next Steps
+
+1. Continue the runs-domain extraction from `api/app/main.py`.
+2. Replace the temporary `/runs` migration surface with the real workspace/detail split.
+
+## 2026-05-06 06:33
+
+### Summary
+
+Completed the runs-domain route extraction. The runs HTTP surface now lives in dedicated modules under `api/app/runs/`, while `api/app/main.py` has been reduced to bootstrap plus existing run/runtime helpers wired through a service callback registry so current behavior and tests remain stable.
+
+### Files Created / Modified
+
+- `api/app/runs/__init__.py`
+- `api/app/runs/models.py`
+- `api/app/runs/service.py`
+- `api/app/runs/routes.py`
+- `api/app/main.py`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+docker compose exec api python -m unittest tests.test_web_api -v
+docker compose exec web npm run build
+git diff --check
+```
+
+### Results
+
+- Runs endpoints are no longer declared directly inside `api/app/main.py`.
+- `api/app/main.py` still exposes route function names imported from `api.app.runs.routes`, preserving direct-call compatibility for current tests and any local tooling expecting those names on the module.
+- Runtime callback wiring uses lambdas against main-module helpers, so `tests.test_web_api` patches on `web_api._get_run` and related helpers still affect route behavior as expected.
+- API container tests pass: 8 tests.
+- Web production build passes after backend extraction.
+
+### Issues / Blockers
+
+- The actual run execution/storage helpers still live in `api/app/main.py`; only the route layer and request model/service boundary were extracted in this slice.
+- `/runs` frontend is still the temporary migrated MVP surface and needs the real component/workspace split next.
+
+### Next Steps
+
+1. Split the `/runs` page into focused workspace components.
+2. Continue tightening `/runs/[id]` around the approved forensic tab model.
+3. After the runs UX split, start introducing saved profiles as first-class entities.
+
 - Existing worktree is dirty from the broader simulator upgrade; do not revert unrelated changes.
 - Live backend commands will not be run unless explicitly requested because they create/update real backend data.
 
@@ -1459,6 +1706,316 @@ date '+%Y-%m-%d %H:%M %Z'
 
 1. User reviews `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md`.
 2. If approved, transition to implementation planning only.
+## 2026-05-06 03:31
+
+### Summary
+
+Created the execution-ready implementation plan for the approved operations-platform redesign. The plan keeps the existing stack and simulator core, but sequences the work around secure backend-owned auth, route-first app-shell migration, focused run surfaces, overview-first UX, structured schedules/campaigns, exact-execution replay, and archive/retention lifecycle support.
+
+### Files Created / Modified
+
+- `docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/implementation_plan.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+ls -1 docs/superpowers/plans
+sed -n '1,260p' docs/superpowers/plans/2026-05-02-simulator-web-gui-platform.md
+sed -n '1,320p' docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md
+sed -n '1,260p' /Users/mars/.codex/plugins/cache/openai-curated/superpowers/3c463363/skills/writing-plans/SKILL.md
+rg -n "TBD|TODO|FIXME|later|if needed|where permitted|or .* maybe|phase-2|\\?" docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md
+sed -n '1,340p' docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md
+```
+
+### Results
+
+- New redesign implementation plan written for study.
+- Tracker README and canonical implementation plan now point at the redesign effort rather than the older generic web-GUI target.
+- The implementation sequence is now explicit:
+  - auth/session foundation first,
+  - backend route/service split,
+  - protected app shell,
+  - runs split,
+  - overview cockpit,
+  - profiles/schedules/campaigns,
+  - exact replay,
+  - archive/retention,
+  - admin/alerts,
+  - hardening/cutover.
+
+### Issues / Blockers
+
+- The plan has been written, but no implementation should start until the user studies and approves it.
+
+### Next Steps
+
+1. User studies `docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md`.
+2. If changes are requested, revise the plan and re-sync tracker docs.
+3. If approved, choose execution mode and proceed into implementation.
+## 2026-05-06 07:01
+
+### Summary
+
+Completed the first frontend `/runs` workspace split. The old monolithic route now delegates its launch form, live console, guide/reference surface, recent-runs table, statistics section, and delete modal to focused `web/src/components/runs/*` components while keeping the existing data flow and route behavior stable.
+
+### Files Created / Modified
+
+- `web/src/components/runs/RunLaunchPanel.tsx`
+- `web/src/components/runs/RunLiveConsole.tsx`
+- `web/src/components/runs/FlowPlannerGuide.tsx`
+- `web/src/components/runs/RecentRunsTable.tsx`
+- `web/src/components/runs/RunStatistics.tsx`
+- `web/src/components/runs/DeleteRunModal.tsx`
+- `web/src/app/(app)/runs/page.tsx`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '1,260p' web/src/app/(app)/runs/page.tsx
+sed -n '261,1460p' web/src/app/(app)/runs/page.tsx
+sed -n '1,260p' web/src/app/(app)/runs/[id]/page.tsx
+docker compose exec web npm run build
+git diff --check
+```
+
+### Results
+
+- `/runs` is now materially smaller and easier to continue decomposing.
+- Extraction was intentionally presentational-first: polling, selection, and mutation orchestration still lives in the page so this step stays low-risk.
+- The next clean boundary is `/runs/[id]`, where summary/tabs/artifact viewers can be broken into dedicated detail components and then reshaped toward the approved forensic UX.
+
+### Issues / Blockers
+
+- None from this slice.
+
+### Next Steps
+
+1. Extract `/runs/[id]` summary, artifact tabs, and event/log viewers into dedicated components.
+2. Tighten the detail-page information hierarchy toward the approved forensic tab model.
+3. Keep validating with `docker compose exec web npm run build` after each detail-page extraction slice.
+## 2026-05-06 07:11
+
+### Summary
+
+Completed the first `/runs/[id]` detail-page split. The route now delegates its header, overview, markdown artifact rendering, events view, and log view to dedicated detail components while keeping the existing fetch lifecycle and tab behavior unchanged.
+
+### Files Created / Modified
+
+- `web/src/components/runs/detail/RunDetailHeader.tsx`
+- `web/src/components/runs/detail/RunDetailOverview.tsx`
+- `web/src/components/runs/detail/RunArtifactMarkdown.tsx`
+- `web/src/components/runs/detail/RunEventsPanel.tsx`
+- `web/src/components/runs/detail/RunLogPanel.tsx`
+- `web/src/app/(app)/runs/[id]/page.tsx`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '1,520p' web/src/app/(app)/runs/[id]/page.tsx
+sed -n '520,760p' web/src/app/(app)/runs/[id]/page.tsx
+sed -n '1,220p' web/src/components/charts/LatencyBarChart.tsx
+docker compose exec web npm run build
+git diff --check
+```
+
+### Results
+
+- `/runs/[id]` is now easier to evolve without touching one large file.
+- The extraction surfaced and fixed a real chart-prop type mismatch during build verification.
+- The next slice should stop being purely structural and start reshaping the detail route into the approved forensic information architecture.
+
+### Issues / Blockers
+
+- None from this slice.
+
+### Next Steps
+
+1. Redesign `/runs/[id]` tab hierarchy toward operator summary vs technical forensics instead of the current generic surface.
+2. Add dedicated identity/execution context sections needed for rerun-exactly and future archive summaries.
+3. Keep validating with `docker compose exec web npm run build` after each UX slice.
+## 2026-05-06 07:21
+
+### Summary
+
+Completed the first real forensic UX upgrade for `/runs/[id]`. The route now uses explicit operator/engineering surfaces instead of generic tab labels, and it has a dedicated execution-context panel that exposes the run metadata needed for future exact-rerun, scheduling, and archive-summary work.
+
+### Files Created / Modified
+
+- `web/src/components/runs/detail/RunExecutionSnapshotPanel.tsx`
+- `web/src/components/runs/detail/RunDetailTabNav.tsx`
+- `web/src/components/runs/detail/RunDetailOverview.tsx`
+- `web/src/app/(app)/runs/[id]/page.tsx`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '1,260p' web/src/app/(app)/runs/[id]/page.tsx
+sed -n '1,220p' web/src/lib/api.ts
+docker compose exec web npm run build
+git diff --check
+```
+
+### Results
+
+- The detail route now reads more like an operations tool and less like a generic artifact viewer.
+- The new `Execution` tab gives the frontend a stable place to show immutable replay data once backend snapshot storage exists.
+- This slice did not change backend contracts; it only reorganized and enriched the current frontend behavior.
+
+### Issues / Blockers
+
+- The execution panel still relies on the recorded command string and current `RunRow` fields; true immutable execution snapshots do not exist yet on the backend.
+
+### Next Steps
+
+1. Add backend entities and API support for saved run profiles and immutable execution snapshots.
+2. Extend runs data/contracts so the execution tab can show real replay payloads rather than inferred values only.
+3. Start the scheduling/profile foundation once snapshot/profile persistence exists.
+## 2026-05-06 07:36
+
+### Summary
+
+Closed the remaining “partially done” foundation work. The backend now has real archive/retention route modules, run creation persists execution snapshots, and `/overview` has moved from a placeholder page to a usable monitoring cockpit backed by live summary APIs.
+
+### Files Created / Modified
+
+- `api/app/archives/__init__.py`
+- `api/app/archives/routes.py`
+- `api/app/archives/service.py`
+- `api/app/retention/__init__.py`
+- `api/app/retention/routes.py`
+- `api/app/retention/service.py`
+- `api/app/auth/policies.py`
+- `api/app/main.py`
+- `web/src/lib/api.ts`
+- `web/src/app/(app)/overview/page.tsx`
+- `web/src/components/runs/detail/RunExecutionSnapshotPanel.tsx`
+- `tests/test_web_api.py`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+docker compose exec api python -m unittest tests.test_web_api -v
+docker compose exec web npm run build
+git diff --check
+```
+
+### Results
+
+- Backend route ownership is no longer only auth/admin/runs; archive and retention summaries now have dedicated modules too.
+- Execution context is no longer only inferred from the command string at render time; a persisted execution snapshot now exists on runs.
+- `/overview` now presents operational attention, archive backlog, purge backlog, and platform state instead of just acting as a placeholder landing page.
+
+### Issues / Blockers
+
+- Saved run profiles, immutable replay APIs beyond the basic stored snapshot, scheduling/campaign orchestration, and real archive/purge lifecycle jobs are still not implemented.
+
+### Next Steps
+
+1. Add saved run profile entities and CRUD/API wiring.
+2. Add replay-oriented APIs that expose immutable execution snapshots as first-class data.
+3. Build schedule and campaign persistence on top of those entities.
+## 2026-05-06 08:03
+
+### Summary
+
+Completed the first real platform-entity slice beyond the foundation: saved run profiles and replay-oriented execution snapshot APIs. The backend now persists reusable run definitions, the runs workspace can save/load/launch them, and the run detail execution tab can trigger an exact replay from the stored snapshot.
+
+### Files Created / Modified
+
+- `api/app/runs/models.py`
+- `api/app/runs/routes.py`
+- `api/app/runs/service.py`
+- `api/app/main.py`
+- `web/src/lib/api.ts`
+- `web/src/components/runs/RunProfilesPanel.tsx`
+- `web/src/components/runs/detail/RunExecutionSnapshotPanel.tsx`
+- `web/src/app/(app)/runs/page.tsx`
+- `web/src/app/(app)/runs/[id]/page.tsx`
+- `tests/test_web_api.py`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+docker compose exec api python -m unittest tests.test_web_api -v
+docker compose exec web npm run build
+git diff --check
+```
+
+### Results
+
+- Reusable run profiles now exist as persisted platform entities instead of only ad hoc launch-form state.
+- Exact replay is now exposed as an API and wired into the execution tab, using the stored execution snapshot rather than reconstructing from the current UI.
+- These profile/snapshot primitives are now the right base for schedule and campaign entities.
+
+### Issues / Blockers
+
+- Schedules and campaigns still do not exist as persisted entities.
+- The replay snapshot is exact for launch parameters, but there is still no richer immutable execution record for schedule provenance, retry policy, or future forensic comparisons.
+
+### Next Steps
+
+1. Add schedule entities and CRUD/API wiring backed by saved profiles.
+2. Add campaign-step persistence and failure-policy modeling.
+3. Replace the `/schedules` placeholder with real schedule management built on the new primitives.
+## 2026-05-06 08:49
+
+### Summary
+
+Fixed the login-page refresh bug where submitting credentials performed a native GET to `/auth/login?...` and left the user stuck. The login form is now progressively safe: if hydration is late, the browser still submits a real POST to the auth API, receives the session cookie, and is redirected into the app.
+
+### Files Created / Modified
+
+- `api/app/auth/routes.py`
+- `web/src/components/LoginForm.tsx`
+- `web/src/app/auth/login/LoginPageClient.tsx`
+- `web/src/app/auth/login/page.tsx`
+- `tests/test_web_api.py`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+docker compose exec api python -m unittest tests.test_web_api -v
+docker compose exec web npm run build
+git diff --check
+docker compose up -d --build api web nginx
+curl -sS -i http://localhost:8080/auth/login
+curl -sS -i -X POST -H 'Content-Type: application/x-www-form-urlencoded' --data 'username=admin&password=admin123' http://localhost:8080/api/v1/auth/login
+```
+
+### Results
+
+- The login form now renders with `method="post"` and `action="/api/v1/auth/login"` instead of falling back to a query-string GET.
+- The auth API now accepts both JSON login bodies for the JS path and URL-encoded bodies for the native browser form path.
+- Browser form submissions now return `303` redirects instead of exposing credentials in the URL.
+
+### Issues / Blockers
+
+- The curl credential check used `admin/admin123` and returned `303 /auth/login?error=invalid_credentials`, so the seeded default admin is not guaranteed in the current database state.
+
+### Next Steps
+
+1. Have the user retry the login in the browser with valid credentials against the rebuilt containers.
+2. If credentials still fail, inspect the current DB user state rather than the form flow.
 ## 2026-05-05 09:57
 
 ### Summary

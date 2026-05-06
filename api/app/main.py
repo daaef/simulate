@@ -14,12 +14,34 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException, Query, Request, Depends, Security
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field
 
 from flow_presets import FLOW_PRESETS
+from .admin.routes import router as admin_router
+from .archives.routes import router as archives_router
+from .archives.service import configure_runtime as configure_archives_runtime
+from .auth import service as auth_service
+from .auth.routes import router as auth_router
+from .auth.dependencies import SESSION_COOKIE_NAME
+from .retention.routes import router as retention_router
+from .retention.service import configure_runtime as configure_retention_runtime
+from .runs.models import RunCreateRequest
+from .runs.routes import (
+    router as runs_router,
+    list_flows,
+    list_runs,
+    count_runs,
+    dashboard_summary,
+    create_run,
+    get_run,
+    get_run_log,
+    get_run_artifact,
+    get_run_metrics,
+    cancel_run,
+    delete_run,
+)
+from .runs.service import configure_runtime as configure_runs_runtime
 
 # Database configuration
 USE_POSTGRES = os.getenv('DATABASE_URL') is not None
@@ -31,24 +53,6 @@ if USE_POSTGRES:
         from psycopg2.extras import DictCursor
     except ImportError:
         DictCursor = None
-
-# Import authentication module
-try:
-    import sys
-    import os
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from auth import (
-        init_auth, get_auth_manager, UserCreate, UserLogin, TokenResponse, 
-        UserProfile as AuthUserProfile
-    )
-    AUTH_ENABLED = True
-except ImportError as e:
-    AUTH_ENABLED = False
-    logging.warning(f"Auth module not available, running without authentication: {e}")
-
-# JWT Configuration (fallback if auth module not available)
-JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 15
-
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -96,6 +100,8 @@ class EventCacheEntry:
 
 
 EVENT_CACHE: "OrderedDict[str, EventCacheEntry]" = OrderedDict()
+ACTIVE_RETENTION_DAYS = 30
+ARCHIVE_RETENTION_DAYS = 180
 
 
 # Database abstraction layer
@@ -122,7 +128,7 @@ def _db() -> sqlite3.Connection:
 def _init_db() -> None:
     """Initialize database schema"""
     if USE_POSTGRES:
-        # PostgreSQL schema is created by migrations
+        _migrate_postgres_schema()
         return
     
     # SQLite schema
@@ -154,7 +160,30 @@ def _init_db() -> None:
                 report_path TEXT,
                 story_path TEXT,
                 events_path TEXT,
-                error TEXT
+                error TEXT,
+                execution_snapshot TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS run_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                name TEXT NOT NULL,
+                description TEXT,
+                flow TEXT NOT NULL,
+                plan TEXT NOT NULL,
+                timing TEXT NOT NULL,
+                mode TEXT,
+                store_id TEXT,
+                phone TEXT,
+                all_users INTEGER NOT NULL DEFAULT 0,
+                no_auto_provision INTEGER NOT NULL DEFAULT 0,
+                post_order_actions INTEGER,
+                extra_args TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
             """
         )
@@ -170,63 +199,46 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE runs ADD COLUMN user_name TEXT")
     if "store_name" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN store_name TEXT")
-
-# Authentication dependencies
-security = HTTPBearer(auto_error=False)
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
-
-
-class ResetPasswordRequest(BaseModel):
-    new_password: str
+    if "execution_snapshot" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN execution_snapshot TEXT")
+    profile_columns = [row[1] for row in conn.execute("PRAGMA table_info(run_profiles)").fetchall()]
+    if profile_columns and "description" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN description TEXT")
 
 
-async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
-):
-    """Get current authenticated user"""
-    if not AUTH_ENABLED:
-        # Return a default user for backward compatibility
-        return {"id": None, "username": "system", "role": "admin"}
-
-    if credentials is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    auth_manager = get_auth_manager()
-    payload = auth_manager.verify_token(credentials.credentials)
-    if not payload:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    user_id = int(payload.get("sub"))
-    user = auth_manager.get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    return user
-
-async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Security(security)):
-    """Get current user if authenticated, otherwise return None"""
-    if not AUTH_ENABLED or not credentials:
-        return None
-    
+def _migrate_postgres_schema() -> None:
+    conn = _get_db_connection()
     try:
-        return await get_current_user(credentials)
-    except HTTPException:
-        return None
-
+        with conn.cursor() as cursor:
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS store_phone TEXT")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS user_name TEXT")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS store_name TEXT")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS execution_snapshot JSONB")
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS run_profiles (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    name VARCHAR(120) NOT NULL,
+                    description TEXT,
+                    flow VARCHAR(50) NOT NULL,
+                    plan VARCHAR(255) NOT NULL,
+                    timing VARCHAR(20) NOT NULL,
+                    mode VARCHAR(20),
+                    store_id VARCHAR(50),
+                    phone VARCHAR(20),
+                    all_users BOOLEAN NOT NULL DEFAULT FALSE,
+                    no_auto_provision BOOLEAN NOT NULL DEFAULT FALSE,
+                    post_order_actions BOOLEAN,
+                    extra_args JSONB DEFAULT '[]',
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+                """
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     payload = dict(row)
@@ -235,6 +247,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     if payload["post_order_actions"] is not None:
         payload["post_order_actions"] = bool(payload["post_order_actions"])
     payload["extra_args"] = json.loads(payload["extra_args"] or "[]")
+    if payload.get("execution_snapshot"):
+        payload["execution_snapshot"] = json.loads(payload["execution_snapshot"])
     return payload
 
 
@@ -251,7 +265,22 @@ def _row_to_dict_any(row) -> dict[str, Any]:
         if payload["post_order_actions"] is not None:
             payload["post_order_actions"] = bool(payload["post_order_actions"])
         payload["extra_args"] = json.loads(payload["extra_args"] or "[]")
+        snapshot = payload.get("execution_snapshot")
+        if isinstance(snapshot, str) and snapshot:
+            payload["execution_snapshot"] = json.loads(snapshot)
         return payload
+
+
+def _profile_row_to_dict_any(row) -> dict[str, Any]:
+    payload = dict(row)
+    payload["all_users"] = bool(payload["all_users"])
+    payload["no_auto_provision"] = bool(payload["no_auto_provision"])
+    if payload["post_order_actions"] is not None:
+        payload["post_order_actions"] = bool(payload["post_order_actions"])
+    extra_args = payload.get("extra_args")
+    if isinstance(extra_args, str):
+        payload["extra_args"] = json.loads(extra_args or "[]")
+    return payload
 
 def _list_runs(limit: int = 100, offset: int = 0, user_id: Optional[int] = None) -> list[dict[str, Any]]:
     _cleanup_stale_processes()
@@ -298,6 +327,55 @@ def _count_runs(user_id: Optional[int] = None) -> int:
         with DB_LOCK, _db() as conn:
             result = conn.execute("SELECT COUNT(*) FROM runs").fetchone()
             return result[0] if result else 0
+
+
+def _resolve_persisted_user_id(user_id: Optional[int]) -> Optional[int]:
+    if user_id is None:
+        return None
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1 FROM users WHERE id = %s", (user_id,))
+                row = cursor.fetchone()
+                return user_id if row else None
+        finally:
+            conn.close()
+    return user_id
+
+
+def _list_run_profiles() -> list[dict[str, Any]]:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute("SELECT * FROM run_profiles ORDER BY updated_at DESC, id DESC")
+                rows = cursor.fetchall()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            rows = conn.execute("SELECT * FROM run_profiles ORDER BY updated_at DESC, id DESC").fetchall()
+    return [_profile_row_to_dict_any(row) for row in rows]
+
+
+def _get_run_profile(profile_id: int) -> dict[str, Any]:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute("SELECT * FROM run_profiles WHERE id = %s", (profile_id,))
+                row = cursor.fetchone()
+                if row is None:
+                    raise HTTPException(status_code=404, detail=f"Run profile {profile_id} not found.")
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            row = conn.execute("SELECT * FROM run_profiles WHERE id = ?", (profile_id,)).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail=f"Run profile {profile_id} not found.")
+    return _profile_row_to_dict_any(row)
 
 def _cleanup_stale_processes() -> None:
     """Remove finished processes from RUN_PROCESSES and update their status if needed."""
@@ -395,26 +473,12 @@ def _update_run(run_id: int, **fields: Any) -> None:
                 (*values, run_id),
             )
 
-
 @dataclass
 class ScheduledRun:
     flow: str
     plan: str
     timing: str
     store_id: str | None = None
-
-
-class RunCreateRequest(BaseModel):
-    flow: str = Field(default="doctor")
-    plan: str = Field(default="sim_actors.json")
-    timing: Literal["fast", "realistic"] = "fast"
-    mode: Literal["trace", "load"] | None = None
-    store_id: str | None = None
-    phone: str | None = None
-    all_users: bool = False
-    no_auto_provision: bool = False
-    post_order_actions: bool | None = None
-    extra_args: list[str] = Field(default_factory=list)
 
 
 def _build_command(request: RunCreateRequest) -> list[str]:
@@ -450,6 +514,39 @@ def _build_command(request: RunCreateRequest) -> list[str]:
     if request.extra_args:
         command.extend(request.extra_args)
     return command
+
+
+def _build_execution_snapshot(request: RunCreateRequest, command: list[str], created_at: str) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "flow": request.flow,
+        "plan": request.plan,
+        "timing": request.timing,
+        "mode": request.mode,
+        "store_id": request.store_id,
+        "phone": request.phone,
+        "all_users": request.all_users,
+        "no_auto_provision": request.no_auto_provision,
+        "post_order_actions": request.post_order_actions,
+        "extra_args": request.extra_args,
+        "command": " ".join(command),
+        "created_at": created_at,
+    }
+
+
+def _profile_request_to_run_request(profile: dict[str, Any]) -> RunCreateRequest:
+    return RunCreateRequest(
+        flow=profile["flow"],
+        plan=profile["plan"],
+        timing=profile["timing"],
+        mode=profile.get("mode"),
+        store_id=profile.get("store_id"),
+        phone=profile.get("phone"),
+        all_users=bool(profile.get("all_users")),
+        no_auto_provision=bool(profile.get("no_auto_provision")),
+        post_order_actions=profile.get("post_order_actions"),
+        extra_args=list(profile.get("extra_args") or []),
+    )
 
 
 def _parse_artifact_paths(line: str) -> tuple[str, str] | None:
@@ -730,6 +827,8 @@ def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
 def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dict[str, Any]:
     command = _build_command(request)
     created_at = _utc_now()
+    execution_snapshot = _build_execution_snapshot(request, command, created_at)
+    persisted_user_id = _resolve_persisted_user_id(user_id)
     
     if USE_POSTGRES:
         conn = _get_db_connection()
@@ -740,12 +839,12 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                     INSERT INTO runs (
                         user_id, flow, plan, timing, mode, store_id, phone, store_phone,
                         user_name, store_name, all_users, no_auto_provision,
-                        post_order_actions, extra_args, status, command, created_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        post_order_actions, extra_args, status, command, created_at, execution_snapshot
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
-                        user_id,
+                        persisted_user_id,
                         request.flow,
                         request.plan,
                         request.timing,
@@ -762,6 +861,7 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                         "queued",
                         " ".join(command),
                         created_at,
+                        json.dumps(execution_snapshot),
                     ),
                 )
                 run_id = cursor.fetchone()[0]
@@ -774,8 +874,8 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                 """
                 INSERT INTO runs (
                     flow, plan, timing, mode, store_id, phone, store_phone, user_name, store_name,
-                    all_users, no_auto_provision, post_order_actions, extra_args, status, command, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    all_users, no_auto_provision, post_order_actions, extra_args, status, command, created_at, execution_snapshot
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request.flow,
@@ -794,6 +894,7 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                     "queued",
                     " ".join(command),
                     created_at,
+                    json.dumps(execution_snapshot),
                 ),
             )
             run_id = int(cursor.lastrowid)
@@ -804,6 +905,178 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
     )
     thread.start()
     return _get_run(run_id)
+
+
+def _list_run_profiles_payload() -> dict[str, Any]:
+    return {"profiles": _list_run_profiles()}
+
+
+def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any]:
+    created_at = _utc_now()
+    persisted_user_id = _resolve_persisted_user_id(user_id)
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO run_profiles (
+                        user_id, name, description, flow, plan, timing, mode, store_id, phone,
+                        all_users, no_auto_provision, post_order_actions, extra_args, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                    """,
+                    (
+                        persisted_user_id,
+                        request.name,
+                        request.description,
+                        request.flow,
+                        request.plan,
+                        request.timing,
+                        request.mode,
+                        request.store_id,
+                        request.phone,
+                        request.all_users,
+                        request.no_auto_provision,
+                        request.post_order_actions,
+                        json.dumps(request.extra_args),
+                        created_at,
+                        created_at,
+                    ),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO run_profiles (
+                    user_id, name, description, flow, plan, timing, mode, store_id, phone,
+                    all_users, no_auto_provision, post_order_actions, extra_args, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    persisted_user_id,
+                    request.name,
+                    request.description,
+                    request.flow,
+                    request.plan,
+                    request.timing,
+                    request.mode,
+                    request.store_id,
+                    request.phone,
+                    int(request.all_users),
+                    int(request.no_auto_provision),
+                    int(request.post_order_actions) if request.post_order_actions is not None else None,
+                    json.dumps(request.extra_args),
+                    created_at,
+                    created_at,
+                ),
+            )
+            row = conn.execute("SELECT * FROM run_profiles WHERE id = ?", (int(cursor.lastrowid),)).fetchone()
+    return {"profile": _profile_row_to_dict_any(row)}
+
+
+def _update_run_profile(profile_id: int, request, user_id: Optional[int] = None) -> dict[str, Any]:
+    _get_run_profile(profile_id)
+    updated_at = _utc_now()
+    fields = {
+        "name": request.name,
+        "description": request.description,
+        "flow": request.flow,
+        "plan": request.plan,
+        "timing": request.timing,
+        "mode": request.mode,
+        "store_id": request.store_id,
+        "phone": request.phone,
+        "all_users": request.all_users,
+        "no_auto_provision": request.no_auto_provision,
+        "post_order_actions": request.post_order_actions,
+        "extra_args": json.dumps(request.extra_args),
+        "updated_at": updated_at,
+    }
+    persisted_user_id = _resolve_persisted_user_id(user_id)
+    if persisted_user_id is not None:
+        fields["user_id"] = persisted_user_id
+
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                keys = list(fields.keys())
+                values = [fields[key] for key in keys]
+                assignment = ", ".join(f"{key} = %s" for key in keys)
+                cursor.execute(
+                    f"UPDATE run_profiles SET {assignment} WHERE id = %s RETURNING *",
+                    (*values, profile_id),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        keys = list(fields.keys())
+        values = [fields[key] for key in keys]
+        assignment = ", ".join(f"{key} = ?" for key in keys)
+        with DB_LOCK, _db() as conn:
+            conn.execute(
+                f"UPDATE run_profiles SET {assignment} WHERE id = ?",
+                (*values, profile_id),
+            )
+            row = conn.execute("SELECT * FROM run_profiles WHERE id = ?", (profile_id,)).fetchone()
+    return {"profile": _profile_row_to_dict_any(row)}
+
+
+def _delete_run_profile(profile_id: int) -> dict[str, Any]:
+    _get_run_profile(profile_id)
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM run_profiles WHERE id = %s", (profile_id,))
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute("DELETE FROM run_profiles WHERE id = ?", (profile_id,))
+    return {"profile_id": profile_id, "deleted": True}
+
+
+def _launch_run_profile(profile_id: int, user_id: Optional[int] = None) -> dict[str, Any]:
+    profile = _get_run_profile(profile_id)
+    request = _profile_request_to_run_request(profile)
+    run = _create_run(request, user_id)
+    return {"profile": profile, "run": run}
+
+
+def _run_execution_snapshot_payload(run_id: int) -> dict[str, Any]:
+    run = _get_run(run_id)
+    snapshot = run.get("execution_snapshot") or {}
+    return {"run_id": run_id, "available": bool(snapshot), "snapshot": snapshot}
+
+
+def _replay_run_logic(run_id: int, user_id: Optional[int] = None) -> dict[str, Any]:
+    run = _get_run(run_id)
+    snapshot = run.get("execution_snapshot")
+    if not isinstance(snapshot, dict) or not snapshot:
+        raise HTTPException(status_code=409, detail=f"Run {run_id} does not have a replayable execution snapshot.")
+    request = RunCreateRequest(
+        flow=snapshot["flow"],
+        plan=snapshot["plan"],
+        timing=snapshot["timing"],
+        mode=snapshot.get("mode"),
+        store_id=snapshot.get("store_id"),
+        phone=snapshot.get("phone"),
+        all_users=bool(snapshot.get("all_users")),
+        no_auto_provision=bool(snapshot.get("no_auto_provision")),
+        post_order_actions=snapshot.get("post_order_actions"),
+        extra_args=list(snapshot.get("extra_args") or []),
+    )
+    replayed_run = _create_run(request, user_id)
+    return {"source_run_id": run_id, "run": replayed_run, "snapshot": snapshot}
 
 
 def _tail_log(path: Path, lines: int) -> str:
@@ -943,6 +1216,37 @@ def _flow_breakdown(runs: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(bucket.items(), key=lambda item: (-item[1], item[0])))
 
 
+def _parse_run_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _retention_buckets(runs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    now = datetime.now(timezone.utc)
+    active_cutoff = ACTIVE_RETENTION_DAYS
+    archive_cutoff = ARCHIVE_RETENTION_DAYS
+    buckets = {"active": [], "archive": [], "purge": []}
+    for run in runs:
+        created_at = _parse_run_timestamp(run.get("created_at"))
+        if created_at is None:
+            buckets["active"].append(run)
+            continue
+        age_days = max(0, int((now - created_at).total_seconds() // 86400))
+        if age_days < active_cutoff:
+            buckets["active"].append(run)
+        elif age_days < archive_cutoff:
+            buckets["archive"].append(run)
+        else:
+            buckets["purge"].append(run)
+    return buckets
+
+
 def _event_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
     actors: dict[str, int] = {}
     actions: dict[str, int] = {}
@@ -992,6 +1296,236 @@ def _event_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _dashboard_summary_payload() -> dict[str, Any]:
+    runs = _list_runs(limit=200)
+    statuses = _status_breakdown(runs)
+    total = len(runs)
+    succeeded = statuses.get("succeeded", 0)
+    success_rate = round((succeeded / total) * 100, 2) if total else 0.0
+    buckets = _retention_buckets(runs)
+    now = datetime.now(timezone.utc)
+    recent_failures = 0
+    active_runs = 0
+    degraded_runs = 0
+    for run in runs:
+        status = str(run.get("status") or "").lower()
+        if status in {"queued", "running", "cancelling"}:
+            active_runs += 1
+        if status == "failed":
+            created_at = _parse_run_timestamp(run.get("created_at"))
+            if created_at and (now - created_at).total_seconds() <= 86400:
+                recent_failures += 1
+            degraded_runs += 1
+    return {
+        "total_runs": total,
+        "status_breakdown": statuses,
+        "flow_breakdown": _flow_breakdown(runs),
+        "success_rate": success_rate,
+        "active_runs": active_runs,
+        "failed_last_24h": recent_failures,
+        "degraded_runs": degraded_runs,
+        "archive_backlog": len(buckets["archive"]),
+        "purge_backlog": len(buckets["purge"]),
+    }
+
+
+def _archives_summary_payload() -> dict[str, Any]:
+    runs = _list_runs(limit=500)
+    buckets = _retention_buckets(runs)
+    return {
+        "policy_days": {"active": ACTIVE_RETENTION_DAYS, "archive": ARCHIVE_RETENTION_DAYS},
+        "counts": {
+            "active": len(buckets["active"]),
+            "archive_ready": len(buckets["archive"]),
+            "purge_ready": len(buckets["purge"]),
+        },
+    }
+
+
+def _archives_runs_payload(limit: int, offset: int) -> dict[str, Any]:
+    runs = _list_runs(limit=500)
+    buckets = _retention_buckets(runs)
+    archive_runs = buckets["archive"] + buckets["purge"]
+    page = archive_runs[offset : offset + limit]
+    return {
+        "runs": page,
+        "total": len(archive_runs),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def _retention_summary_payload() -> dict[str, Any]:
+    runs = _list_runs(limit=500)
+    buckets = _retention_buckets(runs)
+    raw_artifact_runs = sum(1 for run in runs if any(run.get(field) for field in ARTIFACT_FIELDS) or run.get("log_path"))
+    return {
+        "policies": {
+            "active_days": ACTIVE_RETENTION_DAYS,
+            "archive_days": ARCHIVE_RETENTION_DAYS,
+        },
+        "queue": {
+            "archive_ready": len(buckets["archive"]),
+            "purge_ready": len(buckets["purge"]),
+            "artifact_backed_runs": raw_artifact_runs,
+        },
+        "status": "observation-only",
+    }
+
+
+def _run_log_payload(run_id: int, tail: int) -> dict[str, Any]:
+    run = _get_run(run_id)
+    log_path = run.get("log_path")
+    if not log_path:
+        return {"run_id": run_id, "log": ""}
+    return {"run_id": run_id, "log": _tail_log(Path(log_path), tail)}
+
+
+def _run_artifact_payload(
+    run_id: int,
+    kind: Literal["report", "story", "events"],
+    offset: int,
+    limit: int,
+    compact: bool,
+) -> dict[str, Any]:
+    run = _get_run(run_id)
+    mapping = {
+        "report": run.get("report_path"),
+        "story": run.get("story_path"),
+        "events": run.get("events_path"),
+    }
+    path = _safe_path(mapping[kind])
+    if path is None or not path.exists():
+        return {"run_id": run_id, "kind": kind, "available": False, "content": None}
+    if kind in {"report", "story"}:
+        return {
+            "run_id": run_id,
+            "kind": kind,
+            "available": True,
+            "path": str(path),
+            "content": _read_text(path),
+        }
+    cached = _load_events_cached(path)
+    subset = cached.events[offset : offset + limit]
+    if compact:
+        subset = [_compact_event(event) for event in subset]
+    return {
+        "run_id": run_id,
+        "kind": kind,
+        "available": True,
+        "path": str(path),
+        "offset": offset,
+        "limit": limit,
+        "count": len(subset),
+        "total_count": len(cached.events),
+        "content": subset,
+    }
+
+
+def _run_metrics_payload(run_id: int) -> dict[str, Any]:
+    run = _get_run(run_id)
+    path = _safe_path(run.get("events_path"))
+    if path is None or not path.exists():
+        return {
+            "run_id": run_id,
+            "available": False,
+            "metrics": {
+                "total_events": 0,
+                "failed_events": 0,
+                "http_calls": 0,
+                "websocket_events": 0,
+                "top_actors": {},
+                "top_actions": {},
+            },
+        }
+    cached = _load_events_cached(path)
+    return {"run_id": run_id, "available": True, "metrics": cached.metrics}
+
+
+def _cancel_run_logic(run_id: int) -> dict[str, Any]:
+    _get_run(run_id)
+    with RUN_LOCK:
+        process = RUN_PROCESSES.get(run_id)
+        if process is None:
+            raise HTTPException(status_code=409, detail=f"Run {run_id} is not active.")
+        RUN_CANCELLED.add(run_id)
+        process.terminate()
+    _update_run(run_id, status="cancelling")
+    return {"run_id": run_id, "status": "cancelling"}
+
+
+def _delete_run_logic(run_id: int) -> dict[str, Any]:
+    run = _get_run(run_id)
+
+    with RUN_LOCK:
+        process = RUN_PROCESSES.get(run_id)
+        if process is not None:
+            if process.poll() is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Run {run_id} is still active. Cancel the run before deleting."
+                )
+            RUN_PROCESSES.pop(run_id, None)
+
+    log_path = run.get("log_path")
+    run_folder = None
+    if log_path:
+        run_folder = Path(log_path).parent
+    else:
+        for folder_path in LOG_DIR.iterdir():
+            if folder_path.is_dir() and ((folder_path / "events.json").exists() or (folder_path / "report.md").exists()):
+                created_at = run.get("created_at")
+                if created_at:
+                    try:
+                        run_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        folder_time = datetime.fromtimestamp(folder_path.stat().st_mtime)
+                        if abs((folder_time - run_time).total_seconds()) < 3600:
+                            run_folder = folder_path
+                            break
+                    except Exception:
+                        pass
+
+    deleted_files: list[str] = []
+    if run_folder and run_folder.exists():
+        try:
+            for file_path in run_folder.rglob("*"):
+                if file_path.is_file():
+                    deleted_files.append(str(file_path.relative_to(run_folder)))
+            import shutil
+            shutil.rmtree(run_folder)
+            LOGGER.info(f"Deleted run folder: {run_folder}")
+        except Exception as exc:
+            LOGGER.error(f"Failed to delete run folder {run_folder}: {exc}")
+
+    try:
+        if USE_POSTGRES:
+            conn = _get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("DELETE FROM runs WHERE id = %s", (run_id,))
+                conn.commit()
+            finally:
+                conn.close()
+        else:
+            with DB_LOCK, _db() as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+        LOGGER.info(f"Deleted run {run_id} from database")
+    except Exception as exc:
+        LOGGER.error(f"Failed to delete run {run_id} from database: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete run from database: {str(exc)}"
+        )
+
+    return {
+        "run_id": run_id,
+        "deleted": True,
+        "deleted_files": deleted_files,
+        "message": f"Run {run_id} and its artifacts have been deleted."
+    }
+
+
 def _run_autopilot_job() -> None:
     payload = RunCreateRequest(
         flow="doctor",
@@ -1027,13 +1561,34 @@ app.add_middleware(
 )
 
 # Initialize authentication if enabled
-if AUTH_ENABLED and USE_POSTGRES:
-    try:
-        init_auth(POSTGRES_URL)
-        LOGGER.info("Authentication system initialized")
-    except Exception as e:
-        LOGGER.error(f"Failed to initialize authentication: {e}")
-        AUTH_ENABLED = False
+auth_service.init_auth_system(POSTGRES_URL, USE_POSTGRES)
+configure_runs_runtime(
+    list_flows=lambda: {"flows": sorted(FLOW_PRESETS.keys())},
+    list_runs=lambda limit, offset: {"runs": _list_runs(limit=limit, offset=offset), "total": _count_runs(), "limit": limit, "offset": offset},
+    count_runs=lambda: {"count": _count_runs()},
+    dashboard_summary=lambda: _dashboard_summary_payload(),
+    create_run=lambda request, user_id: _create_run(request, user_id),
+    get_run=lambda run_id: _get_run(run_id),
+    get_run_log=lambda run_id, tail: _run_log_payload(run_id, tail),
+    get_run_artifact=lambda run_id, kind, offset, limit, compact: _run_artifact_payload(run_id, kind, offset, limit, compact),
+    get_run_metrics=lambda run_id: _run_metrics_payload(run_id),
+    cancel_run=lambda run_id: _cancel_run_logic(run_id),
+    delete_run=lambda run_id: _delete_run_logic(run_id),
+    list_profiles=lambda: _list_run_profiles_payload(),
+    create_profile=lambda request, user_id: _create_run_profile(request, user_id),
+    update_profile=lambda profile_id, request, user_id: _update_run_profile(profile_id, request, user_id),
+    delete_profile=lambda profile_id: _delete_run_profile(profile_id),
+    launch_profile=lambda profile_id, user_id: _launch_run_profile(profile_id, user_id),
+    get_execution_snapshot=lambda run_id: _run_execution_snapshot_payload(run_id),
+    replay_run=lambda run_id, user_id: _replay_run_logic(run_id, user_id),
+)
+configure_archives_runtime(
+    summary=lambda: _archives_summary_payload(),
+    list_runs=lambda limit, offset: _archives_runs_payload(limit, offset),
+)
+configure_retention_runtime(
+    summary=lambda: _retention_summary_payload(),
+)
 
 
 @app.middleware("http")
@@ -1070,420 +1625,8 @@ def healthz() -> dict[str, Any]:
     }
 
 
-@app.get("/api/v1/flows")
-def list_flows() -> dict[str, Any]:
-    return {"flows": sorted(FLOW_PRESETS.keys())}
-
-
-# Authentication endpoints
-@app.post("/api/v1/auth/register")
-def register_user(user_data: UserCreate) -> dict[str, Any]:
-    """Register a new user"""
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=501, detail="Authentication not enabled")
-    
-    auth_manager = get_auth_manager()
-    try:
-        user = auth_manager.create_user(user_data)
-        return {"message": "User created successfully", "user": user}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to create user")
-
-
-@app.post("/api/v1/auth/login")
-def login_user(credentials: UserLogin) -> TokenResponse:
-    """Authenticate user and return tokens"""
-    if not AUTH_ENABLED:
-        # Return default tokens for backward compatibility
-        return TokenResponse(
-            access_token="default-token",
-            refresh_token="default-refresh",
-            expires_in=900
-        )
-    
-    auth_manager = get_auth_manager()
-    user = auth_manager.authenticate_user(credentials.username, credentials.password)
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    access_token = auth_manager.create_access_token({"sub": str(user['id']), "username": user['username']})
-    refresh_token = auth_manager.create_refresh_token(user['id'])
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
-
-
-@app.post("/api/v1/auth/refresh")
-def refresh_token(payload: RefreshTokenRequest) -> TokenResponse:
-    """Refresh access token"""
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=501, detail="Authentication not enabled")
-    
-    auth_manager = get_auth_manager()
-    tokens = auth_manager.refresh_access_token(payload.refresh_token)
-    if not tokens:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired refresh token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    return tokens
-
-
-@app.post("/api/v1/auth/logout")
-def logout(payload: RefreshTokenRequest) -> dict[str, Any]:
-    """Logout user by invalidating refresh token"""
-    if not AUTH_ENABLED:
-        return {"message": "Logged out successfully"}
-    
-    auth_manager = get_auth_manager()
-    success = auth_manager.logout(payload.refresh_token)
-    if not success:
-        raise HTTPException(status_code=400, detail="Failed to logout")
-    
-    return {"message": "Logged out successfully"}
-
-
-@app.get("/api/v1/auth/me")
-def get_current_user_profile(current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
-    """Get current user profile"""
-    if not AUTH_ENABLED:
-        return {"username": "system", "role": "admin"}
-    
-    return {
-        "id": current_user['id'],
-        "username": current_user['username'],
-        "email": current_user.get('email'),
-        "role": current_user['role'],
-        "created_at": current_user['created_at'],
-        "last_login": current_user.get('last_login'),
-        "preferences": current_user.get('preferences', {})
-    }
-
-# Admin endpoints
-@app.get("/api/v1/admin/users")
-def list_users(current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
-    """List all users (admin only)"""
-    if not AUTH_ENABLED:
-        return {"users": []}
-    
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    auth_manager = get_auth_manager()
-    users = auth_manager.list_users()
-    return {"users": users}
-
-@app.post("/api/v1/admin/users")
-def create_user(user_data: UserCreate, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
-    """Create a new user (admin only)"""
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=501, detail="Authentication not enabled")
-    
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    auth_manager = get_auth_manager()
-    try:
-        user = auth_manager.create_user(user_data)
-        return {"message": "User created successfully", "user": user}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to create user")
-
-@app.put("/api/v1/admin/users/{user_id}")
-def update_user(user_id: int, user_data: dict, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
-    """Update a user (admin only)"""
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=501, detail="Authentication not enabled")
-    
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    auth_manager = get_auth_manager()
-    try:
-        user = auth_manager.update_user(user_id, user_data)
-        return {"message": "User updated successfully", "user": user}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to update user")
-
-@app.delete("/api/v1/admin/users/{user_id}")
-def delete_user(user_id: int, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
-    """Delete a user (admin only)"""
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=501, detail="Authentication not enabled")
-    
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    if user_id == current_user['id']:
-        raise HTTPException(status_code=400, detail="Cannot delete your own account")
-    
-    auth_manager = get_auth_manager()
-    try:
-        success = auth_manager.delete_user(user_id)
-        if not success:
-            raise HTTPException(status_code=404, detail="User not found")
-        return {"message": "User deleted successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to delete user")
-
-@app.post("/api/v1/admin/users/{user_id}/reset-password")
-def reset_user_password(
-    user_id: int,
-    payload: ResetPasswordRequest,
-    current_user: dict = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Reset user password (admin only)"""
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=501, detail="Authentication not enabled")
-    
-    if current_user['role'] != 'admin':
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    auth_manager = get_auth_manager()
-    try:
-        success = auth_manager.reset_password(user_id, payload.new_password)
-        if not success:
-            raise HTTPException(status_code=404, detail="User not found")
-        return {"message": "Password reset successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to reset password")
-
-
-@app.get("/api/v1/runs")
-def list_runs(
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-    current_user: Optional[dict] = Depends(get_optional_user)
-) -> dict[str, Any]:
-    user_id = current_user.get('id') if current_user else None
-    runs = _list_runs(limit=limit, offset=offset, user_id=user_id)
-    total = _count_runs(user_id=user_id)
-    return {"runs": runs, "total": total, "limit": limit, "offset": offset}
-
-
-@app.get("/api/v1/runs/count")
-def count_runs() -> dict[str, Any]:
-    return {"count": _count_runs()}
-
-
-@app.get("/api/v1/dashboard/summary")
-def dashboard_summary() -> dict[str, Any]:
-    runs = _list_runs(limit=200)
-    statuses = _status_breakdown(runs)
-    total = len(runs)
-    succeeded = statuses.get("succeeded", 0)
-    success_rate = round((succeeded / total) * 100, 2) if total else 0.0
-    return {
-        "total_runs": total,
-        "status_breakdown": statuses,
-        "flow_breakdown": _flow_breakdown(runs),
-        "success_rate": success_rate,
-    }
-
-
-@app.post("/api/v1/runs")
-def create_run(request: RunCreateRequest, current_user: Optional[dict] = Depends(get_optional_user)) -> dict[str, Any]:
-    user_id = current_user.get('id') if current_user else None
-    return _create_run(request, user_id)
-
-
-@app.get("/api/v1/runs/{run_id}")
-def get_run(run_id: int) -> dict[str, Any]:
-    return _get_run(run_id)
-
-
-@app.get("/api/v1/runs/{run_id}/log")
-def get_run_log(run_id: int, tail: int = Query(default=200, ge=1, le=5000)) -> dict[str, Any]:
-    run = _get_run(run_id)
-    log_path = run.get("log_path")
-    if not log_path:
-        return {"run_id": run_id, "log": ""}
-    return {"run_id": run_id, "log": _tail_log(Path(log_path), tail)}
-
-
-@app.get("/api/v1/runs/{run_id}/artifacts/{kind}")
-def get_run_artifact(
-    run_id: int,
-    kind: Literal["report", "story", "events"],
-    offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=200, ge=1, le=2000),
-    compact: bool = Query(default=True),
-) -> dict[str, Any]:
-    run = _get_run(run_id)
-    mapping = {
-        "report": run.get("report_path"),
-        "story": run.get("story_path"),
-        "events": run.get("events_path"),
-    }
-    path = _safe_path(mapping[kind])
-    if path is None or not path.exists():
-        return {"run_id": run_id, "kind": kind, "available": False, "content": None}
-    if kind in {"report", "story"}:
-        return {
-            "run_id": run_id,
-            "kind": kind,
-            "available": True,
-            "path": str(path),
-            "content": _read_text(path),
-        }
-    cached = _load_events_cached(path)
-    total_count = len(cached.events)
-    subset = cached.events[offset : offset + limit]
-    if compact:
-        subset = [_compact_event(event) for event in subset]
-    return {
-        "run_id": run_id,
-        "kind": kind,
-        "available": True,
-        "path": str(path),
-        "offset": offset,
-        "limit": limit,
-        "count": len(subset),
-        "total_count": total_count,
-        "content": subset,
-    }
-
-
-@app.get("/api/v1/runs/{run_id}/metrics")
-def get_run_metrics(run_id: int) -> dict[str, Any]:
-    run = _get_run(run_id)
-    path = _safe_path(run.get("events_path"))
-    if path is None or not path.exists():
-        return {
-            "run_id": run_id,
-            "available": False,
-            "metrics": {
-                "total_events": 0,
-                "failed_events": 0,
-                "http_calls": 0,
-                "websocket_events": 0,
-                "top_actors": {},
-                "top_actions": {},
-            },
-        }
-    cached = _load_events_cached(path)
-    return {"run_id": run_id, "available": True, "metrics": cached.metrics}
-
-
-@app.post("/api/v1/runs/{run_id}/cancel")
-def cancel_run(run_id: int) -> dict[str, Any]:
-    _get_run(run_id)
-    with RUN_LOCK:
-        process = RUN_PROCESSES.get(run_id)
-        if process is None:
-            raise HTTPException(status_code=409, detail=f"Run {run_id} is not active.")
-        RUN_CANCELLED.add(run_id)
-        process.terminate()
-    _update_run(run_id, status="cancelling")
-    return {"run_id": run_id, "status": "cancelling"}
-
-
-@app.delete("/api/v1/runs/{run_id}")
-def delete_run(run_id: int) -> dict[str, Any]:
-    """Delete a run and its associated folder."""
-    run = _get_run(run_id)
-
-    # Check if run is active (process exists and is actually running)
-    with RUN_LOCK:
-        process = RUN_PROCESSES.get(run_id)
-        if process is not None:
-            # Check if process is actually still running
-            if process.poll() is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Run {run_id} is still active. Cancel the run before deleting."
-                )
-            # Process has finished but wasn't cleaned up - remove it
-            RUN_PROCESSES.pop(run_id, None)
-    
-    # Get run folder path from log_path or create expected path
-    log_path = run.get("log_path")
-    run_folder = None
-    
-    if log_path:
-        log_file = Path(log_path)
-        # Run folder is the parent of the log file
-        run_folder = log_file.parent
-    else:
-        # Fallback: try to find folder by run ID pattern
-        # Look for folders containing run artifacts
-        for folder_path in LOG_DIR.iterdir():
-            if folder_path.is_dir():
-                # Check if this folder might belong to the run
-                # by checking if it contains expected files
-                if (folder_path / "events.json").exists() or (folder_path / "report.md").exists():
-                    # Simple heuristic: check if folder is old enough to be completed
-                    # and not recently created (to avoid deleting wrong folder)
-                    created_at = run.get("created_at")
-                    if created_at:
-                        try:
-                            from datetime import datetime
-                            run_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                            folder_time = datetime.fromtimestamp(folder_path.stat().st_mtime)
-                            # If folder time is within 1 hour of run time, assume it's the right one
-                            if abs((folder_time - run_time).total_seconds()) < 3600:
-                                run_folder = folder_path
-                                break
-                        except Exception:
-                            pass
-    
-    # Delete the run folder if found
-    deleted_files = []
-    if run_folder and run_folder.exists():
-        try:
-            # List files before deletion for response
-            for file_path in run_folder.rglob("*"):
-                if file_path.is_file():
-                    deleted_files.append(str(file_path.relative_to(run_folder)))
-            
-            # Delete the entire folder
-            import shutil
-            shutil.rmtree(run_folder)
-            LOGGER.info(f"Deleted run folder: {run_folder}")
-        except Exception as e:
-            LOGGER.error(f"Failed to delete run folder {run_folder}: {e}")
-            # Continue with database deletion even if folder deletion fails
-    
-    # Delete from database
-    try:
-        if USE_POSTGRES:
-            conn = _get_db_connection()
-            try:
-                with conn.cursor() as cursor:
-                    cursor.execute("DELETE FROM runs WHERE id = %s", (run_id,))
-                conn.commit()
-            finally:
-                conn.close()
-        else:
-            with DB_LOCK, _db() as conn:
-                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
-                conn.commit()
-        LOGGER.info(f"Deleted run {run_id} from database")
-    except Exception as e:
-        LOGGER.error(f"Failed to delete run {run_id} from database: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete run from database: {str(e)}"
-        )
-    
-    return {
-        "run_id": run_id,
-        "deleted": True,
-        "deleted_files": deleted_files,
-        "message": f"Run {run_id} and its artifacts have been deleted."
-    }
+app.include_router(auth_router)
+app.include_router(admin_router)
+app.include_router(runs_router)
+app.include_router(archives_router)
+app.include_router(retention_router)

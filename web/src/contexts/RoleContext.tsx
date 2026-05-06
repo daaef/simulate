@@ -3,7 +3,7 @@
 import { createContext, useContext, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 
-export type Role = 'admin' | 'user' | 'viewer';
+export type Role = 'admin' | 'operator' | 'viewer' | 'auditor';
 
 export interface Permission {
   resource: string;
@@ -34,17 +34,20 @@ export const ROLE_PERMISSIONS: RolePermissions = {
     // Dashboard access
     { resource: 'dashboard', action: 'read' },
   ],
-  user: [
+  operator: [
     // Run management (own runs only)
     { resource: 'runs', action: 'create' },
     { resource: 'runs', action: 'read' },
-    { resource: 'runs', action: 'delete' },
     { resource: 'runs', action: 'cancel' },
-    // Dashboard access (own data only)
+    // Dashboard access
     { resource: 'dashboard', action: 'read' },
   ],
   viewer: [
     // Read-only access
+    { resource: 'runs', action: 'read' },
+    { resource: 'dashboard', action: 'read' },
+  ],
+  auditor: [
     { resource: 'runs', action: 'read' },
     { resource: 'dashboard', action: 'read' },
   ],
@@ -59,6 +62,8 @@ export interface RoleContextType {
   canManageUsers: boolean;
   canViewDashboard: boolean;
   isAdmin: boolean;
+  isOperator: boolean;
+  isAuditor: boolean;
   isUser: boolean;
   isViewer: boolean;
 }
@@ -67,7 +72,8 @@ const RoleContext = createContext<RoleContextType | undefined>(undefined);
 
 export function RoleProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const userRole = user?.role as Role || null;
+  const normalizedRole = user?.role === 'user' ? 'operator' : user?.role;
+  const userRole = normalizedRole as Role || null;
 
   const hasPermission = (resource: string, action: string): boolean => {
     if (!userRole) return false;
@@ -113,7 +119,9 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     canManageUsers: hasPermission('users', 'create'),
     canViewDashboard: hasPermission('dashboard', 'read'),
     isAdmin: userRole === 'admin',
-    isUser: userRole === 'user',
+    isOperator: userRole === 'operator',
+    isAuditor: userRole === 'auditor',
+    isUser: userRole === 'operator',
     isViewer: userRole === 'viewer',
   };
 

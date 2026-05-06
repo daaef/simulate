@@ -2,11 +2,11 @@
 
 ## Goal
 
-Plan and design a production-grade web GUI platform for the simulator (run orchestration, live monitoring, reports, stories, events explorer), delivered as a Dockerized app deployable on Contabo VPS behind Nginx, with architecture choices that minimize future major rework.
+Plan and sequence the redesign of the simulator web GUI into a production-grade operations platform with strong auth/session ownership, route-first app structure, monitoring-first UX, structured scheduling, campaign orchestration, and archive/retention lifecycle controls.
 
 ## Current Status
 
-In progress (implementation)
+In progress (saved run profiles and replay-oriented execution snapshot APIs are now implemented on top of the closed foundation; next is schedule/campaign persistence and UI built on those profile/snapshot entities)
 
 ## Scope
 
@@ -49,6 +49,8 @@ In progress (implementation)
 - `docs/superpowers/plans/2026-04-30-production-simulator-upgrade.md`
 - `docs/superpowers/specs/2026-05-02-simulator-web-gui-platform-design.md`
 - `docs/superpowers/plans/2026-05-02-simulator-web-gui-platform.md`
+- `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md`
+- `docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md`
 
 ## How to Continue
 
@@ -72,8 +74,8 @@ In progress (implementation)
 - Initial deployment target is a single Contabo VPS with Docker Compose and Nginx reverse proxy.
 - V1 architecture is local-first and simple: no mandatory Celery/Redis dependency.
 - Planning should optimize for future extensibility (optional multi-worker/queue upgrade, scheduled runs, alerting, long-term artifact retention).
-- Some platform choices need explicit user confirmation before implementation (auth model, retention windows, alert channels, storage backend).
+- The redesign spec and redesign implementation plan are both approved; current work starts with backend-owned auth and route-first migration.
 
 ## Last Updated
 
-2026-05-03 12:50
+2026-05-06 08:03

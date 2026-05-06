@@ -2,141 +2,153 @@
 
 ## Problem Statement
 
-The simulator currently runs as a CLI-first system with markdown/json artifacts. Operators want a production-grade web GUI that can run every simulator command, schedule and monitor runs, and present reports/stories/events in a user-friendly way, while being Dockerized and deployable on a Contabo VPS behind Nginx.
+The current simulator web layer has grown from an MVP into a product surface that now needs stronger structure. Auth is still shaped like a frontend-held token shell, the main page carries too many responsibilities, and new requirements such as single-session auth, protected route groups, scheduling, campaign orchestration, archives, retention, and auditability cannot be cleanly layered onto the existing single-page design.
 
 ## Target Behavior
 
-- A web app can launch all existing simulator flows and custom command combinations without manual terminal work.
-- Operators can create, save, clone, schedule, and run simulation profiles from a GUI.
-- Live run telemetry (logs, status transitions, API/websocket metrics) is visible in real time.
-- Reports, stories, and events are first-class GUI views with searchable/filterable drill-down.
-- The platform is Dockerized, production-deployable on Contabo + Nginx, and secured for operational use.
-- The architecture supports future growth (more workers, alerting, longer retention, optional object storage) without major redesign.
+- A dedicated `/auth/login` entry point protects a route-first operations platform.
+- Authentication is backend-owned through secure cookie sessions with single active session enforcement.
+- Protected app routes are split into `/overview`, `/runs`, `/runs/[id]`, `/schedules`, `/archives`, `/retention`, and `/admin/users`.
+- `/overview` is the monitoring-first landing page.
+- Runs can be launched from saved profiles, inspected in focused detail pages, rerun from definitions, or rerun from exact immutable execution snapshots.
+- Schedules support both simple recurring profiles and advanced campaign-style orchestration through structured builders only.
+- Runs follow an explicit lifecycle: `30 days active`, `180 days archived`, then raw artifact purge with retained operational summary.
+- Roles `admin`, `operator`, `viewer`, and `auditor` are enforced on the backend.
 
 ## Existing Behavior
 
 - Simulator execution, orchestration, and validation are implemented in Python CLI modules.
-- Artifacts are generated per run as `events.json`, `report.md`, and `story.md`.
-- No web control plane exists.
-- No job queue, scheduler UI, role-based web auth, or GUI artifact explorer exists.
-- Deployment and operations are manual CLI-oriented.
+- The web control plane exists, but the main dashboard route still acts as launcher, console, charts, guide, report reader, events explorer, and admin surface at once.
+- Auth has been introduced, but the product structure still reflects the older MVP shape rather than the approved operations-platform model.
+- Artifact rendering, monitoring charts, and control-plane basics exist and should be reused where they remain valid.
 
 ## Proposed Approach
 
-Build a thin but robust web control plane around the existing simulator engine:
+Redesign the current web control plane in staged slices while keeping the simulator engine intact:
 
 1. Keep Python simulator modules as the execution core.
-2. Add a Python FastAPI backend for run orchestration, artifact indexing, and APIs.
-3. Use an in-process asynchronous run executor (bounded worker pool) instead of a distributed queue for v1.
-4. Use APScheduler for recurring runs in v1.
-5. Build a Next.js (TypeScript) frontend with shadcn/ui + charting for operations UX.
-6. Containerize frontend/backend/postgres(optional)/nginx and deploy behind Nginx.
+2. Move auth/session/RBAC into first-class backend-owned subsystems.
+3. Replace the single-page UI model with a protected app shell and route-specific pages.
+4. Add saved profiles, structured schedules, and campaign orchestration as platform entities.
+5. Add archive/retention lifecycle support and retained summaries without changing simulator run semantics.
+6. Preserve the current stack: `Next.js + FastAPI + Docker + Nginx`, with APScheduler and no Celery/Redis in v1.
 
-Recommended stack (best long-term fit here):
+Recommended stack:
 
-- Frontend: Next.js App Router + TypeScript + shadcn/ui + TanStack Query + ECharts.
-- Backend API: FastAPI + Pydantic + SQLAlchemy + Alembic.
-- Queue/Scheduler: In-process task runner + APScheduler (Celery/Redis is phase-2 only if scale requires it).
-- Data: SQLite for local PC testing; Postgres for VPS production metadata + artifact indices.
-- Artifacts: local volume in v1, S3-compatible storage abstraction ready for migration.
+- Frontend: Next.js App Router + TypeScript + chart-based operations UI.
+- Backend API: FastAPI + service-split routing + auth/session policy layer.
+- Queue/Scheduler: In-process task runner + APScheduler.
+- Data: Postgres-first operational metadata, keeping SQLite compatibility only where already necessary during migration.
+- Artifacts: local volume in v1 with explicit archive/purge lifecycle.
 
 ## Architecture / Design Notes
 
-- Command execution model:
-  - Backend stores canonical run config.
-  - Backend executor renders validated CLI command and executes subprocess with streamed stdout/stderr.
-  - Parsed events are ingested live and persisted.
-- Observability model:
-  - Store raw logs and parsed key metrics separately.
-  - Keep source artifacts immutable for audit.
-  - Expose derived metrics for fast dashboards.
-- UX model:
-  - Two levels: Operator view (simple) and Engineer view (deep trace).
-  - Guided “Run Builder” defaults to safe/recommended modes.
-  - Advanced mode allows explicit suite/scenario flag tuning.
-- Security model:
-  - Role-based auth (admin/operator/viewer).
-  - Signed API sessions/JWT, CSRF protection, strict CORS policy.
-  - Secrets only via environment variables; never in DB plain text.
-- Reliability model:
-  - Idempotent run submission keys.
-  - Concurrency caps and FIFO scheduling from DB-backed run states.
-  - Graceful cancellation and timeout handling.
-  - Health probes for all services.
+- Auth/session model:
+  - server-managed `httpOnly` sessions,
+  - single active session per user,
+  - backend-enforced RBAC,
+  - no silent compatibility fallback for protected routes.
+- Route model:
+  - public auth route group,
+  - protected app shell,
+  - overview/runs/schedules/archives/retention/admin route families.
+- Run model:
+  - `/runs` for execution/history workspace,
+  - `/runs/[id]` for forensic detail with tabs,
+  - immutable execution snapshots for exact reruns.
+- Schedule model:
+  - `Simple Schedule` for one saved profile on cadence,
+  - `Campaign Schedule` for ordered multi-step orchestration with repeat/spacing/failure policy.
+- Retention model:
+  - active -> archived -> raw-purged with retained summary and narrative.
 - Deployment model:
-  - Docker Compose for v1 production on one VPS.
-  - Nginx TLS reverse proxy with websocket/SSE pass-through.
-  - Persistent volumes for DB and artifacts.
+  - Docker Compose and Nginx remain valid,
+  - session cookie and reverse-proxy behavior must be aligned explicitly.
 
 ## Files to Modify
 
 | File | Purpose of Change |
 |---|---|
-| `docs/superpowers/specs/2026-05-02-simulator-web-gui-platform-design.md` | Architecture/design spec |
-| `docs/superpowers/plans/2026-05-02-simulator-web-gui-platform.md` | Execution-ready phased implementation plan |
+| `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md` | Approved redesign spec |
+| `docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md` | Execution-ready phased redesign plan |
 | `implementation/tracker/README.md` | Update project goal/scope/status for web planning |
-| `implementation/tracker/implementation_plan.md` | Canonical technical plan for web platform |
+| `implementation/tracker/implementation_plan.md` | Canonical technical plan for redesign effort |
 | `implementation/tracker/tasks.md` | Task board for pending implementation phases |
 | `implementation/tracker/session_log.md` | Chronological planning and handoff record |
-| `docker-compose.yml` (planned) | Multi-service deployment definition |
-| `infra/nginx/nginx.conf` (planned) | Reverse proxy + TLS + websocket config |
-| `web/` (planned) | Next.js frontend app |
-| `api/` (planned) | FastAPI service |
-| `api/app/executor.py` (planned) | Async run executor and scheduler integration |
+| `api/app/main.py` | To be reduced to app composition/bootstrap |
+| `api/app/auth/` | New auth/session/permission subsystem |
+| `api/app/runs/` | Run, profile, and execution snapshot routes/services |
+| `api/app/schedules/` | Schedule and campaign routes/services |
+| `api/app/archives/` | Archive browsing and jobs |
+| `api/app/retention/` | Retention policy and purge lifecycle |
+| `web/src/app/` | Route-first App Router surfaces |
+| `web/src/components/` | Shared app-shell, runs, overview, schedules, archives, retention, admin components |
+| `docker-compose.yml` | Service/deployment alignment |
+| `infra/nginx/nginx.conf` | Reverse proxy + secure session alignment |
 
 ## Implementation Steps
 
-1. Finalize architecture decisions (auth model, retention, alert channels, storage backend, concurrency limits).
-2. Scaffold monorepo layout for `web`, `api`, and shared config modules.
-3. Build backend run-model schema, run lifecycle APIs, and artifact indexing APIs.
-4. Build backend execution pipeline for simulator subprocesses and log/event streaming.
-5. Build scheduler and recurring run engine with APScheduler.
-6. Build frontend Run Builder, Profiles, and Run History pages.
-7. Build live run console page (logs + status timeline + key metrics).
-8. Build report/story/events explorer pages with search/filter/download.
-9. Build dashboard pages for daily health, bottlenecks, trend charts, and failure summaries.
-10. Add authentication, roles, and route/API authorization.
-11. Dockerize services and add Nginx reverse proxy config for VPS deployment.
-12. Add backup/retention jobs, observability hooks, and production hardening.
-13. Validate with end-to-end tests and perform pilot deployment.
+1. Freeze redesign boundaries in docs/tracker and prevent drift.
+2. Split backend into auth/runs/schedules/archives/retention/admin route groups.
+3. Replace frontend-held token ownership with backend-owned cookie sessions.
+4. Implement backend-enforced RBAC and session replacement behavior.
+5. Introduce protected app shell and route-first navigation.
+6. Migrate the current dashboard into focused `/runs` and `/runs/[id]` experiences.
+7. Build monitoring-first `/overview`.
+8. Add saved profiles, simple schedules, campaign schedules, and exact execution snapshots.
+9. Implement active/archive/purge lifecycle and retained summaries.
+10. Separate archives and retention governance UX.
+11. Finish admin user lifecycle and in-app alerts.
+12. Validate, cut over from old single-page dashboard, and harden deployment behavior.
 
 ## Testing Strategy
 
 - Unit tests:
-  - Backend request validation, command rendering, parsing pipelines, permission checks.
-  - Frontend components for run builder, tables, filters, and state transitions.
+  - auth/session replacement,
+  - permission enforcement,
+  - schedule validation,
+  - campaign failure policy,
+  - archive summary generation,
+  - retention lifecycle rules.
 - Integration tests:
-  - API + scheduler + DB orchestration.
-  - Real simulator subprocess lifecycle in controlled test mode.
-  - Scheduler-triggered run creation and execution.
+  - login/logout/protected routes,
+  - run launch and exact rerun,
+  - schedule-triggered runs,
+  - archive/purge jobs,
+  - alert creation.
 - Manual tests:
-  - End-to-end “run doctor from GUI” flow.
-  - Report/story/events deep navigation.
-  - Failure/cancel/timeout scenarios.
-  - Deployment on Contabo with Nginx TLS.
+  - login redirect flow,
+  - `/overview` landing,
+  - `/runs` launch/history flow,
+  - `/runs/[id]` inspection,
+  - simple schedule and campaign schedule flows,
+  - archive and retention browsing.
 - Edge cases:
-  - API process restart mid-run, partial artifact writes, duplicate run submissions.
-  - High log volume streaming, connection drops, stale websocket/SSE sessions.
-  - Disk pressure and retention cleanup safety.
+  - new login invalidates previous session,
+  - degraded campaign continues later steps,
+  - retained summary still useful after raw purge,
+  - old dashboard path can be retired cleanly after parity.
 
 ## Rollback Strategy
 
-- Keep CLI simulator unchanged and callable directly.
-- Roll back web platform by stopping web/api services while preserving artifact volumes.
-- Revert schema migrations with controlled Alembic downgrade path.
-- Maintain versioned deployment tags and reversible Nginx configs.
+- Keep the simulator CLI unchanged and callable directly.
+- Introduce the new app shell incrementally; do not remove the old page until parity is reached.
+- Use reversible migrations for new auth/session/schedule/archive tables.
+- Gate raw-artifact purge behavior behind explicit configuration until verified.
+- Keep Nginx/session changes reversible and versioned.
 
 ## Acceptance Criteria
 
-- [ ] Web UI can execute all simulator flow presets and custom trace/load combinations.
-- [ ] Operators can create/save/schedule run profiles without editing CLI flags manually.
-- [ ] Live run telemetry is visible in GUI with stream continuity and failure states.
-- [ ] Reports, stories, and events are fully navigable/searchable in GUI.
-- [ ] Platform runs in Docker on Contabo VPS behind Nginx with TLS and health checks.
-- [ ] Role-based access control is implemented for admin/operator/viewer paths.
-- [ ] Retention and backup strategy is implemented and documented.
-- [ ] The solution passes end-to-end validation against at least one real doctor run.
-- [ ] Local PC bring-up requires only `docker compose up` with no Redis/Celery dependency.
+- [ ] Authentication is backend-owned, cookie-based, and enforces a single active session per user.
+- [ ] Protected operational routes live behind a proper app shell with `/auth/login` as the only public entry path.
+- [ ] `/overview` functions as the monitoring-first landing page.
+- [ ] `/runs` and `/runs/[id]` replace the current overloaded run surface.
+- [ ] Saved profiles, simple schedules, and campaign schedules are all supported through structured UI.
+- [ ] Exact-execution reruns are supported through immutable execution snapshots.
+- [ ] Runs follow the approved `30 days active / 180 days archived / raw purge with retained summary` lifecycle.
+- [ ] `admin`, `operator`, `viewer`, and `auditor` roles are enforced on the backend.
+- [ ] In-app alerts surface operational and governance issues.
+- [ ] The redesigned platform remains Dockerized and deployable behind Nginx without Celery/Redis in v1.
 
 ## Follow-on Initiative: Contract-Driven Runtime + Docs
 

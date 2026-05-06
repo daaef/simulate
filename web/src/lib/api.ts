@@ -24,9 +24,44 @@ export type RunRow = {
   story_path: string | null;
   events_path: string | null;
   error: string | null;
+  execution_snapshot?: Record<string, unknown> | null;
 };
 
 export type RunCreateRequest = {
+  flow: string;
+  plan: string;
+  timing: "fast" | "realistic";
+  mode?: "trace" | "load";
+  store_id?: string;
+  phone?: string;
+  all_users?: boolean;
+  no_auto_provision?: boolean;
+  post_order_actions?: boolean;
+  extra_args?: string[];
+};
+
+export type RunProfile = {
+  id: number;
+  user_id?: number | null;
+  name: string;
+  description: string | null;
+  flow: string;
+  plan: string;
+  timing: "fast" | "realistic";
+  mode: "trace" | "load" | null;
+  store_id: string | null;
+  phone: string | null;
+  all_users: boolean;
+  no_auto_provision: boolean;
+  post_order_actions: boolean | null;
+  extra_args: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type RunProfileUpsertRequest = {
+  name: string;
+  description?: string;
   flow: string;
   plan: string;
   timing: "fast" | "realistic";
@@ -44,6 +79,36 @@ export type DashboardSummary = {
   status_breakdown: Record<string, number>;
   flow_breakdown: Record<string, number>;
   success_rate: number;
+  active_runs?: number;
+  failed_last_24h?: number;
+  degraded_runs?: number;
+  archive_backlog?: number;
+  purge_backlog?: number;
+};
+
+export type ArchiveSummary = {
+  policy_days: {
+    active: number;
+    archive: number;
+  };
+  counts: {
+    active: number;
+    archive_ready: number;
+    purge_ready: number;
+  };
+};
+
+export type RetentionSummary = {
+  policies: {
+    active_days: number;
+    archive_days: number;
+  };
+  queue: {
+    archive_ready: number;
+    purge_ready: number;
+    artifact_backed_runs: number;
+  };
+  status: string;
 };
 
 export type RunMetrics = {
@@ -109,16 +174,14 @@ function stripHtml(value: string): string {
   return truncateText(value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&"));
 }
 
-function getAuthHeaders(): Record<string, string> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('simulator_access_token') : null;
-  if (token) {
-    return {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    };
-  }
+function withSession(init: RequestInit = {}): RequestInit {
   return {
-    'Content-Type': 'application/json',
+    ...init,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init.headers ?? {}),
+    },
   };
 }
 
@@ -178,25 +241,37 @@ async function unwrap<T>(response: Response, source: string): Promise<T> {
 }
 
 export async function fetchFlows(): Promise<string[]> {
-  const payload = await unwrap<{ flows: string[] }>(await fetch("/api/v1/flows", { headers: getAuthHeaders() }), "flows");
+  const payload = await unwrap<{ flows: string[] }>(await fetch("/api/v1/flows", withSession()), "flows");
   return payload.flows;
 }
 
 export async function fetchRuns(limit: number = 50, offset: number = 0): Promise<{ runs: RunRow[]; total: number; limit: number; offset: number }> {
   const payload = await unwrap<{ runs: RunRow[]; total: number; limit: number; offset: number }>(
-    await fetch(`/api/v1/runs?limit=${limit}&offset=${offset}`, { headers: getAuthHeaders() }), 
+    await fetch(`/api/v1/runs?limit=${limit}&offset=${offset}`, withSession()),
     "runs"
   );
   return payload;
 }
 
+export async function fetchRun(runId: number): Promise<RunRow> {
+  return unwrap<RunRow>(await fetch(`/api/v1/runs/${runId}`, withSession()), "run");
+}
+
 export async function fetchRunsCount(): Promise<number> {
-  const payload = await unwrap<{ count: number }>(await fetch("/api/v1/runs/count", { headers: getAuthHeaders() }), "runs-count");
+  const payload = await unwrap<{ count: number }>(await fetch("/api/v1/runs/count", withSession()), "runs-count");
   return payload.count;
 }
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
-  return unwrap<DashboardSummary>(await fetch("/api/v1/dashboard/summary", { headers: getAuthHeaders() }), "dashboard-summary");
+  return unwrap<DashboardSummary>(await fetch("/api/v1/dashboard/summary", withSession()), "dashboard-summary");
+}
+
+export async function fetchArchiveSummary(): Promise<ArchiveSummary> {
+  return unwrap<ArchiveSummary>(await fetch("/api/v1/archives/summary", withSession()), "archives-summary");
+}
+
+export async function fetchRetentionSummary(): Promise<RetentionSummary> {
+  return unwrap<RetentionSummary>(await fetch("/api/v1/retention/summary", withSession()), "retention-summary");
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -207,7 +282,7 @@ export async function createRun(request: RunCreateRequest): Promise<RunRow> {
   return unwrap<RunRow>(
     await fetch("/api/v1/runs", {
       method: "POST",
-      headers: getAuthHeaders(),
+      ...withSession(),
       body: JSON.stringify(request)
     }),
     "create-run"
@@ -218,7 +293,7 @@ export async function cancelRun(runId: number): Promise<void> {
   await unwrap(
     await fetch(`/api/v1/runs/${runId}/cancel`, {
       method: "POST",
-      headers: getAuthHeaders()
+      ...withSession()
     }),
     "cancel-run"
   );
@@ -238,9 +313,75 @@ export async function deleteRun(runId: number): Promise<{
   }>(
     await fetch(`/api/v1/runs/${runId}`, {
       method: "DELETE",
-      headers: getAuthHeaders()
+      ...withSession()
     }),
     "delete-run"
+  );
+}
+
+export async function fetchRunProfiles(): Promise<RunProfile[]> {
+  const payload = await unwrap<{ profiles: RunProfile[] }>(await fetch("/api/v1/run-profiles", withSession()), "run-profiles");
+  return payload.profiles;
+}
+
+export async function createRunProfile(request: RunProfileUpsertRequest): Promise<RunProfile> {
+  const payload = await unwrap<{ profile: RunProfile }>(
+    await fetch("/api/v1/run-profiles", {
+      method: "POST",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "create-run-profile"
+  );
+  return payload.profile;
+}
+
+export async function updateRunProfile(profileId: number, request: RunProfileUpsertRequest): Promise<RunProfile> {
+  const payload = await unwrap<{ profile: RunProfile }>(
+    await fetch(`/api/v1/run-profiles/${profileId}`, {
+      method: "PUT",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "update-run-profile"
+  );
+  return payload.profile;
+}
+
+export async function deleteRunProfile(profileId: number): Promise<{ profile_id: number; deleted: boolean }> {
+  return unwrap<{ profile_id: number; deleted: boolean }>(
+    await fetch(`/api/v1/run-profiles/${profileId}`, {
+      method: "DELETE",
+      ...withSession(),
+    }),
+    "delete-run-profile"
+  );
+}
+
+export async function launchRunProfile(profileId: number): Promise<{ profile: RunProfile; run: RunRow }> {
+  return unwrap<{ profile: RunProfile; run: RunRow }>(
+    await fetch(`/api/v1/run-profiles/${profileId}/launch`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "launch-run-profile"
+  );
+}
+
+export async function fetchExecutionSnapshot(runId: number): Promise<{ run_id: number; available: boolean; snapshot: Record<string, unknown> }> {
+  return unwrap<{ run_id: number; available: boolean; snapshot: Record<string, unknown> }>(
+    await fetch(`/api/v1/runs/${runId}/execution-snapshot`, withSession()),
+    "execution-snapshot"
+  );
+}
+
+export async function replayRun(runId: number): Promise<{ source_run_id: number; run: RunRow; snapshot: Record<string, unknown> }> {
+  return unwrap<{ source_run_id: number; run: RunRow; snapshot: Record<string, unknown> }>(
+    await fetch(`/api/v1/runs/${runId}/replay`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "replay-run"
   );
 }
 
@@ -249,7 +390,7 @@ export async function fetchRunLog(runId: number, tail?: number): Promise<{ avail
     ? `/api/v1/runs/${runId}/log?tail=${tail}`
     : `/api/v1/runs/${runId}/log?tail=300`;
   const payload = await unwrap<{ run_id: number; log: string }>(
-    await fetch(url, { headers: getAuthHeaders() }),
+    await fetch(url, withSession()),
     "run-log"
   );
   return { available: true, log: payload.log };
@@ -260,7 +401,7 @@ export async function fetchRunArtifactText(
   kind: "report" | "story"
 ): Promise<RunArtifactResponse<string>> {
   return unwrap<RunArtifactResponse<string>>(
-    await fetch(`/api/v1/runs/${runId}/artifacts/${kind}`, { headers: getAuthHeaders() }),
+    await fetch(`/api/v1/runs/${runId}/artifacts/${kind}`, withSession()),
     `artifact-${kind}`
   );
 }
@@ -275,7 +416,7 @@ export async function fetchRunArtifactEvents(
   return unwrap<RunArtifactResponse<Array<Record<string, unknown>>>>(
     await fetch(
       `/api/v1/runs/${runId}/artifacts/events?offset=${offset}&limit=${limit}&compact=${compact ? "true" : "false"}`,
-      { headers: getAuthHeaders() }
+      withSession()
     ),
     "artifact-events"
   );
@@ -286,5 +427,5 @@ export async function fetchRunMetrics(runId: number): Promise<{
   available: boolean;
   metrics: RunMetrics;
 }> {
-  return unwrap(await fetch(`/api/v1/runs/${runId}/metrics`, { headers: getAuthHeaders() }), "run-metrics");
+  return unwrap(await fetch(`/api/v1/runs/${runId}/metrics`, withSession()), "run-metrics");
 }
