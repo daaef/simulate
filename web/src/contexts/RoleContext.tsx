@@ -18,11 +18,76 @@ const LEGACY_ROLE_ALIASES: Record<string, Role> = {
   user: "operator",
 };
 
+const RESOURCE_ALIASES: Record<string, string> = {
+  run: "runs",
+  runs: "runs",
+  simulation: "runs",
+  simulations: "runs",
+  simulator: "runs",
+
+  user: "users",
+  users: "users",
+
+  archive: "archives",
+  archives: "archives",
+
+  retention: "retention",
+  dashboard: "dashboard",
+  system: "system",
+};
+
+const ACTION_ALIASES: Record<string, string> = {
+  create: "create",
+  start: "create",
+  launch: "create",
+  run: "create",
+  execute: "create",
+
+  read: "read",
+  view: "read",
+  list: "read",
+
+  update: "update",
+  edit: "update",
+
+  cancel: "cancel",
+  stop: "cancel",
+
+  delete: "delete",
+  remove: "delete",
+  purge: "delete",
+
+  reset_password: "reset_password",
+  configure: "configure",
+};
+
 function normalizeRole(role: string | null | undefined): Role | null {
   if (!role) return null;
 
   const normalized = role.trim().toLowerCase();
-  return (LEGACY_ROLE_ALIASES[normalized] || normalized) as Role;
+  const finalRole = LEGACY_ROLE_ALIASES[normalized] || normalized;
+
+  if (
+    finalRole === "admin" ||
+    finalRole === "operator" ||
+    finalRole === "runner" ||
+    finalRole === "viewer" ||
+    finalRole === "auditor"
+  ) {
+    return finalRole;
+  }
+
+  return null;
+}
+
+function normalizeResource(resource: string): string {
+  const normalized = resource.trim().toLowerCase();
+  return RESOURCE_ALIASES[normalized] || normalized;
+}
+
+function normalizeAction(action: string): string {
+  const normalized = action.trim().toLowerCase();
+  return ACTION_ALIASES[normalized] || normalized;
 }
 
 export const ROLE_PERMISSIONS: RolePermissions = {
@@ -74,6 +139,7 @@ export const ROLE_PERMISSIONS: RolePermissions = {
 
     { resource: "dashboard", action: "read" },
     { resource: "archives", action: "read" },
+    { resource: "retention", action: "read" },
   ],
 
   auditor: [
@@ -92,6 +158,8 @@ export interface RoleContextType {
   hasAllPermissions: (permissions: Permission[]) => boolean;
 
   canCreateRuns: boolean;
+  canRunSimulations: boolean;
+  canStartRuns: boolean;
   canCancelRuns: boolean;
   canDeleteRuns: boolean;
   canManageUsers: boolean;
@@ -104,6 +172,12 @@ export interface RoleContextType {
   isRunner: boolean;
   isAuditor: boolean;
   isViewer: boolean;
+
+  /**
+   * Backward compatibility:
+   * old UI code used "user" to mean normal/operator user.
+   */
+  isUser: boolean;
 }
 
 const RoleContext = createContext<RoleContextType | undefined>(undefined);
@@ -115,9 +189,14 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const hasPermission = (resource: string, action: string): boolean => {
     if (!userRole) return false;
 
+    const normalizedResource = normalizeResource(resource);
+    const normalizedAction = normalizeAction(action);
     const permissions = ROLE_PERMISSIONS[userRole] || [];
+
     return permissions.some(
-      (permission) => permission.resource === resource && permission.action === action
+      (permission) =>
+        permission.resource === normalizedResource &&
+        permission.action === normalizedAction
     );
   };
 
@@ -137,13 +216,17 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     );
   };
 
+  const canCreateRuns = hasPermission("runs", "create");
+
   const value: RoleContextType = {
     userRole,
     hasPermission,
     hasAnyPermission,
     hasAllPermissions,
 
-    canCreateRuns: hasPermission("runs", "create"),
+    canCreateRuns,
+    canRunSimulations: canCreateRuns,
+    canStartRuns: canCreateRuns,
     canCancelRuns: hasPermission("runs", "cancel"),
     canDeleteRuns: hasPermission("runs", "delete"),
     canManageUsers: hasPermission("users", "create"),
@@ -156,6 +239,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     isRunner: userRole === "runner",
     isAuditor: userRole === "auditor",
     isViewer: userRole === "viewer",
+    isUser: userRole === "operator",
   };
 
   return <RoleContext.Provider value={value}>{children}</RoleContext.Provider>;
