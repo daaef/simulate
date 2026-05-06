@@ -1413,6 +1413,52 @@ curl -sS -i -X POST http://127.0.0.1:8080/api/v1/admin/users/1/reset-password -H
 
 1. If you want strict cleanup, run a targeted whitespace normalization pass on touched files before the next commit.
 2. Continue with the broader contract-driven docs/runtime sync phase.
+
+## 2026-05-06 03:16
+
+### Summary
+
+Completed the brainstorming/design phase for the next web-platform evolution and wrote the formal redesign spec. The approved direction is a route-first operations platform with dedicated auth entry, server-managed cookie sessions, single active session per user, role-enforced protected routes, overview-first landing, structured scheduling, campaign orchestration, and active/archive/purge lifecycle handling.
+
+### Files Created / Modified
+
+- `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+ls -1 docs/superpowers/specs
+sed -n '1,220p' docs/superpowers/specs/2026-05-02-simulator-web-gui-platform-design.md
+rg -n "TBD|TODO|FIXME|maybe|optional later|phase-2|\\?" docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md
+sed -n '1,320p' docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md
+date '+%Y-%m-%d %H:%M %Z'
+```
+
+### Results
+
+- New redesign spec written and self-reviewed for ambiguity/placeholders.
+- Design locks the key product decisions needed before implementation:
+  - admin-created users only,
+  - single active session,
+  - backend-owned cookie sessions,
+  - `admin/operator/viewer/auditor` roles,
+  - `/auth/login` plus protected app shell,
+  - `/overview` as post-login home,
+  - simple schedules plus advanced campaign schedules,
+  - `30 days active / 180 days archived / raw purge with retained summary`,
+  - exact-execution reruns,
+  - in-app alerts only for v1.
+
+### Issues / Blockers
+
+- Implementation must not start until the user reviews and approves the new spec file.
+
+### Next Steps
+
+1. User reviews `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md`.
+2. If approved, transition to implementation planning only.
 ## 2026-05-05 09:57
 
 ### Summary

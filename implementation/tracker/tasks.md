@@ -345,6 +345,18 @@ Continue remaining platform features: profile/schedule CRUD and auth/alert/deplo
   - Notes: Run a doctor simulation and check dashboard.
   - Completion evidence: Run details show full identity.
 
+### Phase 19: Operations Platform Redesign Spec (2026-05-06)
+
+- [x] Produce approved redesign spec for auth, routing, runs UX, schedules, and retention
+  - Dependency: User design approvals collected through brainstorming.
+  - Notes: Locked decisions include admin-created users only, single active session, cookie-based sessions, overview landing, route-first app shell, structured scheduling, campaign mode, rerun-exact execution, and active/archive/purge lifecycle.
+  - Completion evidence: `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md`
+
+- [~] Wait for user review of the written redesign spec
+  - Dependency: Spec file written and self-reviewed.
+  - Notes: No implementation should begin until the user reviews and approves the spec document.
+  - Completion evidence: User explicitly approves the spec file.
+
 ## Next Immediate Task
 
-Fix `NameError: name 'console' is not defined` in `reporting.py`.
+User review of `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md`, then transition to implementation planning only after approval.
