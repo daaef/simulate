@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Optional, Set, Tuple, Dict
 
 from fastapi import Depends, HTTPException
 
 from .dependencies import get_current_user
 
 Role = str
+Permission = Tuple[str, str]
 
-FINAL_ROLES: set[Role] = {
+FINAL_ROLES: Set[Role] = {
     "admin",
     "operator",
     "runner",
@@ -16,11 +17,11 @@ FINAL_ROLES: set[Role] = {
     "auditor",
 }
 
-LEGACY_ROLE_ALIASES: dict[str, Role] = {
+LEGACY_ROLE_ALIASES: Dict[str, Role] = {
     "user": "operator",
 }
 
-ROLE_PERMISSIONS: dict[Role, set[tuple[str, str]]] = {
+ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
     "admin": {
         ("users", "create"),
         ("users", "read"),
@@ -66,6 +67,7 @@ ROLE_PERMISSIONS: dict[Role, set[tuple[str, str]]] = {
 
         ("dashboard", "read"),
         ("archives", "read"),
+        ("retention", "read"),
     },
     "auditor": {
         ("runs", "read"),
@@ -77,7 +79,7 @@ ROLE_PERMISSIONS: dict[Role, set[tuple[str, str]]] = {
 }
 
 
-def normalize_role(role: str | None) -> Role:
+def normalize_role(role: Optional[str]) -> Role:
     if not role:
         return "viewer"
 
@@ -99,8 +101,8 @@ def require_permission(resource: str, action: str):
     return dependency
 
 
-def require_roles(*roles: Iterable[str] | str):
-    allowed: set[str] = set()
+def require_roles(*roles):
+    allowed: Set[str] = set()
 
     for role in roles:
         if isinstance(role, str):
