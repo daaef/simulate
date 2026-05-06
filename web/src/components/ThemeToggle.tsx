@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTheme } from "../contexts/ThemeContext";
 
 interface ThemeToggleProps {
   className?: string;
@@ -8,39 +9,11 @@ interface ThemeToggleProps {
 
 export function ThemeToggle({ className = "" }: ThemeToggleProps) {
   const [mounted, setMounted] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     setMounted(true);
-    // Get theme from localStorage or system preference
-    const storedTheme = localStorage.getItem("theme") as "light" | "dark" | null;
-    if (storedTheme) {
-      setTheme(storedTheme);
-    } else {
-      // Check system preference
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-      setTheme(systemTheme);
-    }
   }, []);
-
-  useEffect(() => {
-    if (!mounted) return;
-    
-    // Apply theme to document
-    const root = document.documentElement;
-    if (theme === "dark") {
-      root.setAttribute("data-theme", "dark");
-    } else {
-      root.removeAttribute("data-theme");
-    }
-    
-    // Save to localStorage
-    localStorage.setItem("theme", theme);
-  }, [theme, mounted]);
-
-  const toggleTheme = () => {
-    setTheme(prev => prev === "light" ? "dark" : "light");
-  };
 
   // Avoid hydration mismatch
   if (!mounted) {

@@ -75,6 +75,11 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const normalizedRole = user?.role === 'user' ? 'operator' : user?.role;
   const userRole = normalizedRole as Role || null;
 
+  // Debug logging to diagnose permission issues
+  if (typeof window !== 'undefined') {
+    console.log('[RoleContext]', { user: user?.username, userRole, rawRole: user?.role });
+  }
+
   const hasPermission = (resource: string, action: string): boolean => {
     if (!userRole) return false;
     
