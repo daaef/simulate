@@ -2035,3 +2035,278 @@ python3 -m py_compile reporting.py user_sim.py api/app/main.py
 
 ### Next Steps
 1. Verify complete identity capture in web dashboard by running a live simulation.
+
+## 2026-05-06 16:23
+
+### Summary
+
+Started the plan-backed simulator configuration slice after user approval. The target is to keep `.env` focused on secrets/deployment values while moving non-sensitive simulation defaults into validated JSON run plans usable by both CLI and GUI. Added the approved spec and implementation plan before touching production code.
+
+### Files Created / Modified
+
+- `docs/superpowers/specs/2026-05-06-plan-backed-simulator-config-design.md`
+- `docs/superpowers/plans/2026-05-06-plan-backed-simulator-config.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '...' README.md SIMULATOR_GUIDE.md ARCHITECTURE.md
+sed -n '...' implementation/tracker/README.md implementation/tracker/tasks.md implementation/tracker/implementation_plan.md implementation/tracker/session_log.md
+date '+%Y-%m-%d %H:%M %Z'
+```
+
+### Results
+
+- Existing CLI and web run surfaces are confirmed as the execution path to preserve.
+- The new design is additive: old actor-only `sim_actors.json` remains valid.
+- Next work will follow TDD.
+
+### Issues / Blockers
+
+- Worktree already contains unrelated auth/session changes and untracked files; do not revert them.
+
+### Next Steps
+
+1. Add failing tests for plan-backed config.
+2. Add failing tests for GUI plan API.
+3. Implement the minimal schema/API/UI/docs changes.
+
+## 2026-05-06 16:42
+
+### Summary
+
+Completed the plan-backed simulator configuration slice. JSON run plans now support non-sensitive runtime/rules/fixture/payment/review/new-user defaults, reject sensitive keys, and apply with precedence of explicit CLI flags over plan values over `.env` over built-in defaults. Added a file-backed simulation plan API and a web `Config` page for admin-owned GUI plans under `runs/gui-plans/`. The Runs launcher can select saved GUI plans.
+
+### Files Created / Modified
+
+- `.env.example`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `ARCHITECTURE.md`
+- `sim_actors.json`
+- `run_plan.py`
+- `config.py`
+- `__main__.py`
+- `api/app/main.py`
+- `api/app/simulation_plans/__init__.py`
+- `api/app/simulation_plans/models.py`
+- `api/app/simulation_plans/routes.py`
+- `api/app/simulation_plans/service.py`
+- `web/src/lib/api.ts`
+- `web/src/app/(app)/layout.tsx`
+- `web/src/app/(app)/config/page.tsx`
+- `web/src/components/runs/RunLaunchPanel.tsx`
+- `web/src/app/(app)/runs/page.tsx`
+- `tests/test_simulate.py`
+- `tests/test_web_api.py`
+- `docs/superpowers/specs/2026-05-06-plan-backed-simulator-config-design.md`
+- `docs/superpowers/plans/2026-05-06-plan-backed-simulator-config.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+python3 -m unittest tests.test_simulate.RunPlanTests.test_loads_extended_non_sensitive_plan_sections tests.test_simulate.RunPlanTests.test_plan_rejects_sensitive_keys tests.test_simulate.RunPlanTests.test_config_applies_plan_defaults_and_preserves_explicit_cli_values -v
+docker compose exec api python -m unittest tests.test_web_api.SimulationPlansApiTests -v
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m py_compile run_plan.py config.py __main__.py api/app/main.py api/app/simulation_plans/models.py api/app/simulation_plans/routes.py api/app/simulation_plans/service.py
+python3 -m unittest tests.test_simulate -v
+docker compose exec api python -m unittest tests.test_web_api -v
+python3 -m simulate --help
+docker compose exec web npm run build
+python3 -c 'from run_plan import load_run_plan; plan=load_run_plan("sim_actors.json"); print(plan.schema_version, plan.runtime_defaults.get("flow"), len(plan.users), len(plan.stores))'
+git diff --check
+git status --short
+```
+
+### Results
+
+- Focused plan/config tests pass.
+- Focused simulation-plan API tests pass.
+- Python compile check passes.
+- Full simulator unit module passes: 39 tests.
+- Full web API test module passes: 16 tests.
+- CLI help loads successfully with plan-backed defaults.
+- Next.js build passes and includes `/config`.
+- Default `sim_actors.json` parses as schema version `2`, flow `doctor`, 13 users, and 3 stores.
+- Whitespace check passes.
+
+### Issues / Blockers
+
+- Worktree still contains unrelated pre-existing auth/session changes and untracked `AGENTS.md`; these were not reverted.
+- Root `README.md` was already untracked in this workspace but was updated because repo instructions require docs to stay current.
+
+### Next Steps
+
+1. Manually verify `/config` in the browser after the running stack is rebuilt.
+2. Use `Config` to save a GUI plan and launch it from the Runs page.
+3. Review the pre-existing auth/session dirty files before the next implementation slice.
+
+## 2026-05-06 19:06
+
+### Summary
+
+Started the unsafe web run deletion fix. Root cause is `delete_run` deleting `Path(log_path).parent`, which is the shared GUI log directory for all web runs. The fix will hard-delete only the selected run's log file and own artifact folder, preserve unrelated logs/artifacts, and recreate the GUI log directory before starting new runs.
+
+### Files Created / Modified
+
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+date '+%Y-%m-%d %H:%M %Z'
+sed -n '...' implementation/tracker/README.md implementation/tracker/implementation_plan.md implementation/tracker/tasks.md implementation/tracker/session_log.md
+```
+
+### Results
+
+- Tracker updated before production code changes.
+
+### Issues / Blockers
+
+- Worktree already contains unrelated dirty files; this fix must avoid reverting them.
+
+### Next Steps
+
+1. Add failing deletion/log-dir regression tests.
+2. Implement minimal backend fix.
+3. Update docs and run verification.
+
+## 2026-05-06 19:13
+
+### Summary
+
+Completed the unsafe web run deletion fix. Run deletion now removes only the selected run's log file and own artifact folder, returns `deleted_files` plus `missing_files`, preserves `runs/web-gui/`, and recreates the log directory before launching a run.
+
+### Files Created / Modified
+
+- `api/app/main.py`
+- `tests/test_web_api.py`
+- `web/src/lib/api.ts`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+docker compose exec api python -m unittest tests.test_web_api.RunDeletionSafetyTests -v
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m py_compile api/app/main.py
+docker compose exec api python -m unittest tests.test_web_api -v
+docker compose exec web npm run build
+git diff --check
+docker compose restart api
+curl -sS -i http://localhost:8080/healthz
+```
+
+### Results
+
+- New deletion regression tests pass.
+- Full web API test module passes: 19 tests.
+- Python compile check passes.
+- Next.js production build passes.
+- Whitespace check passes.
+- API container restarted and health endpoint returns `200 OK`.
+
+### Issues / Blockers
+
+- GUI log files already removed by the prior unsafe delete are not recoverable from this patch unless backups exist.
+- Worktree still contains unrelated dirty files; they were not reverted.
+
+### Next Steps
+
+1. Use future run deletes normally; only the selected run's log/artifacts should disappear.
+2. If old run console output is needed, recover missing `runs/web-gui/run-*.log` files from backup.
+
+## 2026-05-06 21:16
+
+### Summary
+
+Started local `.env` cleanup. The goal is to keep `.env` to secret/auth/deployment values while preserving current simulator defaults through `sim_actors.json` and GUI-compatible run-plan fields.
+
+### Files Created / Modified
+
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '...' README.md SIMULATOR_GUIDE.md ARCHITECTURE.md
+rg -n '^[A-Za-z_][A-Za-z0-9_]*=' .env
+python3 -m json.tool sim_actors.json
+```
+
+### Results
+
+- Confirmed `sim_actors.json` already contains most non-sensitive defaults.
+- Identified remaining migration items: default store should be `FZY_926025`, default user needs delivery GPS, and `.env` should drop plan-backed simulator keys.
+
+### Issues / Blockers
+
+- `.env` contains real secrets; do not expose values in docs or final output.
+- Worktree remains dirty with unrelated files; only scoped cleanup files should be changed.
+
+### Next Steps
+
+1. Patch `sim_actors.json`.
+2. Clean local `.env`.
+3. Update docs and validate config resolution.
+
+## 2026-05-06 21:19
+
+### Summary
+
+Completed local `.env` cleanup. Non-sensitive simulator behavior now lives in `sim_actors.json`: default phone, default store, delivery GPS, runtime defaults, autopilot rules, payment mode, fixture defaults, review defaults, and new-user metadata. Local `.env` now keeps only auth cache/secrets and deployment URLs.
+
+### Files Created / Modified
+
+- `.env`
+- `.env.example`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `sim_actors.json`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+python3 -m json.tool sim_actors.json
+python3 -c 'import config; actors=config.load_sim_actors(); ...'
+python3 -c 'from run_plan import load_run_plan; ...'
+python3 -m simulate --help
+python3 -c 'import importlib.util, sys; ... m._apply_args(args); ...'
+docker compose exec api python -c 'from api.app.runs.models import RunCreateRequest; from api.app.main import _build_command; ...'
+python3 -m unittest tests.test_simulate -v
+git diff --check
+```
+
+### Results
+
+- `sim_actors.json` parses successfully.
+- Config resolves to phone `+2348166675609`, store `FZY_926025`, subentity `7`, currency `jpy`, delivery GPS `35.15494521954757/136.9663666561246`, and trace/doctor/fast runtime defaults.
+- GUI run command with blank phone is `python3 -u -m simulate doctor --plan runs/gui-plans/daily-doctor-plan.json --timing fast`, so the selected plan can supply the phone.
+- Simulator unit suite passes: 39 tests.
+- Whitespace check passes.
+
+### Issues / Blockers
+
+- Host Python lacks API dependencies such as `pydantic`; API-specific command-builder check was run inside the API container.
+- Worktree still contains unrelated dirty files; they were not reverted.
+
+### Next Steps
+
+1. Keep actor/run behavior in `sim_actors.json` or GUI plans.
+2. Use GUI Phone or CLI `--phone` only for one-off overrides.

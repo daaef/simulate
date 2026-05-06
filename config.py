@@ -241,6 +241,178 @@ def apply_actor_selection(
         SIM_COUPON_ID = int(defaults["coupon_id"])
 
 
+def _has_plan_value(value: Any) -> bool:
+    return value is not None and value != ""
+
+
+def _plan_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _plan_string(value: Any) -> str:
+    return str(value).strip()
+
+
+def _plan_lower_string(value: Any) -> str:
+    return _plan_string(value).lower()
+
+
+def _plan_scenarios(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip().lower() for item in value if str(item).strip()]
+    return [item.strip().lower() for item in str(value).split(",") if item.strip()]
+
+
+def _apply_plan_value(
+    attr: str,
+    value: Any,
+    *,
+    preserve: set[str],
+    transform=lambda raw: raw,
+) -> None:
+    if attr in preserve or not _has_plan_value(value):
+        return
+    globals()[attr] = transform(value)
+
+
+def _apply_plan_section(
+    section: dict[str, Any],
+    mapping: dict[str, tuple[str, Any]],
+    *,
+    preserve: set[str],
+) -> None:
+    for key, (attr, transform) in mapping.items():
+        _apply_plan_value(attr, section.get(key), preserve=preserve, transform=transform)
+
+
+def _planned_strict_value(plan: Any, *, preserve: set[str]) -> bool:
+    if "SIM_STRICT_PLAN" in preserve:
+        return SIM_STRICT_PLAN
+    strict_value = getattr(plan, "rules", {}).get("strict_plan")
+    if not _has_plan_value(strict_value):
+        return SIM_STRICT_PLAN
+    return _plan_bool(strict_value)
+
+
+def apply_plan_defaults(plan: Any, *, preserve: set[str] | None = None) -> None:
+    """Apply non-sensitive run-plan defaults to config globals.
+
+    Values in ``preserve`` represent explicit CLI inputs and are not overwritten.
+    """
+    preserved = set(preserve or set())
+    runtime = getattr(plan, "runtime_defaults", {}) or {}
+    rules = getattr(plan, "rules", {}) or {}
+    fixture_defaults = getattr(plan, "fixture_defaults", {}) or {}
+    payment = getattr(plan, "payment_defaults", {}) or {}
+    review = getattr(plan, "review_defaults", {}) or {}
+    new_user = getattr(plan, "new_user_defaults", {}) or {}
+
+    _apply_plan_section(
+        runtime,
+        {
+            "flow": ("SIM_FLOW", _plan_lower_string),
+            "mode": ("SIM_RUN_MODE", _plan_lower_string),
+            "trace_suite": ("SIM_TRACE_SUITE", _plan_lower_string),
+            "trace_scenarios": ("SIM_TRACE_SCENARIOS", _plan_scenarios),
+            "timing_profile": ("SIM_TIMING_PROFILE", _plan_lower_string),
+            "users": ("N_USERS", int),
+            "orders": ("SIM_ORDERS", int),
+            "interval_seconds": ("ORDER_INTERVAL_SECONDS", float),
+            "reject_rate": ("REJECT_RATE", float),
+            "continuous": ("SIM_CONTINUOUS", _plan_bool),
+            "all_users": ("ALL_USERS", _plan_bool),
+        },
+        preserve=preserved,
+    )
+    _apply_plan_section(
+        rules,
+        {
+            "strict_plan": ("SIM_STRICT_PLAN", _plan_bool),
+            "run_app_probes": ("SIM_RUN_APP_PROBES", _plan_bool),
+            "run_store_dashboard_probes": ("SIM_RUN_STORE_DASHBOARD_PROBES", _plan_bool),
+            "run_post_order_actions": ("SIM_RUN_POST_ORDER_ACTIONS", _plan_bool),
+            "app_autopilot": ("SIM_APP_AUTOPILOT", _plan_bool),
+            "auto_select_store": ("SIM_AUTO_SELECT_STORE", _plan_bool),
+            "auto_select_coupon": ("SIM_AUTO_SELECT_COUPON", _plan_bool),
+            "auto_provision_fixtures": ("SIM_AUTO_PROVISION_FIXTURES", _plan_bool),
+            "mutate_store_setup": ("SIM_MUTATE_STORE_SETUP", _plan_bool),
+            "mutate_menu_setup": ("SIM_MUTATE_MENU_SETUP", _plan_bool),
+            "auto_toggle_store_status": ("SIM_AUTO_TOGGLE_STORE_STATUS", _plan_bool),
+            "store_open_status": ("SIM_STORE_OPEN_STATUS", int),
+            "store_closed_status": ("SIM_STORE_CLOSED_STATUS", int),
+        },
+        preserve=preserved,
+    )
+    _apply_plan_section(
+        payment,
+        {
+            "mode": ("SIM_PAYMENT_MODE", _plan_lower_string),
+            "case": ("SIM_PAYMENT_CASE", _plan_lower_string),
+            "free_order_amount": ("SIM_FREE_ORDER_AMOUNT", float),
+            "coupon_id": ("SIM_COUPON_ID", int),
+            "save_card": ("SIM_SAVE_CARD", _plan_bool),
+            "test_payment_method": ("STRIPE_TEST_PAYMENT_METHOD", _plan_string),
+        },
+        preserve=preserved,
+    )
+
+    store_setup = fixture_defaults.get("store_setup", {}) if isinstance(fixture_defaults, dict) else {}
+    if isinstance(store_setup, dict):
+        _apply_plan_section(
+            store_setup,
+            {
+                "name": ("SIM_STORE_SETUP_NAME", _plan_string),
+                "branch": ("SIM_STORE_SETUP_BRANCH", _plan_string),
+                "description": ("SIM_STORE_SETUP_DESCRIPTION", _plan_string),
+                "mobile": ("SIM_STORE_SETUP_MOBILE", _plan_string),
+                "start_time": ("SIM_STORE_SETUP_START_TIME", _plan_string),
+                "closing_time": ("SIM_STORE_SETUP_CLOSING_TIME", _plan_string),
+                "status": ("SIM_STORE_SETUP_STATUS", int),
+                "address": ("SIM_STORE_SETUP_ADDRESS", _plan_string),
+                "city": ("SIM_STORE_SETUP_CITY", _plan_string),
+                "state": ("SIM_STORE_SETUP_STATE", _plan_string),
+                "country": ("SIM_STORE_SETUP_COUNTRY", _plan_string),
+            },
+            preserve=preserved,
+        )
+
+    menu = fixture_defaults.get("menu", {}) if isinstance(fixture_defaults, dict) else {}
+    if isinstance(menu, dict):
+        _apply_plan_section(
+            menu,
+            {
+                "category_name": ("SIM_MENU_CATEGORY_NAME", _plan_string),
+                "name": ("SIM_MENU_NAME", _plan_string),
+                "description": ("SIM_MENU_DESCRIPTION", _plan_string),
+                "price": ("SIM_MENU_PRICE", float),
+                "ingredients": ("SIM_MENU_INGREDIENTS", _plan_string),
+                "discount": ("SIM_MENU_DISCOUNT", float),
+                "discount_price": ("SIM_MENU_DISCOUNT_PRICE", float),
+            },
+            preserve=preserved,
+        )
+
+    _apply_plan_section(
+        review,
+        {
+            "rating": ("SIM_REVIEW_RATING", int),
+            "comment": ("SIM_REVIEW_COMMENT", _plan_string),
+        },
+        preserve=preserved,
+    )
+    _apply_plan_section(
+        new_user,
+        {
+            "first_name": ("SIM_NEW_USER_FIRST_NAME", _plan_string),
+            "last_name": ("SIM_NEW_USER_LAST_NAME", _plan_string),
+            "email": ("SIM_NEW_USER_EMAIL", _plan_string),
+        },
+        preserve=preserved,
+    )
+
+
 def _resolve_sim_path(path: str | Path) -> Path:
     candidate = Path(path).expanduser()
     if candidate.is_absolute():
@@ -256,7 +428,11 @@ def set_sim_actors_path(path: str | Path) -> None:
     SIM_ACTORS_PATH = _resolve_sim_path(path)
 
 
-def load_sim_actors(path: str | Path | None = None) -> dict[str, Any]:
+def load_sim_actors(
+    path: str | Path | None = None,
+    *,
+    preserve: set[str] | None = None,
+) -> dict[str, Any]:
     """Load actors from sim_actors.json and apply defaults to config globals.
 
     Returns ``{"users": [...], "stores": [...]}``.
@@ -271,7 +447,10 @@ def load_sim_actors(path: str | Path | None = None) -> dict[str, Any]:
     from run_plan import PlanValidationError, load_run_plan
 
     try:
-        actors = load_run_plan(actor_path, strict=SIM_STRICT_PLAN).to_actors()
+        plan = load_run_plan(actor_path, strict=False)
+        plan.validate(strict=_planned_strict_value(plan, preserve=set(preserve or set())))
+        apply_plan_defaults(plan, preserve=preserve)
+        actors = plan.to_actors()
     except PlanValidationError as exc:
         raise RuntimeError(f"Invalid simulator plan {actor_path}: {exc}") from exc
     SIM_ACTORS = actors

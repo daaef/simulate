@@ -258,6 +258,27 @@ Run `python3 -m simulate full --plan sim_actors.json --timing fast` to confirm t
 - [x] Render report/story as markdown and present events as API-doc style
   - Dependency: Phase 15 monitoring UI.
   - Notes: Switched report/story rendering from raw preformatted text to markdown rendering, normalized event parsing for recorder schema (`ts`, `ok`, `method`, `endpoint`), and added dedicated API-call table with method/status/latency for documentation-like inspection.
+
+### Phase 16: Plan-Backed Simulator Configuration
+
+- [x] Extend JSON run plans with non-sensitive simulator defaults
+  - Dependency: User approval on 2026-05-06.
+  - Notes: Keep CLI command syntax unchanged; precedence is explicit CLI flags, then selected plan, then `.env`, then built-in defaults.
+  - Completion evidence: `tests.test_simulate.RunPlanTests` focused cases pass; full `tests.test_simulate` passes; `python3 -m simulate --help` passes.
+
+- [x] Add GUI-owned plan storage and plan editor
+  - Dependency: Plan schema/config support.
+  - Notes: Store generated plans under `runs/gui-plans/`; reject secrets/tokens/passwords from plan content.
+  - Completion evidence: `docker compose exec api python -m unittest tests.test_web_api.SimulationPlansApiTests -v` passes; `docker compose exec web npm run build` passes and includes `/config`.
+
+- [x] Update docs for `.env` versus plan responsibilities
+  - Dependency: Implementation behavior.
+  - Notes: README and SIMULATOR_GUIDE must explain the new workflow.
+  - Completion evidence: `README.md`, `SIMULATOR_GUIDE.md`, `ARCHITECTURE.md`, `.env.example`, and `sim_actors.json` updated; `git diff --check` passes.
+
+## Next Immediate Task
+
+Review unrelated existing auth-session worktree changes before starting the next feature slice.
   - Completion evidence: `web/package.json` (`react-markdown`, `remark-gfm`), `web/src/app/page.tsx` markdown + API-call/event-stream views, `web/src/app/globals.css` markdown/method badge styles, `api/app/main.py` metrics/events normalization.
 
 - [x] Fix long-document freeze in report/events inspector
@@ -516,3 +537,25 @@ Start the first truly not-done platform block: saved run profiles and immutable 
 ## Next Immediate Task
 
 Start schedule and campaign persistence on top of the new profile and replay primitives, then replace the `/schedules` placeholder with real profile-backed schedule management.
+
+### Phase 29: Unsafe Run Deletion Fix (2026-05-06)
+
+- [x] Fix run deletion so it only removes selected-run files
+  - Dependency: User reported deleting run #1 emptied run #5 live console.
+  - Notes: Add regression tests for shared GUI logs, artifact folder isolation, and missing log-dir recreation before production changes.
+  - Completion evidence: `RunDeletionSafetyTests` pass; full `tests.test_web_api` passes; API restarted and `/healthz` returns 200.
+
+## Next Immediate Task
+
+Monitor future run deletes from the web UI; already-deleted GUI log files cannot be recovered without backups.
+
+### Phase 30: Local Env Cleanup Into Plan Defaults (2026-05-06)
+
+- [x] Move non-sensitive local `.env` behavior into `sim_actors.json`
+  - Dependency: Plan-backed config support from Phase 16.
+  - Notes: Preserve effective defaults for user phone, store, delivery GPS, runtime/rule/payment/fixture settings; keep secrets and deployment URLs in `.env`.
+  - Completion evidence: Config resolution check returns `+2348166675609`, `FZY_926025`, subentity `7`, delivery GPS, trace/doctor/fast defaults; `tests.test_simulate` passes; CLI help passes; GUI command builder omits `--phone` when blank.
+
+## Next Immediate Task
+
+Use plan-backed values for future CLI/GUI runs; keep `.env` free of actor/run-behavior keys.

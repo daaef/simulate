@@ -6,7 +6,7 @@ Plan and sequence the redesign of the simulator web GUI into a production-grade 
 
 ## Current Status
 
-In progress (saved run profiles and replay-oriented execution snapshot APIs are now implemented on top of the closed foundation; next is schedule/campaign persistence and UI built on those profile/snapshot entities)
+Completed (local `.env` cleaned; simulator behavior now comes from `sim_actors.json` / GUI plans)
 
 ## Scope
 
@@ -51,6 +51,11 @@ In progress (saved run profiles and replay-oriented execution snapshot APIs are 
 - `docs/superpowers/plans/2026-05-02-simulator-web-gui-platform.md`
 - `docs/superpowers/specs/2026-05-06-simulator-operations-platform-redesign.md`
 - `docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md`
+- `docs/superpowers/specs/2026-05-06-plan-backed-simulator-config-design.md`
+- `docs/superpowers/plans/2026-05-06-plan-backed-simulator-config.md`
+- `api/app/main.py`
+- `tests/test_web_api.py`
+- `.env`
 
 ## How to Continue
 
@@ -75,7 +80,11 @@ In progress (saved run profiles and replay-oriented execution snapshot APIs are 
 - V1 architecture is local-first and simple: no mandatory Celery/Redis dependency.
 - Planning should optimize for future extensibility (optional multi-worker/queue upgrade, scheduled runs, alerting, long-term artifact retention).
 - The redesign spec and redesign implementation plan are both approved; current work starts with backend-owned auth and route-first migration.
+- CLI command syntax must remain compatible; non-sensitive plan defaults are additive and must not remove `.env` fallback behavior.
+- Web run deletion must hard-delete only the selected run's own log/artifacts; shared GUI log directories and unrelated run artifacts must survive.
+- Secrets, tokens, and passwords remain out of JSON plans.
+- Local `.env` may contain real secrets; do not print or move secret values into tracked docs or plan JSON.
 
 ## Last Updated
 
-2026-05-06 08:03
+2026-05-06 21:19

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import json
 import os
+import re
+import shutil
 import sqlite3
 import subprocess
 import threading
@@ -26,6 +28,9 @@ from .auth.routes import router as auth_router
 from .auth.dependencies import SESSION_COOKIE_NAME
 from .retention.routes import router as retention_router
 from .retention.service import configure_runtime as configure_retention_runtime
+from .simulation_plans.models import SimulationPlanUpsertRequest
+from .simulation_plans.routes import router as simulation_plans_router
+from .simulation_plans.service import configure_runtime as configure_simulation_plans_runtime
 from .runs.models import RunCreateRequest
 from .runs.routes import (
     router as runs_router,
@@ -68,11 +73,15 @@ SIMULATOR_WORKDIR = os.getenv("SIMULATOR_WORKDIR", "/workspace")
 PROJECT_DIR = os.getenv("SIMULATOR_PROJECT_DIR", "/workspace/simulate")
 DB_PATH = os.getenv("RUN_DB_PATH", "/workspace/simulate/runs/web-gui.sqlite")
 LOG_DIR = Path(os.getenv("RUN_LOG_DIR", "/workspace/simulate/runs/web-gui"))
+SIMULATION_PLANS_DIR = Path(
+    os.getenv("SIM_GUI_PLANS_DIR", str(Path(PROJECT_DIR) / "runs" / "gui-plans"))
+)
 AUTO_REFRESH_SECONDS = max(5, int(os.getenv("RUN_AUTO_REFRESH_SECONDS", "30")))
 ALLOW_ORIGINS = os.getenv("WEB_CORS_ORIGINS", "*")
 
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+SIMULATION_PLANS_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_LOCK = threading.Lock()
 RUN_PROCESSES: dict[int, subprocess.Popen[str]] = {}
@@ -87,6 +96,7 @@ MONITORED_ENDPOINT_PREFIXES = (
     "/api/v1/dashboard/summary",
 )
 LOGGER = logging.getLogger("simulate.web_api")
+SIMULATION_PLAN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
 
 
 @dataclass
@@ -715,6 +725,7 @@ def _hydrate_run_artifacts(run: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     _update_run(run_id, status="running", started_at=_utc_now(), log_path=str(log_path))
     process = subprocess.Popen(
         command,
@@ -899,6 +910,7 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
             )
             run_id = int(cursor.lastrowid)
     
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"run-{run_id}.log"
     thread = threading.Thread(
         target=_run_simulation, args=(run_id, command, log_path), daemon=True
@@ -1077,6 +1089,118 @@ def _replay_run_logic(run_id: int, user_id: Optional[int] = None) -> dict[str, A
     )
     replayed_run = _create_run(request, user_id)
     return {"source_run_id": run_id, "run": replayed_run, "snapshot": snapshot}
+
+
+def _simulation_plans_dir() -> Path:
+    SIMULATION_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    return SIMULATION_PLANS_DIR
+
+
+def _slugify_plan_name(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return slug[:64] or "simulation-plan"
+
+
+def _validate_plan_id(plan_id: str) -> str:
+    if not SIMULATION_PLAN_ID_PATTERN.match(plan_id):
+        raise HTTPException(status_code=404, detail=f"Simulation plan {plan_id!r} not found.")
+    return plan_id
+
+
+def _simulation_plan_path(plan_id: str) -> Path:
+    safe_id = _validate_plan_id(plan_id)
+    return _simulation_plans_dir() / f"{safe_id}.json"
+
+
+def _launchable_plan_path(path: Path) -> str:
+    return f"runs/gui-plans/{path.name}"
+
+
+def _validate_simulation_plan_content(content: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(content, dict):
+        raise HTTPException(status_code=400, detail="Simulation plan content must be a JSON object.")
+    try:
+        from run_plan import PlanValidationError, RunPlan
+
+        plan = RunPlan.from_dict(content)
+        plan.validate(strict=False)
+    except PlanValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid simulation plan: {exc}") from exc
+    return dict(content)
+
+
+def _read_simulation_plan_file(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Simulation plan {path.stem!r} not found.") from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"Stored simulation plan {path.stem!r} is invalid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=500, detail=f"Stored simulation plan {path.stem!r} must be a JSON object.")
+    return payload
+
+
+def _simulation_plan_payload(path: Path) -> dict[str, Any]:
+    content = _read_simulation_plan_file(path)
+    name = str(content.get("name") or path.stem.replace("-", " ").title())
+    return {
+        "id": path.stem,
+        "name": name,
+        "path": _launchable_plan_path(path),
+        "content": content,
+    }
+
+
+def _list_simulation_plans_payload() -> dict[str, Any]:
+    plans = [
+        _simulation_plan_payload(path)
+        for path in sorted(_simulation_plans_dir().glob("*.json"))
+        if path.is_file()
+    ]
+    return {"plans": plans}
+
+
+def _get_simulation_plan_payload(plan_id: str) -> dict[str, Any]:
+    return {"plan": _simulation_plan_payload(_simulation_plan_path(plan_id))}
+
+
+def _next_simulation_plan_path(name: str) -> Path:
+    base = _slugify_plan_name(name)
+    candidate = _simulation_plan_path(base)
+    suffix = 2
+    while candidate.exists():
+        candidate = _simulation_plan_path(f"{base}-{suffix}")
+        suffix += 1
+    return candidate
+
+
+def _write_simulation_plan(path: Path, request: SimulationPlanUpsertRequest) -> dict[str, Any]:
+    content = _validate_simulation_plan_content(request.content)
+    content["name"] = request.name.strip()
+    path.write_text(json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {"plan": _simulation_plan_payload(path)}
+
+
+def _create_simulation_plan(request: SimulationPlanUpsertRequest) -> dict[str, Any]:
+    return _write_simulation_plan(_next_simulation_plan_path(request.name), request)
+
+
+def _update_simulation_plan(plan_id: str, request: SimulationPlanUpsertRequest) -> dict[str, Any]:
+    path = _simulation_plan_path(plan_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Simulation plan {plan_id!r} not found.")
+    return _write_simulation_plan(path, request)
+
+
+def _delete_simulation_plan(plan_id: str) -> dict[str, Any]:
+    path = _simulation_plan_path(plan_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Simulation plan {plan_id!r} not found.")
+    path.unlink()
+    return {"plan_id": plan_id, "deleted": True}
 
 
 def _tail_log(path: Path, lines: int) -> str:
@@ -1454,6 +1578,56 @@ def _cancel_run_logic(run_id: int) -> dict[str, Any]:
     return {"run_id": run_id, "status": "cancelling"}
 
 
+def _protected_delete_dirs() -> set[Path]:
+    project_root = Path(PROJECT_DIR).resolve()
+    workdir_root = Path(SIMULATOR_WORKDIR).resolve()
+    log_dir = LOG_DIR.resolve()
+    return {
+        project_root,
+        workdir_root,
+        project_root / "runs",
+        log_dir,
+    }
+
+
+def _record_deleted_file(file_path: Path, deleted_files: list[str]) -> None:
+    deleted_files.append(str(file_path))
+
+
+def _delete_expected_file(file_path: Path, deleted_files: list[str], missing_files: list[str]) -> None:
+    if file_path.exists():
+        file_path.unlink()
+        _record_deleted_file(file_path, deleted_files)
+        return
+    missing_files.append(str(file_path))
+
+
+def _delete_artifact_paths(
+    artifact_paths: list[Path],
+    deleted_files: list[str],
+    missing_files: list[str],
+) -> None:
+    if not artifact_paths:
+        return
+
+    artifact_dirs = {path.parent for path in artifact_paths}
+    if len(artifact_dirs) == 1:
+        artifact_dir = next(iter(artifact_dirs))
+        if artifact_dir.exists() and artifact_dir.is_dir() and artifact_dir.resolve() not in _protected_delete_dirs():
+            for file_path in artifact_dir.rglob("*"):
+                if file_path.is_file():
+                    _record_deleted_file(file_path, deleted_files)
+            shutil.rmtree(artifact_dir)
+            for file_path in artifact_paths:
+                if not file_path.exists() and str(file_path) not in deleted_files:
+                    missing_files.append(str(file_path))
+            LOGGER.info(f"Deleted run artifact folder: {artifact_dir}")
+            return
+
+    for file_path in artifact_paths:
+        _delete_expected_file(file_path, deleted_files, missing_files)
+
+
 def _delete_run_logic(run_id: int) -> dict[str, Any]:
     run = _get_run(run_id)
 
@@ -1467,35 +1641,27 @@ def _delete_run_logic(run_id: int) -> dict[str, Any]:
                 )
             RUN_PROCESSES.pop(run_id, None)
 
-    log_path = run.get("log_path")
-    run_folder = None
-    if log_path:
-        run_folder = Path(log_path).parent
-    else:
-        for folder_path in LOG_DIR.iterdir():
-            if folder_path.is_dir() and ((folder_path / "events.json").exists() or (folder_path / "report.md").exists()):
-                created_at = run.get("created_at")
-                if created_at:
-                    try:
-                        run_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        folder_time = datetime.fromtimestamp(folder_path.stat().st_mtime)
-                        if abs((folder_time - run_time).total_seconds()) < 3600:
-                            run_folder = folder_path
-                            break
-                    except Exception:
-                        pass
-
     deleted_files: list[str] = []
-    if run_folder and run_folder.exists():
+    missing_files: list[str] = []
+
+    log_path = _safe_path(run.get("log_path"))
+    if log_path is not None:
         try:
-            for file_path in run_folder.rglob("*"):
-                if file_path.is_file():
-                    deleted_files.append(str(file_path.relative_to(run_folder)))
-            import shutil
-            shutil.rmtree(run_folder)
-            LOGGER.info(f"Deleted run folder: {run_folder}")
+            _delete_expected_file(log_path, deleted_files, missing_files)
         except Exception as exc:
-            LOGGER.error(f"Failed to delete run folder {run_folder}: {exc}")
+            LOGGER.error(f"Failed to delete run log {log_path}: {exc}")
+            raise HTTPException(status_code=500, detail=f"Failed to delete run log: {str(exc)}")
+
+    artifact_paths = [
+        path
+        for field in ARTIFACT_FIELDS
+        if (path := _safe_path(run.get(field))) is not None
+    ]
+    try:
+        _delete_artifact_paths(artifact_paths, deleted_files, missing_files)
+    except Exception as exc:
+        LOGGER.error(f"Failed to delete run artifacts for run {run_id}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete run artifacts: {str(exc)}")
 
     try:
         if USE_POSTGRES:
@@ -1522,7 +1688,8 @@ def _delete_run_logic(run_id: int) -> dict[str, Any]:
         "run_id": run_id,
         "deleted": True,
         "deleted_files": deleted_files,
-        "message": f"Run {run_id} and its artifacts have been deleted."
+        "missing_files": missing_files,
+        "message": f"Run {run_id} and its available artifacts have been deleted."
     }
 
 
@@ -1589,6 +1756,13 @@ configure_archives_runtime(
 configure_retention_runtime(
     summary=lambda: _retention_summary_payload(),
 )
+configure_simulation_plans_runtime(
+    list_plans=lambda: _list_simulation_plans_payload(),
+    get_plan=lambda plan_id: _get_simulation_plan_payload(plan_id),
+    create_plan=lambda request: _create_simulation_plan(request),
+    update_plan=lambda plan_id, request: _update_simulation_plan(plan_id, request),
+    delete_plan=lambda plan_id: _delete_simulation_plan(plan_id),
+)
 
 
 @app.middleware("http")
@@ -1630,3 +1804,4 @@ app.include_router(admin_router)
 app.include_router(runs_router)
 app.include_router(archives_router)
 app.include_router(retention_router)
+app.include_router(simulation_plans_router)

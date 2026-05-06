@@ -140,6 +140,20 @@ export type HealthResponse = {
   db_path: string;
 };
 
+export type SimulationPlanContent = Record<string, unknown>;
+
+export type SimulationPlan = {
+  id: string;
+  name: string;
+  path: string;
+  content: SimulationPlanContent;
+};
+
+export type SimulationPlanUpsertRequest = {
+  name: string;
+  content: SimulationPlanContent;
+};
+
 export class ApiRequestError extends Error {
   source: string;
   status: number;
@@ -303,12 +317,14 @@ export async function deleteRun(runId: number): Promise<{
   run_id: number;
   deleted: boolean;
   deleted_files: string[];
+  missing_files: string[];
   message: string;
 }> {
   return unwrap<{
     run_id: number;
     deleted: boolean;
     deleted_files: string[];
+    missing_files: string[];
     message: string;
   }>(
     await fetch(`/api/v1/runs/${runId}`, {
@@ -428,4 +444,54 @@ export async function fetchRunMetrics(runId: number): Promise<{
   metrics: RunMetrics;
 }> {
   return unwrap(await fetch(`/api/v1/runs/${runId}/metrics`, withSession()), "run-metrics");
+}
+
+export async function fetchSimulationPlans(): Promise<SimulationPlan[]> {
+  const payload = await unwrap<{ plans: SimulationPlan[] }>(
+    await fetch("/api/v1/simulation-plans", withSession()),
+    "simulation-plans"
+  );
+  return payload.plans;
+}
+
+export async function fetchSimulationPlan(planId: string): Promise<SimulationPlan> {
+  const payload = await unwrap<{ plan: SimulationPlan }>(
+    await fetch(`/api/v1/simulation-plans/${planId}`, withSession()),
+    "simulation-plan"
+  );
+  return payload.plan;
+}
+
+export async function createSimulationPlan(request: SimulationPlanUpsertRequest): Promise<SimulationPlan> {
+  const payload = await unwrap<{ plan: SimulationPlan }>(
+    await fetch("/api/v1/simulation-plans", {
+      method: "POST",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "create-simulation-plan"
+  );
+  return payload.plan;
+}
+
+export async function updateSimulationPlan(planId: string, request: SimulationPlanUpsertRequest): Promise<SimulationPlan> {
+  const payload = await unwrap<{ plan: SimulationPlan }>(
+    await fetch(`/api/v1/simulation-plans/${planId}`, {
+      method: "PUT",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "update-simulation-plan"
+  );
+  return payload.plan;
+}
+
+export async function deleteSimulationPlan(planId: string): Promise<{ plan_id: string; deleted: boolean }> {
+  return unwrap<{ plan_id: string; deleted: boolean }>(
+    await fetch(`/api/v1/simulation-plans/${planId}`, {
+      method: "DELETE",
+      ...withSession(),
+    }),
+    "delete-simulation-plan"
+  );
 }

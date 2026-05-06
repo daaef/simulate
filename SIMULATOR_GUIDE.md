@@ -6,14 +6,94 @@ This simulator is a daily doctor for the ordering platform. It simulates user ap
 
 Required operator inputs:
 
-- `.env` for environment URLs and secrets.
-- A plan JSON (default `sim_actors.json`) with users (phone + delivery GPS) and stores (`store_id`, optional metadata).
+- `.env` for secrets, auth cache values, credentials, and deployment URLs only.
+- A plan JSON (default `sim_actors.json`) with users, stores, GPS, runtime defaults, rules, fixture defaults, payment defaults without Stripe secrets, review defaults, and new-user metadata.
 
 Generated artifacts per run:
 
 - `runs/<timestamp>/events.json`: complete event ledger.
 - `runs/<timestamp>/report.md`: summary + bottlenecks + tabled findings + technical trace.
 - `runs/<timestamp>/story.md`: narrative scenario summary.
+
+Configuration precedence:
+
+1. Explicit CLI flags.
+2. Values from the selected plan JSON.
+3. `.env` fallback for secret/auth/deployment values.
+4. Built-in defaults.
+
+The GUI stores admin-created plans in `runs/gui-plans/` and launches them through the same `--plan` CLI path.
+
+## Plan-Backed Configuration
+
+Existing actor-only plans remain valid:
+
+```json
+{
+  "defaults": {"user_phone": "+2348166675609", "store_id": "FZY_586940"},
+  "users": [{"phone": "+2348166675609", "role": "returning"}],
+  "stores": [{"store_id": "FZY_586940", "subentity_id": 6}]
+}
+```
+
+Richer plans can also carry non-sensitive defaults:
+
+```json
+{
+  "schema_version": 2,
+  "defaults": {
+    "user_phone": "+2348166675609",
+    "store_id": "FZY_586940",
+    "location_radius": 1,
+    "coupon_id": null
+  },
+  "runtime_defaults": {
+    "flow": "doctor",
+    "mode": "trace",
+    "trace_suite": "doctor",
+    "timing_profile": "fast",
+    "users": 1,
+    "orders": 1,
+    "interval_seconds": 30,
+    "reject_rate": 0.1,
+    "continuous": false
+  },
+  "rules": {
+    "strict_plan": false,
+    "run_app_probes": true,
+    "run_store_dashboard_probes": true,
+    "run_post_order_actions": false,
+    "auto_select_store": true,
+    "auto_select_coupon": true,
+    "auto_provision_fixtures": true
+  },
+  "payment_defaults": {
+    "mode": "stripe",
+    "case": "paid_no_coupon",
+    "coupon_id": null,
+    "save_card": false,
+    "test_payment_method": "pm_card_visa"
+  },
+  "fixture_defaults": {
+    "store_setup": {"name": "Fainzy Simulator Store", "city": "Nagoya"},
+    "menu": {"category_name": "Simulator", "name": "Simulator item", "price": 100}
+  },
+  "review_defaults": {"rating": 4, "comment": "Simulator review"},
+  "new_user_defaults": {"first_name": "Fainzy", "last_name": "Simulator", "email": ""},
+  "users": [{"phone": "+2348166675609", "role": "returning"}],
+  "stores": [{"store_id": "FZY_586940", "subentity_id": 6}]
+}
+```
+
+Keep these out of plan JSON: keys containing `secret`, `token`, `password`, `api_key`, or `private_key`. Plan validation rejects them. Stripe secret keys, cached auth tokens, test-user passwords, and deployment URLs stay in `.env`.
+
+Keep normal simulator behavior out of `.env`. Phone/store selection, delivery GPS, runtime defaults, fixture/menu defaults, payment mode/coupon defaults, review defaults, and new-user names/email belong in `sim_actors.json` or the selected GUI plan. If the GUI Phone field is blank, the launched run uses the selected plan's phone; if `--phone` is supplied, that explicit CLI value wins.
+
+Admins can edit GUI-owned plans at `Config` in the web UI. The saved `path` field is launchable from the Runs page and from CLI:
+
+```bash
+python3 -m simulate doctor --plan runs/gui-plans/daily-doctor.json --timing fast
+```
 
 ## 2) Validated Command Matrix
 
@@ -143,7 +223,7 @@ Supported and meaningful:
 Validated incompatibilities and behavior constraints:
 
 - `trace` + `--continuous` is invalid and fails validation.
-- Coupon scenarios fail fast when both are true: no `SIM_COUPON_ID` and `SIM_AUTO_SELECT_COUPON=false`.
+- Coupon scenarios fail fast when both are true: no configured plan/env coupon id and auto coupon selection is disabled.
 - `--users`, `--orders`, `--interval`, `--reject`, `--all-users`, `--continuous` are load-mode controls; in trace they do not change scenario logic.
 - `--suite` / `--scenario` are trace controls; in load they do not alter load orchestration.
 - `--store` sets explicit store mode; with explicit store, auto store fallback is disabled.
@@ -173,7 +253,7 @@ Common failure signatures:
 
 - `No active delivery locations were returned`: delivery GPS/radius issue.
 - `No usable store candidate could serve this simulation`: all candidate stores failed setup/fixtures.
-- `SIM_COUPON_ID is required for coupon flows`: auto coupon selection disabled and no configured coupon.
+- `SIM_COUPON_ID is required for coupon flows`: auto coupon selection disabled and no plan/env coupon is configured.
 - `STRIPE_SECRET_KEY is required`: paid flow selected without Stripe secret.
 
 ### 3.2 `python3 -m simulate --mode trace --suite <suite> ...`
@@ -247,23 +327,23 @@ Common failure signatures:
 
 | Flag | Type | Default | Effect | Constraints / Interactions |
 | --- | --- | --- | --- | --- |
-| `--mode` | `load` or `trace` | from env (`SIM_RUN_MODE`) | Selects orchestration model | `trace` rejects `--continuous` |
-| `--suite` | string | from env (`SIM_TRACE_SUITE`) | Selects trace suite | Trace-mode only |
+| `--mode` | `load` or `trace` | from plan/env (`SIM_RUN_MODE`) | Selects orchestration model | `trace` rejects `--continuous` |
+| `--suite` | string | from plan/env (`SIM_TRACE_SUITE`) | Selects trace suite | Trace-mode only |
 | `--scenario` | repeatable string | none | Appends explicit trace scenarios | Trace-mode only; invalid names fail |
-| `--timing` | `fast` or `realistic` | `fast` | Controls deterministic delays in trace | Does not throttle load worker creation |
-| `--users` | int | `1` | User worker count for load | Must be `>=1` in load |
-| `--orders` | int | `1` | Total orders in bounded load | Must be `>=1` in load unless `--continuous` |
-| `--interval` | float seconds | `30.0` | Delay between user order attempts in load | Load-mode control |
-| `--reject` | float `0..1` | `0.1` | Probabilistic store rejection rate in load | Must be between `0` and `1` |
-| `--continuous` | boolean | `false` | Infinite load run | Invalid in trace |
+| `--timing` | `fast` or `realistic` | from plan/env (`SIM_TIMING_PROFILE`) | Controls deterministic delays in trace | Does not throttle load worker creation |
+| `--users` | int | from plan/env (`N_USERS`) | User worker count for load | Must be `>=1` in load |
+| `--orders` | int | from plan/env (`SIM_ORDERS`) | Total orders in bounded load | Must be `>=1` in load unless `--continuous` |
+| `--interval` | float seconds | from plan/env (`ORDER_INTERVAL_SECONDS`) | Delay between user order attempts in load | Load-mode control |
+| `--reject` | float `0..1` | from plan/env (`REJECT_RATE`) | Probabilistic store rejection rate in load | Must be between `0` and `1` |
+| `--continuous` | boolean | from plan/env (`SIM_CONTINUOUS`) | Infinite load run | Invalid in trace |
 | `--phone` | string | none | Overrides selected user phone | Should exist in plan for deterministic selection |
 | `--store` | string | none | Forces a specific store ID | Disables store fallback behavior by marking explicit store |
 | `--all-users` | boolean | `false` | In load, auth and run all plan users | Load-mode control |
 | `--plan` | path | `sim_actors.json` | Run plan JSON path | Relative paths resolve from current cwd first |
-| `--strict-plan` | boolean | `false` | Enforces user GPS + store IDs at load time | Fails fast on missing required plan fields |
+| `--strict-plan` | boolean | from plan/env (`SIM_STRICT_PLAN`) | Enforces user GPS + store IDs at load time | Fails fast on missing required plan fields |
 | `--skip-app-probes` | boolean | `false` | Disables user-side non-order probes | Affects `app_bootstrap`/doctor/full/audit evidence depth |
 | `--skip-store-dashboard-probes` | boolean | `false` | Disables store dashboard probes | Affects `store_dashboard` coverage |
-| `--post-order-actions` | boolean | env default | Enables receipt/review/reorder after completed orders | Can create real review/receipt records |
+| `--post-order-actions` | boolean | from plan/env | Enables receipt/review/reorder after completed orders | Can create real review/receipt records |
 | `--no-auto-provision` | boolean | `false` | Disables automatic setup/category/menu repair path | Sets `SIM_AUTO_PROVISION_FIXTURES=false` for run |
 
 ## 5) What We Test (Coverage Map)
@@ -400,10 +480,10 @@ python3 -m simulate store-setup --plan sim_actors.json --store FZY_926025 --timi
 
 ## 10) Common Failures
 
-- `No active delivery locations were returned`: adjust user delivery GPS (`SIM_LAT/SIM_LNG` or plan user GPS) and radius.
+- `No active delivery locations were returned`: adjust plan user delivery GPS and radius.
 - `No available priced menu items found`: enable auto-provision or check store/menu endpoints.
 - `No usable store candidate could serve this simulation`: every candidate store failed login/setup/fixture bootstrap.
-- `SIM_COUPON_ID is required for coupon flows`: configure coupon or enable auto-select coupon.
+- `SIM_COUPON_ID is required for coupon flows`: configure a plan/env coupon or enable auto-select coupon.
 - `STRIPE_SECRET_KEY is required`: paid flow selected without Stripe key.
 
 ## 11) Rebuild Outline (from scratch)
@@ -418,3 +498,264 @@ python3 -m simulate store-setup --plan sim_actors.json --store FZY_926025 --timi
 8. Load orchestrator (multi-user/multi-store concurrent runners).
 9. Health summary builder (verdicts, latency percentiles, websocket match rate, bottlenecks).
 10. Operator docs (this guide + command matrix + parameter/coverage reference).
+
+## 12) Web UI Authentication, Admin Account, and Roles
+
+The dockerized web UI is available at:
+
+```bash
+http://localhost:8080
+```
+
+Default admin login:
+
+| Field | Value |
+| --- | --- |
+| Username | `admin` |
+| Password | `admin123` |
+| Email | `admin@simulator.local` |
+| Role | `admin` |
+
+Change this password before shared, staging, or production use. The default admin is seeded by `api/migrations/001-initial-schema.sql`; after a PostgreSQL volume already exists, changing that migration file does not update the running database.
+
+### Role Model
+
+Allowed persisted roles are:
+
+| Role | Intended use | Permissions |
+| --- | --- | --- |
+| `admin` | Full system administrator. | Create/read/update/delete users, reset passwords, create/read/update/cancel/delete runs, read dashboard, read/delete archives, read/update retention, read/configure system settings. |
+| `operator` | Normal simulator operator. | Create/read/cancel runs, read dashboard, read archives, read retention settings. |
+| `runner` | Limited user who can start and inspect runs. | Create/read runs, read dashboard. Cannot cancel runs, delete runs, manage users, or change retention/system settings. |
+| `viewer` | Read-only product/operations user. | Read runs, dashboard, archives, and retention settings. |
+| `auditor` | Read-only evidence/audit user. | Same read-only access as `viewer`; use this role when the account exists for compliance, evidence review, or investigation workflows. |
+
+Legacy role `user` is normalized to `operator` by the role migration and should not be used for new accounts.
+
+### Authentication Behavior
+
+- Self-service registration is disabled: `POST /api/v1/auth/register` always returns `403`.
+- Users must be created by an `admin`.
+- Browser login uses the HTTP-only `simulator_session` cookie.
+- One active browser session is kept per user. Logging in again as the same user invalidates that user's previous session.
+- Cookie defaults are `simulator_session`, seven-day max age, `SameSite=Lax`, path `/`, and `Secure=false` unless overridden by environment.
+- `SIM_AUTH_DISABLED=true` creates a local development admin identity only outside production; it is rejected when `SIM_ENV=production` or `SIM_ENV=prod`.
+- In production, set a strong `JWT_SECRET_KEY`; the default placeholder is rejected in production.
+
+### Run Deletion and Runtime Files
+
+Only admins can delete runs. Deleting a completed run removes that run's database row, its GUI log file under `runs/web-gui/`, and its own artifact folder containing `report.md`, `story.md`, and `events.json` when those paths are available.
+
+Deletion must not remove the shared `runs/web-gui/` directory or files belonging to other runs. The API response includes `deleted_files` for files actually removed and `missing_files` for expected log/artifact paths that were already absent.
+
+### Create and Manage Users in the UI
+
+1. Sign in at `http://localhost:8080/auth/login` as an admin.
+2. Open `Admin` in the app navigation, or go directly to `http://localhost:8080/admin/users`.
+3. Click `Create User`.
+4. Enter `username`, `email`, `password`, and one of these roles: `admin`, `operator`, `runner`, `viewer`, `auditor`.
+5. Use the user table to edit email/role/active status, reset passwords, or delete accounts.
+
+Notes:
+
+- The UI disables editing and deleting the currently signed-in user's row.
+- Password reset is available from the user table and invalidates that user's existing session.
+- Prefer deactivating (`Active=false`) over deleting when you need history to remain explainable.
+- Keep at least one known working admin account.
+
+### Create Users Through the API
+
+Login once and save the session cookie:
+
+```bash
+curl -sS -c /tmp/sim-admin.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}' \
+  http://localhost:8080/api/v1/auth/login
+```
+
+Create an operator:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"ops1","email":"ops1@simulator.local","password":"change-me-123","role":"operator"}' \
+  http://localhost:8080/api/v1/admin/users
+```
+
+Create a runner:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"runner1","email":"runner1@simulator.local","password":"change-me-123","role":"runner"}' \
+  http://localhost:8080/api/v1/admin/users
+```
+
+Create a viewer:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"viewer1","email":"viewer1@simulator.local","password":"change-me-123","role":"viewer"}' \
+  http://localhost:8080/api/v1/admin/users
+```
+
+Create an auditor:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"auditor1","email":"auditor1@simulator.local","password":"change-me-123","role":"auditor"}' \
+  http://localhost:8080/api/v1/admin/users
+```
+
+Create another admin:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin2","email":"admin2@simulator.local","password":"change-me-123","role":"admin"}' \
+  http://localhost:8080/api/v1/admin/users
+```
+
+List users and get user IDs:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  http://localhost:8080/api/v1/admin/users
+```
+
+Update a user's role, email, or active status:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  -X PUT \
+  -H 'Content-Type: application/json' \
+  -d '{"role":"runner","is_active":true}' \
+  http://localhost:8080/api/v1/admin/users/<USER_ID>
+```
+
+Reset a user's password:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"new_password":"new-change-me-123"}' \
+  http://localhost:8080/api/v1/admin/users/<USER_ID>/reset-password
+```
+
+Delete a user:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  -X DELETE \
+  http://localhost:8080/api/v1/admin/users/<USER_ID>
+```
+
+The delete endpoint refuses to delete the currently signed-in admin account.
+
+### Change the Default Admin Password
+
+Preferred path for an existing database:
+
+1. Sign in as `admin`.
+2. Open `Admin` -> `User Management`.
+3. Click `Reset Password` on the `admin` row.
+4. Enter the new password.
+5. Sign out and sign in with the new password.
+
+API path for an existing database:
+
+```bash
+curl -sS -c /tmp/sim-admin.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}' \
+  http://localhost:8080/api/v1/auth/login
+
+curl -sS -b /tmp/sim-admin.cookie \
+  http://localhost:8080/api/v1/admin/users
+
+curl -sS -b /tmp/sim-admin.cookie \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"new_password":"replace-with-a-strong-password"}' \
+  http://localhost:8080/api/v1/admin/users/<ADMIN_USER_ID>/reset-password
+```
+
+The reset endpoint rewrites the bcrypt hash and deletes that user's existing sessions.
+
+### Change the Seeded Admin for a Fresh Database
+
+Use this only before creating a new PostgreSQL volume, or before resetting the local database from scratch.
+
+Generate a bcrypt hash in the API container:
+
+```bash
+docker compose exec api python -c 'import bcrypt; print(bcrypt.hashpw(b"replace-with-a-strong-password", bcrypt.gensalt()).decode())'
+```
+
+Then update the default admin seed in `api/migrations/001-initial-schema.sql`:
+
+```sql
+INSERT INTO users (username, email, password_hash, role)
+VALUES (
+    'admin',
+    'admin@simulator.local',
+    '<GENERATED_BCRYPT_HASH>',
+    'admin'
+)
+ON CONFLICT (username) DO NOTHING;
+```
+
+To seed a different first admin for a fresh database, change the `username`, `email`, bcrypt hash, and keep `role` set to `admin`.
+
+### Create a New Admin Account
+
+Preferred path:
+
+1. Sign in with an existing admin.
+2. Open `Admin` -> `User Management`.
+3. Create a new user with role `admin`.
+4. Sign out and verify the new admin can sign in.
+5. Reset, deactivate, or delete the old admin only after the new admin is verified.
+
+API path:
+
+```bash
+curl -sS -b /tmp/sim-admin.cookie \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"new-admin","email":"new-admin@simulator.local","password":"replace-with-a-strong-password","role":"admin"}' \
+  http://localhost:8080/api/v1/admin/users
+```
+
+### Lockout Recovery
+
+If no admin password is known, generate a bcrypt hash:
+
+```bash
+docker compose exec api python -c 'import bcrypt; print(bcrypt.hashpw(b"temporary-admin-password", bcrypt.gensalt()).decode())'
+```
+
+Open PostgreSQL:
+
+```bash
+docker compose exec postgres psql -U simulator -d simulator
+```
+
+Run SQL with the generated hash:
+
+```sql
+UPDATE users
+SET password_hash = '<GENERATED_BCRYPT_HASH>',
+    is_active = TRUE,
+    role = 'admin',
+    updated_at = NOW()
+WHERE username = 'admin';
+
+DELETE FROM user_sessions
+WHERE user_id = (SELECT id FROM users WHERE username = 'admin');
+```
+
+Then sign in as `admin` with the temporary password and immediately reset it through the UI or API.

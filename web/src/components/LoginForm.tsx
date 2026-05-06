@@ -15,18 +15,29 @@ export default function LoginForm({ onSuccess, initialError = "" }: LoginFormPro
   const [error, setError] = useState(initialError);
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    if (!event.defaultPrevented) {
+      event.preventDefault();
+    }
+
+    event.stopPropagation();
     setError("");
 
-    if (!username || !password) {
+    const cleanUsername = username.trim();
+
+    if (!cleanUsername || !password) {
       setError("Username and password are required");
       return;
     }
 
     try {
       setSubmitting(true);
-      const credentials: LoginCredentials = { username, password };
+
+      const credentials: LoginCredentials = {
+        username: cleanUsername,
+        password,
+      };
+
       await login(credentials);
       onSuccess?.();
     } catch (caughtError) {
@@ -41,6 +52,7 @@ export default function LoginForm({ onSuccess, initialError = "" }: LoginFormPro
       <h2 style={{ textAlign: "center", marginBottom: "12px", color: "var(--text-primary)" }}>
         Sign In
       </h2>
+
       <p style={{ textAlign: "center", margin: "0 0 24px", color: "var(--text-secondary)" }}>
         Admin-created accounts only.
       </p>
@@ -67,6 +79,7 @@ export default function LoginForm({ onSuccess, initialError = "" }: LoginFormPro
           <label style={{ display: "block", marginBottom: "4px", color: "var(--text-secondary)" }}>
             Username
           </label>
+
           <input
             type="text"
             name="username"
@@ -74,6 +87,7 @@ export default function LoginForm({ onSuccess, initialError = "" }: LoginFormPro
             onChange={(event) => setUsername(event.target.value)}
             disabled={submitting}
             required
+            autoComplete="username"
             style={{
               width: "100%",
               padding: "10px 12px",
@@ -91,6 +105,7 @@ export default function LoginForm({ onSuccess, initialError = "" }: LoginFormPro
           <label style={{ display: "block", marginBottom: "4px", color: "var(--text-secondary)" }}>
             Password
           </label>
+
           <input
             type="password"
             name="password"
@@ -98,6 +113,7 @@ export default function LoginForm({ onSuccess, initialError = "" }: LoginFormPro
             onChange={(event) => setPassword(event.target.value)}
             disabled={submitting}
             required
+            autoComplete="current-password"
             style={{
               width: "100%",
               padding: "10px 12px",

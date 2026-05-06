@@ -166,24 +166,41 @@ _store_from_cli = False
 _active_flow = ""
 
 
+def _has_cli_flag(argv: list[str], *flags: str) -> bool:
+    return any(arg == flag or arg.startswith(f"{flag}=") for arg in argv for flag in flags)
+
+
+def _explicit_config_overrides(argv: list[str]) -> set[str]:
+    mapping = {
+        "--mode": "SIM_RUN_MODE",
+        "--suite": "SIM_TRACE_SUITE",
+        "--scenario": "SIM_TRACE_SCENARIOS",
+        "--timing": "SIM_TIMING_PROFILE",
+        "--users": "N_USERS",
+        "--interval": "ORDER_INTERVAL_SECONDS",
+        "--reject": "REJECT_RATE",
+        "--orders": "SIM_ORDERS",
+        "--continuous": "SIM_CONTINUOUS",
+        "--phone": "USER_PHONE_NUMBER",
+        "--store": "STORE_ID",
+        "--all-users": "ALL_USERS",
+        "--strict-plan": "SIM_STRICT_PLAN",
+        "--skip-app-probes": "SIM_RUN_APP_PROBES",
+        "--skip-store-dashboard-probes": "SIM_RUN_STORE_DASHBOARD_PROBES",
+        "--post-order-actions": "SIM_RUN_POST_ORDER_ACTIONS",
+        "--no-auto-provision": "SIM_AUTO_PROVISION_FIXTURES",
+    }
+    return {
+        attr
+        for flag, attr in mapping.items()
+        if _has_cli_flag(argv, flag)
+    }
+
+
 def _apply_args(args: argparse.Namespace) -> None:
     global _store_from_cli, _active_flow
-    config.SIM_RUN_MODE = args.mode
-    config.SIM_TRACE_SUITE = args.suite
-    config.SIM_TRACE_SCENARIOS = [item.lower() for item in (args.scenario or config.SIM_TRACE_SCENARIOS)]
-    config.SIM_TIMING_PROFILE = args.timing
-    config.N_USERS = args.users
-    config.ORDER_INTERVAL_SECONDS = args.interval
-    config.REJECT_RATE = args.reject
-    config.SIM_ORDERS = args.orders
-    config.SIM_CONTINUOUS = args.continuous
-    config.ALL_USERS = args.all_users
-    config.SIM_STRICT_PLAN = args.strict_plan
-    config.SIM_RUN_APP_PROBES = not args.skip_app_probes
-    config.SIM_RUN_STORE_DASHBOARD_PROBES = not args.skip_store_dashboard_probes
-    config.SIM_RUN_POST_ORDER_ACTIONS = args.post_order_actions
-    if args.no_auto_provision:
-        config.SIM_AUTO_PROVISION_FIXTURES = False
+    argv = sys.argv[1:]
+    explicit_overrides = _explicit_config_overrides(argv)
     if args.plan:
         config.set_sim_actors_path(args.plan)
     if args.phone:
@@ -193,7 +210,39 @@ def _apply_args(args: argparse.Namespace) -> None:
         _store_from_cli = True
     config.SIM_STORE_EXPLICIT = _store_from_cli
 
-    actors = config.load_sim_actors()
+    actors = config.load_sim_actors(preserve=explicit_overrides)
+
+    if _has_cli_flag(argv, "--mode"):
+        config.SIM_RUN_MODE = args.mode
+    if _has_cli_flag(argv, "--suite"):
+        config.SIM_TRACE_SUITE = args.suite
+    if _has_cli_flag(argv, "--scenario"):
+        config.SIM_TRACE_SCENARIOS = [item.lower() for item in (args.scenario or [])]
+    if _has_cli_flag(argv, "--timing"):
+        config.SIM_TIMING_PROFILE = args.timing
+    if _has_cli_flag(argv, "--users"):
+        config.N_USERS = args.users
+    if _has_cli_flag(argv, "--interval"):
+        config.ORDER_INTERVAL_SECONDS = args.interval
+    if _has_cli_flag(argv, "--reject"):
+        config.REJECT_RATE = args.reject
+    if _has_cli_flag(argv, "--orders"):
+        config.SIM_ORDERS = args.orders
+    if _has_cli_flag(argv, "--continuous"):
+        config.SIM_CONTINUOUS = args.continuous
+    if _has_cli_flag(argv, "--all-users"):
+        config.ALL_USERS = args.all_users
+    if _has_cli_flag(argv, "--strict-plan"):
+        config.SIM_STRICT_PLAN = args.strict_plan
+    if _has_cli_flag(argv, "--skip-app-probes"):
+        config.SIM_RUN_APP_PROBES = not args.skip_app_probes
+    if _has_cli_flag(argv, "--skip-store-dashboard-probes"):
+        config.SIM_RUN_STORE_DASHBOARD_PROBES = not args.skip_store_dashboard_probes
+    if _has_cli_flag(argv, "--post-order-actions"):
+        config.SIM_RUN_POST_ORDER_ACTIONS = args.post_order_actions
+    if _has_cli_flag(argv, "--no-auto-provision") and args.no_auto_provision:
+        config.SIM_AUTO_PROVISION_FIXTURES = False
+
     flow_name = args.flow
     if not flow_name:
         explicit_flow_flags = {"--mode", "--suite", "--scenario"}

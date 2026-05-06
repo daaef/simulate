@@ -1,10 +1,79 @@
 {
+  "schema_version": 2,
   "defaults": {
     "user_phone": "+2348166675609",
     "new_user_phone": "+2347030766794",
-    "store_id": "FZY_586940",
+    "store_id": "FZY_926025",
     "location_radius": 1,
     "coupon_id": null
+  },
+  "runtime_defaults": {
+    "flow": "doctor",
+    "mode": "trace",
+    "trace_suite": "doctor",
+    "trace_scenarios": [],
+    "timing_profile": "fast",
+    "users": 1,
+    "orders": 1,
+    "interval_seconds": 30,
+    "reject_rate": 0.1,
+    "continuous": false
+  },
+  "rules": {
+    "strict_plan": false,
+    "run_app_probes": true,
+    "run_store_dashboard_probes": true,
+    "run_post_order_actions": false,
+    "app_autopilot": true,
+    "auto_select_store": true,
+    "auto_select_coupon": true,
+    "auto_provision_fixtures": true,
+    "mutate_store_setup": false,
+    "mutate_menu_setup": false,
+    "auto_toggle_store_status": true,
+    "store_open_status": 1,
+    "store_closed_status": 3
+  },
+  "payment_defaults": {
+    "mode": "stripe",
+    "case": "paid_no_coupon",
+    "free_order_amount": 0,
+    "coupon_id": null,
+    "save_card": false,
+    "test_payment_method": "pm_card_visa"
+  },
+  "fixture_defaults": {
+    "store_setup": {
+      "name": "Fainzy Simulator Store",
+      "branch": "Simulator",
+      "description": "Store profile created by simulator setup flow.",
+      "mobile": "+2348166675609",
+      "start_time": "07:00",
+      "closing_time": "23:59",
+      "status": 1,
+      "address": "Simulator address",
+      "city": "Nagoya",
+      "state": "Aichi",
+      "country": "Japan"
+    },
+    "menu": {
+      "category_name": "Simulator",
+      "name": "Simulator item",
+      "description": "Menu item created by simulator.",
+      "price": 100,
+      "ingredients": "simulator ingredients",
+      "discount": 0,
+      "discount_price": 0
+    }
+  },
+  "review_defaults": {
+    "rating": 4,
+    "comment": "Simulator review"
+  },
+  "new_user_defaults": {
+    "first_name": "Fainzy",
+    "last_name": "Simulator",
+    "email": ""
   },
   "users": [
     {
@@ -37,7 +106,9 @@
     },
     {
       "phone": "+2348166675609",
-      "role": "returning_default"
+      "role": "returning_default",
+      "lat": 35.15494521954757,
+      "lng": 136.9663666561246
     },
     {
       "phone": "+2348102894804",

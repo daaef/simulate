@@ -115,7 +115,7 @@ INSERT INTO users (username, email, password_hash, role)
 VALUES (
     'admin', 
     'admin@simulator.local', 
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj/RK.s5uO9G', -- bcrypt hash of "admin123"
+    '$2b$12$MlaNrujpG.T6AJGHXi6kC.w.lB4tJdrrdiYl5WTk1CzzQKuE3x66C', -- bcrypt hash of "admin123"
     'admin'
 ) ON CONFLICT (username) DO NOTHING;
 

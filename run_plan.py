@@ -12,6 +12,9 @@ class PlanValidationError(ValueError):
     """Raised when a simulator run plan is malformed."""
 
 
+SENSITIVE_KEY_PARTS = ("secret", "token", "password", "api_key", "private_key")
+
+
 def _as_float(value: Any) -> float | None:
     if value in {None, ""}:
         return None
@@ -38,6 +41,27 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _dict_section(raw: dict[str, Any], key: str) -> dict[str, Any]:
+    value = raw.get(key, {})
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _find_sensitive_keys(value: Any, *, path: str = "$") -> list[str]:
+    findings: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}"
+            lowered = key_text.lower()
+            if any(part in lowered for part in SENSITIVE_KEY_PARTS):
+                findings.append(child_path)
+            findings.extend(_find_sensitive_keys(child, path=child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            findings.extend(_find_sensitive_keys(child, path=f"{path}[{index}]"))
+    return findings
 
 
 @dataclass(frozen=True)
@@ -120,7 +144,15 @@ class PlanStore:
 
 @dataclass(frozen=True)
 class RunPlan:
+    schema_version: int = 1
+    name: str = ""
     defaults: dict[str, Any] = field(default_factory=dict)
+    runtime_defaults: dict[str, Any] = field(default_factory=dict)
+    rules: dict[str, Any] = field(default_factory=dict)
+    fixture_defaults: dict[str, Any] = field(default_factory=dict)
+    payment_defaults: dict[str, Any] = field(default_factory=dict)
+    review_defaults: dict[str, Any] = field(default_factory=dict)
+    new_user_defaults: dict[str, Any] = field(default_factory=dict)
     users: list[PlanUser] = field(default_factory=list)
     stores: list[PlanStore] = field(default_factory=list)
     source_path: Path | None = None
@@ -142,9 +174,17 @@ class RunPlan:
             for item in raw.get("stores", [])
             if isinstance(item, dict)
         ]
-        defaults = raw.get("defaults", {})
+        defaults = _dict_section(raw, "defaults")
         return cls(
-            defaults=dict(defaults) if isinstance(defaults, dict) else {},
+            schema_version=int(raw.get("schema_version") or 1),
+            name=str(raw.get("name") or ""),
+            defaults=defaults,
+            runtime_defaults=_dict_section(raw, "runtime_defaults"),
+            rules=_dict_section(raw, "rules"),
+            fixture_defaults=_dict_section(raw, "fixture_defaults"),
+            payment_defaults=_dict_section(raw, "payment_defaults"),
+            review_defaults=_dict_section(raw, "review_defaults"),
+            new_user_defaults=_dict_section(raw, "new_user_defaults"),
             users=users,
             stores=stores,
             source_path=source_path,
@@ -152,6 +192,12 @@ class RunPlan:
 
     def validate(self, *, strict: bool = False) -> None:
         errors: list[str] = []
+        sensitive_keys = _find_sensitive_keys(self.to_raw())
+        if sensitive_keys:
+            errors.append(
+                "sensitive key is not allowed in run plans: "
+                + ", ".join(sensitive_keys)
+            )
         if strict and not self.users:
             errors.append("users must contain at least one user")
         if strict and not self.stores:
@@ -175,6 +221,29 @@ class RunPlan:
             "users": [user.to_actor() for user in self.users],
             "stores": [store.to_actor() for store in self.stores],
         }
+
+    def to_raw(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.schema_version != 1:
+            payload["schema_version"] = self.schema_version
+        if self.name:
+            payload["name"] = self.name
+        payload["defaults"] = dict(self.defaults)
+        if self.runtime_defaults:
+            payload["runtime_defaults"] = dict(self.runtime_defaults)
+        if self.rules:
+            payload["rules"] = dict(self.rules)
+        if self.fixture_defaults:
+            payload["fixture_defaults"] = dict(self.fixture_defaults)
+        if self.payment_defaults:
+            payload["payment_defaults"] = dict(self.payment_defaults)
+        if self.review_defaults:
+            payload["review_defaults"] = dict(self.review_defaults)
+        if self.new_user_defaults:
+            payload["new_user_defaults"] = dict(self.new_user_defaults)
+        payload["users"] = [user.to_actor() for user in self.users]
+        payload["stores"] = [store.to_actor() for store in self.stores]
+        return payload
 
 
 def load_run_plan(path: str | Path, *, strict: bool = False) -> RunPlan:

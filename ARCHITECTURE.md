@@ -30,6 +30,7 @@ active websocket connection. There are no shared queues between simulators.
 | `transport` | Masked request/response proof, auth proof, latency capture |
 | `reporting` | `events.json`, `report.md`, and `story.md` artifacts |
 | `run_plan` | JSON run-plan parsing and validation for operator input |
+| `api/app/simulation_plans` | Web API for GUI-owned plan files stored under `runs/gui-plans/` |
 | `app_probes` | Real-app API probes outside the core order mutation |
 | `post_order_actions` | Receipt, review, and reorder probes after completed orders |
 | `health` | Daily doctor summary, latency, bottleneck, websocket, and issue metrics |
@@ -135,15 +136,33 @@ Artifact roles:
 
 ## JSON Run Plan
 
-The public input is a JSON file. `sim_actors.json` remains valid, and richer plans can add GPS to each user:
+The public input is a JSON file. `.env` remains the secret/deployment fallback; non-sensitive simulation behavior should live in the selected plan. `sim_actors.json` remains valid, and richer plans can add runtime defaults, rules, fixture defaults, payment defaults without Stripe secrets, review defaults, and GPS to each user:
 
 ```json
 {
+  "schema_version": 2,
   "defaults": {
     "user_phone": "+2348166675609",
     "store_id": "FZY_586940",
     "location_radius": 1,
     "coupon_id": null
+  },
+  "runtime_defaults": {
+    "flow": "doctor",
+    "mode": "trace",
+    "trace_suite": "doctor",
+    "timing_profile": "fast"
+  },
+  "rules": {
+    "auto_select_store": true,
+    "auto_select_coupon": true,
+    "auto_provision_fixtures": true
+  },
+  "payment_defaults": {
+    "mode": "stripe",
+    "case": "paid_no_coupon",
+    "coupon_id": null,
+    "test_payment_method": "pm_card_visa"
   },
   "users": [
     {
@@ -168,6 +187,8 @@ The public input is a JSON file. `sim_actors.json` remains valid, and richer pla
 
 Use `--strict-plan` when operators want the simulator to reject users without GPS coordinates or stores without IDs.
 
+Precedence is explicit CLI flags, then selected plan JSON, then `.env`, then built-in defaults. GUI-generated plans are stored as JSON under `runs/gui-plans/` and launched through the same `--plan` command path.
+
 ## CLI
 
 Examples:
@@ -184,52 +205,22 @@ python3 -m simulate store-dashboard --plan sim_actors.json
 
 ## Required Environment
 
+`.env` is intentionally small: keep secrets, cached credentials, deployment URLs, and optional runtime paths here. Put normal simulation behavior in the selected plan JSON.
+
 ```env
-USER_PHONE_NUMBER=+819012345678
 USER_LASTMILE_TOKEN=
 USER_ID=
-
-STORE_ID=1
 STORE_LASTMILE_TOKEN=
 
-SUBENTITY_ID=1
-LOCATION_ID=
-STORE_CURRENCY=jpy
-
-SIM_LAT=
-SIM_LNG=
-SIM_LOCATION_RADIUS=1
-
-SIM_RUN_MODE=load
-SIM_TRACE_SUITE=core
-SIM_TRACE_SCENARIOS=
-SIM_TIMING_PROFILE=fast
-
-SIM_PAYMENT_MODE=stripe
-SIM_PAYMENT_CASE=paid_no_coupon
-SIM_RUN_APP_PROBES=true
-SIM_RUN_STORE_DASHBOARD_PROBES=true
-SIM_RUN_POST_ORDER_ACTIONS=false
-SIM_STRICT_PLAN=false
-SIM_APP_AUTOPILOT=true
-SIM_AUTO_SELECT_STORE=true
-SIM_AUTO_SELECT_COUPON=true
-SIM_REVIEW_RATING=4
-SIM_REVIEW_COMMENT=Simulator review
 STRIPE_SECRET_KEY=
-STRIPE_TEST_PAYMENT_METHOD=pm_card_visa
-SIM_SAVE_CARD=false
-SIM_FREE_ORDER_AMOUNT=0
-SIM_COUPON_ID=
+SIM_NEW_USER_PASSWORD=Password123!
 
 LASTMILE_BASE_URL=https://lastmile.fainzy.tech
 FAINZY_BASE_URL=https://fainzy.tech
 
-N_USERS=1
-SIM_ORDERS=1
-SIM_CONTINUOUS=false
-ORDER_INTERVAL_SECONDS=30
-REJECT_RATE=0.1
+SIM_ENV=development
+JWT_SECRET_KEY=dev-only-change-me
+POSTGRES_PASSWORD=simulator123
 
 USER_DECISION_POLL_INTERVAL_SECONDS=5
 USER_DECISION_POLL_MAX_ATTEMPTS=60
@@ -240,9 +231,9 @@ SIM_WEBSOCKET_DRAIN_SECONDS=3
 SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS=20
 ```
 
-`SIM_LAT` and `SIM_LNG` are user delivery coordinates for `/v1/entities/locations/<lng>/<lat>/`. Store coordinates from the run plan are store metadata only and must not overwrite delivery-location search coordinates.
+Plan `users[].lat/lng` are user delivery coordinates for `/v1/entities/locations/<lng>/<lat>/`. Store coordinates from the run plan are store metadata only and must not overwrite delivery-location search coordinates.
 
-`SIM_APP_AUTOPILOT=true` is the default operator mode. It lets doctor/trace flows behave like the apps: when no store is explicit, startup can try planned stores until one serves the selected user/location, and coupon scenarios can fetch/select a valid coupon automatically.
+Plan `rules.app_autopilot=true` is the default operator mode. It lets doctor/trace flows behave like the apps: when no store is explicit, startup can try planned stores until one serves the selected user/location, and coupon scenarios can fetch/select a valid coupon automatically.
 
 ## Verification
 

@@ -26,6 +26,7 @@ from websocket_observer import validate_websocket_events
 def _fixtures():
     return types.SimpleNamespace(
         user_id=13,
+        user={"id": 13, "phone_number": "+2348000000000", "first_name": "Test", "last_name": "User"},
         store={"id": 1, "name": "Test Store", "branch": "Main", "currency": "jpy"},
         location={"id": 5, "name": "Campus", "address": "Campus Road"},
         menu_items=[{"id": 1}, {"id": 2}],
@@ -101,6 +102,213 @@ class RunPlanTests(unittest.TestCase):
         self.assertEqual(actors["users"][0]["lat"], 1.0)
         self.assertEqual(actors["stores"][0]["store_id"], "FZY_1")
         self.assertEqual(actors["stores"][0]["subentity_id"], 5)
+
+    def test_loads_extended_non_sensitive_plan_sections(self) -> None:
+        from run_plan import load_run_plan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir) / "plan.json"
+            path.write_text(
+                """
+                {
+                  "schema_version": 2,
+                  "defaults": {"user_phone": "+100", "store_id": "FZY_1"},
+                  "runtime_defaults": {
+                    "flow": "full",
+                    "mode": "trace",
+                    "trace_suite": "doctor",
+                    "timing_profile": "realistic",
+                    "users": 4,
+                    "orders": 8,
+                    "interval_seconds": 2.5,
+                    "reject_rate": 0.25,
+                    "continuous": false
+                  },
+                  "rules": {
+                    "strict_plan": true,
+                    "run_app_probes": false,
+                    "run_store_dashboard_probes": false,
+                    "run_post_order_actions": true,
+                    "auto_select_store": false,
+                    "auto_select_coupon": false,
+                    "auto_provision_fixtures": false
+                  },
+                  "fixture_defaults": {
+                    "store_setup": {"name": "Plan Store", "city": "Nagoya"},
+                    "menu": {"category_name": "Plan Menu", "name": "Plan Item", "price": 1200}
+                  },
+                  "payment_defaults": {
+                    "mode": "free",
+                    "case": "free_with_coupon",
+                    "free_order_amount": 0,
+                    "coupon_id": 301,
+                    "save_card": true,
+                    "test_payment_method": "pm_card_visa"
+                  },
+                  "review_defaults": {"rating": 5, "comment": "Plan review"},
+                  "new_user_defaults": {"first_name": "Plan", "last_name": "User", "email": "plan@example.com"},
+                  "users": [{"phone": "+100", "lat": 35.1, "lng": 136.9}],
+                  "stores": [{"store_id": "FZY_1", "lat": 35.1, "lng": 136.9}]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            plan = load_run_plan(path)
+
+        self.assertEqual(plan.schema_version, 2)
+        self.assertEqual(plan.runtime_defaults["flow"], "full")
+        self.assertEqual(plan.rules["strict_plan"], True)
+        self.assertEqual(plan.fixture_defaults["menu"]["price"], 1200)
+        self.assertEqual(plan.payment_defaults["coupon_id"], 301)
+        self.assertEqual(plan.review_defaults["comment"], "Plan review")
+        self.assertEqual(plan.new_user_defaults["email"], "plan@example.com")
+
+    def test_plan_rejects_sensitive_keys(self) -> None:
+        from run_plan import PlanValidationError, load_run_plan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir) / "bad-plan.json"
+            path.write_text(
+                """
+                {
+                  "payment_defaults": {"stripe_secret_key": "sk_test_should_not_be_here"},
+                  "users": [{"phone": "+100", "lat": 35.1, "lng": 136.9}],
+                  "stores": [{"store_id": "FZY_1", "lat": 35.1, "lng": 136.9}]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(PlanValidationError) as raised:
+                load_run_plan(path)
+
+        self.assertIn("sensitive key", str(raised.exception))
+
+    def test_config_applies_plan_defaults_and_preserves_explicit_cli_values(self) -> None:
+        import config
+
+        tracked_attrs = (
+            "SIM_FLOW",
+            "SIM_RUN_MODE",
+            "SIM_TRACE_SUITE",
+            "SIM_TRACE_SCENARIOS",
+            "SIM_TIMING_PROFILE",
+            "N_USERS",
+            "SIM_ORDERS",
+            "ORDER_INTERVAL_SECONDS",
+            "REJECT_RATE",
+            "SIM_CONTINUOUS",
+            "SIM_STRICT_PLAN",
+            "SIM_RUN_APP_PROBES",
+            "SIM_RUN_STORE_DASHBOARD_PROBES",
+            "SIM_RUN_POST_ORDER_ACTIONS",
+            "SIM_AUTO_SELECT_STORE",
+            "SIM_AUTO_SELECT_COUPON",
+            "SIM_AUTO_PROVISION_FIXTURES",
+            "SIM_PAYMENT_MODE",
+            "SIM_PAYMENT_CASE",
+            "SIM_FREE_ORDER_AMOUNT",
+            "SIM_COUPON_ID",
+            "SIM_SAVE_CARD",
+            "STRIPE_TEST_PAYMENT_METHOD",
+            "SIM_STORE_SETUP_NAME",
+            "SIM_STORE_SETUP_CITY",
+            "SIM_MENU_CATEGORY_NAME",
+            "SIM_MENU_NAME",
+            "SIM_MENU_PRICE",
+            "SIM_REVIEW_RATING",
+            "SIM_REVIEW_COMMENT",
+            "SIM_NEW_USER_FIRST_NAME",
+            "SIM_NEW_USER_LAST_NAME",
+            "SIM_NEW_USER_EMAIL",
+            "SIM_ACTORS_PATH",
+        )
+        previous = {name: getattr(config, name) for name in tracked_attrs}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir) / "plan.json"
+            path.write_text(
+                """
+                {
+                  "runtime_defaults": {
+                    "flow": "full",
+                    "mode": "trace",
+                    "trace_suite": "doctor",
+                    "trace_scenarios": ["completed", "rejected"],
+                    "timing_profile": "realistic",
+                    "users": 3,
+                    "orders": 9,
+                    "interval_seconds": 1.5,
+                    "reject_rate": 0.2,
+                    "continuous": true
+                  },
+                  "rules": {
+                    "strict_plan": true,
+                    "run_app_probes": false,
+                    "run_store_dashboard_probes": false,
+                    "run_post_order_actions": true,
+                    "auto_select_store": false,
+                    "auto_select_coupon": false,
+                    "auto_provision_fixtures": false
+                  },
+                  "payment_defaults": {
+                    "mode": "free",
+                    "case": "free_with_coupon",
+                    "free_order_amount": 0,
+                    "coupon_id": 301,
+                    "save_card": true,
+                    "test_payment_method": "pm_card_visa"
+                  },
+                  "fixture_defaults": {
+                    "store_setup": {"name": "Plan Store", "city": "Nagoya"},
+                    "menu": {"category_name": "Plan Category", "name": "Plan Item", "price": 900}
+                  },
+                  "review_defaults": {"rating": 5, "comment": "Plan review"},
+                  "new_user_defaults": {"first_name": "Plan", "last_name": "User", "email": "plan@example.com"},
+                  "users": [{"phone": "+100", "lat": 35.1, "lng": 136.9}],
+                  "stores": [{"store_id": "FZY_1", "lat": 35.1, "lng": 136.9}]
+                }
+                """,
+                encoding="utf-8",
+            )
+            try:
+                config.SIM_TIMING_PROFILE = "fast"
+                config.load_sim_actors(path, preserve={"SIM_TIMING_PROFILE"})
+
+                self.assertEqual(config.SIM_FLOW, "full")
+                self.assertEqual(config.SIM_RUN_MODE, "trace")
+                self.assertEqual(config.SIM_TRACE_SUITE, "doctor")
+                self.assertEqual(config.SIM_TRACE_SCENARIOS, ["completed", "rejected"])
+                self.assertEqual(config.SIM_TIMING_PROFILE, "fast")
+                self.assertEqual(config.N_USERS, 3)
+                self.assertEqual(config.SIM_ORDERS, 9)
+                self.assertEqual(config.ORDER_INTERVAL_SECONDS, 1.5)
+                self.assertEqual(config.REJECT_RATE, 0.2)
+                self.assertTrue(config.SIM_CONTINUOUS)
+                self.assertTrue(config.SIM_STRICT_PLAN)
+                self.assertFalse(config.SIM_RUN_APP_PROBES)
+                self.assertFalse(config.SIM_RUN_STORE_DASHBOARD_PROBES)
+                self.assertTrue(config.SIM_RUN_POST_ORDER_ACTIONS)
+                self.assertFalse(config.SIM_AUTO_SELECT_STORE)
+                self.assertFalse(config.SIM_AUTO_SELECT_COUPON)
+                self.assertFalse(config.SIM_AUTO_PROVISION_FIXTURES)
+                self.assertEqual(config.SIM_PAYMENT_MODE, "free")
+                self.assertEqual(config.SIM_PAYMENT_CASE, "free_with_coupon")
+                self.assertEqual(config.SIM_COUPON_ID, 301)
+                self.assertTrue(config.SIM_SAVE_CARD)
+                self.assertEqual(config.SIM_STORE_SETUP_NAME, "Plan Store")
+                self.assertEqual(config.SIM_STORE_SETUP_CITY, "Nagoya")
+                self.assertEqual(config.SIM_MENU_CATEGORY_NAME, "Plan Category")
+                self.assertEqual(config.SIM_MENU_NAME, "Plan Item")
+                self.assertEqual(config.SIM_MENU_PRICE, 900.0)
+                self.assertEqual(config.SIM_REVIEW_RATING, 5)
+                self.assertEqual(config.SIM_REVIEW_COMMENT, "Plan review")
+                self.assertEqual(config.SIM_NEW_USER_FIRST_NAME, "Plan")
+                self.assertEqual(config.SIM_NEW_USER_LAST_NAME, "User")
+                self.assertEqual(config.SIM_NEW_USER_EMAIL, "plan@example.com")
+            finally:
+                for name, value in previous.items():
+                    setattr(config, name, value)
 
     def test_config_plan_path_prefers_existing_cwd_relative_path(self) -> None:
         import config
@@ -480,6 +688,7 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("bad store cannot serve this user")
             return types.SimpleNamespace(
                 user_id=13,
+                user={"id": 13, "phone_number": "+2348000000000", "first_name": "Test", "last_name": "User"},
                 store={"id": 2, "name": "Good Store", "currency": "jpy"},
                 location={"id": 5},
                 menu_items=[{"id": 7, "status": "available", "price": 100}],
