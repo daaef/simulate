@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, Dict, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -10,8 +12,8 @@ class RefreshTokenRequest(BaseModel):
 class SessionUserResponse(BaseModel):
     id: int
     username: str
-    email: str | None = None
+    email: Optional[str] = None
     role: str
-    created_at: str | object
-    last_login: str | object | None = None
-    preferences: dict[str, object] = Field(default_factory=dict)
+    created_at: Any
+    last_login: Optional[Any] = None
+    preferences: Dict[str, Any] = Field(default_factory=dict)
