@@ -90,3 +90,17 @@ Admins can edit GUI-owned plans from `Config`. Use the saved plan path, for exam
 
 - `SIMULATOR_GUIDE.md`: Operator guide (CLI + web UI + auth/roles).
 - `ARCHITECTURE.md`: System architecture and component responsibilities.
+- `docs/deployment.md`: Production deployment runbook (SSH + GitHub Actions + Docker Compose).
+
+## Production Deployment
+
+Production deployment is handled by a portable SSH workflow in `.github/workflows/deploy.yml`.
+
+- Triggered on push to `main` and manually via `workflow_dispatch`.
+- Deploys only the simulator stack (`nginx`, `web`, `api`, `postgres`) using `docker-compose.prod.yml`.
+- Preserves state with named Docker volumes for Postgres data, run artifacts, and GUI plans.
+- Requires host-managed `.env.prod`; workflow fails if `.env.prod` is missing.
+- Uses `git@github.com:daaef/simulate.git` and defaults deployment path to `/root/simulate`.
+- Defaults to `http://127.0.0.1:8090` via `SIMULATOR_HOST_BIND=127.0.0.1` and `SIMULATOR_HOST_PORT=8090`; set `0.0.0.0` only when intentionally exposing publicly.
+
+See `docs/deployment.md` for first-time VPS setup, GitHub secrets, backup/rollback, health checks, and security hardening.
