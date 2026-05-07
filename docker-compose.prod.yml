@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-simulator}
+      POSTGRES_USER: ${POSTGRES_USER:-simulator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - simulator_postgres_data:/var/lib/postgresql/data
+      - ./api/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-simulator} -d ${POSTGRES_DB:-simulator}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    command: ["uvicorn", "api.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      SIM_ENV: ${SIM_ENV:-production}
+      SIMULATOR_WORKDIR: /workspace
+      SIMULATOR_PROJECT_DIR: /workspace/simulate
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-simulator}
+      POSTGRES_USER: ${POSTGRES_USER:-simulator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      RUN_DB_PATH: /workspace/simulate/runs/web-gui.sqlite
+      RUN_LOG_DIR: ${RUN_LOG_DIR:-/workspace/simulate/runs/web-gui}
+      SIM_GUI_PLANS_DIR: ${SIM_GUI_PLANS_DIR:-/workspace/simulate/runs/gui-plans}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+      WEB_CORS_ORIGINS: ${WEB_CORS_ORIGINS:?WEB_CORS_ORIGINS is required}
+      SIM_AUTH_DISABLED: ${SIM_AUTH_DISABLED:-false}
+      SIMULATOR_SESSION_COOKIE_NAME: ${SIMULATOR_SESSION_COOKIE_NAME:-simulator_session}
+      SIMULATOR_SESSION_MAX_AGE_SECONDS: ${SIMULATOR_SESSION_MAX_AGE_SECONDS:-604800}
+      SIMULATOR_SESSION_COOKIE_SECURE: ${SIMULATOR_SESSION_COOKIE_SECURE:-true}
+      SIMULATOR_SESSION_COOKIE_SAMESITE: ${SIMULATOR_SESSION_COOKIE_SAMESITE:-lax}
+      USER_DECISION_POLL_INTERVAL_SECONDS: ${USER_DECISION_POLL_INTERVAL_SECONDS:-5}
+      USER_DECISION_POLL_MAX_ATTEMPTS: ${USER_DECISION_POLL_MAX_ATTEMPTS:-60}
+      ORDER_PROCESSING_POLL_INTERVAL_SECONDS: ${ORDER_PROCESSING_POLL_INTERVAL_SECONDS:-5}
+      ORDER_PROCESSING_POLL_MAX_ATTEMPTS: ${ORDER_PROCESSING_POLL_MAX_ATTEMPTS:-60}
+      SIM_WEBSOCKET_CONNECT_GRACE_SECONDS: ${SIM_WEBSOCKET_CONNECT_GRACE_SECONDS:-1}
+      SIM_WEBSOCKET_DRAIN_SECONDS: ${SIM_WEBSOCKET_DRAIN_SECONDS:-3}
+      SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS: ${SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS:-20}
+    volumes:
+      - simulator_runs_data:/workspace/simulate/runs
+      - simulator_gui_plans_data:/workspace/simulate/runs/gui-plans
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    command: ["sh", "-c", "npm run build && npm run start -- --hostname 0.0.0.0 --port 3000"]
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    ports:
+      - "${SIMULATOR_HOST_BIND:-127.0.0.1}:${SIMULATOR_HOST_PORT:-8090}:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  simulator_postgres_data:
+  simulator_runs_data:
+  simulator_gui_plans_data:

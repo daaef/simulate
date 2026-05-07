@@ -963,3 +963,16 @@ WHERE user_id = (SELECT id FROM users WHERE username = 'admin');
 ```
 
 Then sign in as `admin` with the temporary password and immediately reset it through the UI or API.
+
+## Production Deployment Operations
+
+Production deployment for this repository is intentionally limited to deploying the Simulator service stack itself (`nginx`, `web`, `api`, `postgres`) and excludes post-deployment simulation automation.
+
+- Workflow: `.github/workflows/deploy.yml`
+- Compose file: `docker-compose.prod.yml`
+- Host env file (required): `.env.prod`
+- Trigger: push to `main` or manual workflow dispatch
+
+Deployment is idempotent (`git fetch` + `git checkout main` + `git reset --hard origin/main`), does not delete volumes, and fails if health check (`/healthz`) fails.
+
+Use `docs/deployment.md` as the full production runbook for first-time host setup, GitHub secrets, backup/restore, rollback, logs, troubleshooting, and security hardening.

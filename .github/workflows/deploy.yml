@@ -1,0 +1,98 @@
+name: Deploy Simulator
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_PATH: ${{ secrets.SIMULATOR_DEPLOY_PATH }}
+          REPO_URL: git@github.com:daaef/simulate.git
+        with:
+          host: ${{ secrets.SIMULATOR_DEPLOY_HOST }}
+          username: ${{ secrets.SIMULATOR_DEPLOY_USERNAME }}
+          key: ${{ secrets.SIMULATOR_DEPLOY_SSH_KEY }}
+          port: ${{ secrets.SIMULATOR_DEPLOY_PORT || '22' }}
+          envs: DEPLOY_PATH,REPO_URL
+          command_timeout: 45m
+          script: |
+            set -euo pipefail
+
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "ERROR: docker is not installed on target host"
+              exit 1
+            fi
+
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "ERROR: docker compose plugin is not available on target host"
+              exit 1
+            fi
+
+            TARGET_PATH="${DEPLOY_PATH:-/root/simulate}"
+
+            mkdir -p "$TARGET_PATH"
+
+            if [ ! -d "$TARGET_PATH/.git" ]; then
+              echo "Repository missing, cloning into $TARGET_PATH"
+              git clone "$REPO_URL" "$TARGET_PATH"
+            fi
+
+            cd "$TARGET_PATH"
+
+            cleanup_on_error() {
+              echo "Deployment failed. Container status:"
+              docker compose -f docker-compose.prod.yml --env-file .env.prod ps || true
+              echo "Recent API logs:"
+              docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 80 api || true
+              echo "Recent web logs:"
+              docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 80 web || true
+              echo "Recent nginx logs:"
+              docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 80 nginx || true
+            }
+            trap cleanup_on_error ERR
+
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+
+            if [ ! -f .env.prod ]; then
+              echo "ERROR: .env.prod is missing at $TARGET_PATH/.env.prod"
+              echo "Create it from .env.prod.example and rerun deployment."
+              exit 1
+            fi
+
+            echo "Building production images..."
+            docker compose -f docker-compose.prod.yml --env-file .env.prod build
+
+            echo "Starting/updating production stack..."
+            docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --remove-orphans
+
+            HOST_PORT="$(grep -E '^SIMULATOR_HOST_PORT=' .env.prod | tail -1 | cut -d '=' -f2- | tr -d '"' || true)"
+            if [ -z "$HOST_PORT" ]; then
+              HOST_PORT="8090"
+            fi
+
+            echo "Running health check on 127.0.0.1:${HOST_PORT}/healthz"
+            HEALTH_OK=0
+            for i in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:${HOST_PORT}/healthz" >/dev/null; then
+                HEALTH_OK=1
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "$HEALTH_OK" -ne 1 ]; then
+              echo "ERROR: health check failed after deployment"
+              exit 1
+            fi
+
+            echo "Deployment successful"
+            docker compose -f docker-compose.prod.yml --env-file .env.prod ps
