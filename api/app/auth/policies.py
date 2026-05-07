@@ -37,11 +37,19 @@ ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
 
         ("dashboard", "read"),
 
+        ("schedules", "create"),
+        ("schedules", "read"),
+        ("schedules", "update"),
+        ("schedules", "delete"),
+        ("schedules", "trigger"),
+
         ("archives", "read"),
         ("archives", "delete"),
 
         ("retention", "read"),
         ("retention", "update"),
+
+        ("alerts", "read"),
 
         ("system", "read"),
         ("system", "configure"),
@@ -53,28 +61,40 @@ ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
 
         ("dashboard", "read"),
 
+        ("schedules", "create"),
+        ("schedules", "read"),
+        ("schedules", "update"),
+        ("schedules", "trigger"),
+
         ("archives", "read"),
         ("retention", "read"),
+        ("alerts", "read"),
     },
     "runner": {
         ("runs", "create"),
         ("runs", "read"),
 
         ("dashboard", "read"),
+        ("schedules", "read"),
+        ("alerts", "read"),
     },
     "viewer": {
         ("runs", "read"),
 
         ("dashboard", "read"),
+        ("schedules", "read"),
         ("archives", "read"),
         ("retention", "read"),
+        ("alerts", "read"),
     },
     "auditor": {
         ("runs", "read"),
 
         ("dashboard", "read"),
+        ("schedules", "read"),
         ("archives", "read"),
         ("retention", "read"),
+        ("alerts", "read"),
     },
 }
 

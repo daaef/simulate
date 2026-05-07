@@ -24,6 +24,40 @@ User roles: `admin`, `operator`, `runner`, `viewer`, `auditor`. See `SIMULATOR_G
 
 Admins can delete completed runs from the web UI. Deleting a run removes only that run's database row, GUI log file, and owned artifact folder; shared GUI log storage and other runs are preserved. The delete API reports both `deleted_files` and `missing_files`.
 
+## Web UI Operations
+
+The authenticated app shell includes active route highlighting for `Overview`, `Runs`, `Config`, `Schedules`, `Archives`, `Retention`, and `Admin`.
+
+- `Overview`: status cards, run status and success charts, flow distribution, failure trend, archive/purge backlog, schedule health, and alerts.
+- `Runs`: launch, cancel, replay, delete completed runs, and inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles.
+- `Schedules`: creates profile-backed simple schedules and campaign schedules with date/time active ranges, run windows, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, pause, resume, disable, soft delete, and restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
+- `Archives`: searchable archive/raw-purge candidate browsing with retained run summaries.
+- `Retention`: policy windows, archive/purge queues, retained-summary fields, and purge-safety state.
+- `Admin`: manage users under `/admin/users` and configure system policies (including allowed scheduling timezones) under `/admin/system`.
+
+## Schedule Semantics
+
+Preferred schedule contract (for new/edited schedules):
+
+1. `anchor_start_at`: when recurring automation starts.
+2. `period`: `hourly`, `daily`, `weekly`, or `monthly`.
+3. `stop_rule`: `never`, `end_at`, or `duration`.
+4. `runs_per_period`: number of runs to distribute in each period window.
+5. Optional constraints: `run_window_start/end` and `blackout_dates`.
+
+The scheduler computes period candidates, applies stop rule, applies window/blackout constraints, then emits:
+
+- `next_run_at`
+- `next_run_reason`
+- `current_period_runs`
+- `requested_runs_per_period`
+- `feasible_runs_per_period`
+- `schedule_warnings`
+
+Legacy cadence/custom fields remain accepted for compatibility with existing schedules.
+
+The `/schedules` form shows pre-submit automation preview (next run, requested vs feasible runs, and warnings). See `SIMULATOR_GUIDE.md` section **Schedule and Campaign APIs** for full details and worked examples.
+
 ## CLI Simulator
 
 Daily recommended run:
@@ -46,7 +80,7 @@ Admins can edit GUI-owned plans from `Config`. Use the saved plan path, for exam
 
 ## Repo Map
 
-- `api/`: FastAPI service (auth, run orchestration, admin APIs) used by the web UI.
+- `api/`: FastAPI service (auth, run orchestration, schedules, alerts, archive/retention, admin APIs) used by the web UI.
 - `web/`: Next.js frontend for the web UI.
 - `infra/`: Nginx config and infra wiring for the Docker stack.
 - `runs/`: Generated run artifacts (`events.json`, `report.md`, `story.md`) and web UI runtime storage, including per-run GUI logs under `runs/web-gui/`.

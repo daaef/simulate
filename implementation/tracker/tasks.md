@@ -218,6 +218,11 @@ Run `python3 -m simulate full --plan sim_actors.json --timing fast` to confirm t
 
 ### Phase 14: Web GUI Implementation (Local-First Scaffold)
 
+- [x] Admin-configured allowed scheduling timezones
+  - Dependency: Schedules feature exists.
+  - Notes: Add `system_settings` persistence, `GET/PUT /api/v1/system/timezones`, `/admin/system` UI with allowlist toggle + checklist, schedules timezone dropdown backed by policy, and API enforcement on schedule create/update.
+  - Completion evidence: `SystemTimezonesApiTests` added; `python3 -m unittest discover -s tests` passes; `cd web && npm run build` passes.
+
 - [x] Scaffold dockerized web/api/nginx app with no Celery/Redis dependency
   - Dependency: Phase 13 completion.
   - Notes: Added FastAPI run-control API, Next.js GUI shell, Dockerfiles, compose stack, and Nginx reverse proxy.
@@ -559,3 +564,14 @@ Monitor future run deletes from the web UI; already-deleted GUI log files cannot
 ## Next Immediate Task
 
 Use plan-backed values for future CLI/GUI runs; keep `.env` free of actor/run-behavior keys.
+
+### Phase 31: Remaining Platform Features + UX Upgrade (2026-05-06)
+
+- [x] Implement schedules, campaigns, charts, dark-mode polish, archives/retention pages, admin/alerts polish, and docs
+  - Dependency: Phase 28 saved profiles/replay, Phase 29 delete safety, Phase 30 plan-backed config.
+  - Notes: User approved the "Remaining Platform Plan With UX Upgrade"; scope includes `api/app/schedules/`, in-process scheduled execution, active navigation, dark-mode contrast, glanceable charts, archive/retention UX, alerts, admin lifecycle polish, and documentation updates.
+  - Completion evidence: `docker compose exec api python -m unittest tests.test_web_api -v`, focused schedules/alerts tests, `docker compose exec web npm run build`, `docker compose exec api python -m py_compile ...`, and `git diff --check`.
+
+## Next Immediate Task
+
+Manual smoke: log in, switch dark/light mode, verify active navigation on nested `/runs/<id>`, create/trigger a schedule, inspect archive/retention pages.

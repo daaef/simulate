@@ -2310,3 +2310,94 @@ git diff --check
 
 1. Keep actor/run behavior in `sim_actors.json` or GUI plans.
 2. Use GUI Phone or CLI `--phone` only for one-off overrides.
+
+## 2026-05-06 23:55
+
+### Summary
+
+Started implementing the remaining operations-platform plan with the requested UX upgrade. Scope for this session is schedules/campaign APIs and UI, active navigation, dark-mode and chart polish, archives/retention pages, alerts/admin polish where feasible, docs, and verification.
+
+### Files Created / Modified
+
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '...' implementation/tracker/implementation_plan.md
+sed -n '...' implementation/tracker/tasks.md
+sed -n '...' implementation/tracker/session_log.md
+sed -n '...' README.md SIMULATOR_GUIDE.md ARCHITECTURE.md
+sed -n '...' api/app/main.py api/app/runs/* api/app/auth/policies.py
+sed -n '...' web/src/app/(app)/layout.tsx web/src/app/(app)/overview/page.tsx web/src/app/globals.css
+sed -n '...' tests/test_web_api.py
+git status --short
+```
+
+### Results
+
+- Existing completed baseline confirmed: backend-owned auth, route shell, overview, runs, run profiles/replay, archives/retention summary modules, config page, and safe run deletion.
+- Missing platform block confirmed: `api/app/schedules/` and `web/src/components/schedules/` do not exist; `/schedules`, `/archives`, and `/retention` are still placeholders.
+- UX gaps confirmed: app navigation has no active route state, dark mode still has hardcoded light colors in shared CSS/chart code, and overview uses simple inline bars rather than reusable glanceable chart components.
+
+### Issues / Blockers
+
+- Full request is broad and touches backend, frontend, docs, and tests; tracker is updated so work remains restartable if it spans sessions.
+- No separate git worktree was created because the user is actively working in this shared feature branch/workspace.
+
+### Next Steps
+
+1. Add failing backend tests for schedule CRUD/campaign/manual trigger, alerts, retention summaries, and permissions.
+2. Implement backend schedule/alert/archive/retention functionality.
+3. Implement frontend navigation, chart, dark-mode, schedule/archive/retention pages.
+4. Update docs and run verification.
+
+## 2026-05-06 23:59
+
+### Summary
+
+Implemented the remaining operations-platform slice: schedules/campaign APIs and UI, in-process scheduled execution, active navigation, dark-mode/chart polish, archives and retention pages, alerts, and docs.
+
+### Files Created / Modified
+
+- Created `api/app/schedules/` and `api/app/alerts/`.
+- Created `web/src/components/AppNav.tsx`.
+- Created reusable overview charts: `DistributionDonut`, `HorizontalBarChart`, and `Sparkline`.
+- Updated `api/app/main.py`, role policies, schedules/archives/retention/overview pages, global CSS, admin UI, docs, and tests.
+
+### Tests / Commands Run
+
+```bash
+docker compose exec api python -m unittest tests.test_web_api.SchedulesApiTests tests.test_web_api.AlertsAndRetentionApiTests -v
+docker compose exec web npm run build
+docker compose exec api python -m py_compile api/app/main.py api/app/schedules/routes.py api/app/schedules/models.py api/app/schedules/service.py api/app/alerts/routes.py api/app/alerts/service.py
+docker compose exec api python -m unittest tests.test_web_api -v
+git diff --check
+```
+
+### Results
+
+- Focused schedules/alerts/retention tests passed.
+- Full `tests.test_web_api` suite passed: 24 tests.
+- Next production build passed.
+- Python compile and diff whitespace checks passed.
+
+### Remaining Follow-Up
+
+1. Manual browser smoke for login, theme toggle, active nested navigation, schedule create/trigger, archives, and retention.
+2. Future slice can add advanced recurrence controls, retry policies, and true spacing delays between campaign steps.
+
+## 2026-05-07 00:40
+
+### Summary
+
+Implemented admin-configured allowed timezones: persisted system setting, admin UI at `/admin/system`, schedules timezone dropdown sourced from system policy, and server-side enforcement rejecting disallowed schedule create/update.
+
+### Tests / Commands Run
+
+```bash
+python3 -m pip install fastapi apscheduler
+python3 -m unittest discover -s tests
+cd web && npm run build
+```

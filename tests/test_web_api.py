@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from fastapi.testclient import TestClient
@@ -421,8 +422,9 @@ class RunDeletionSafetyTests(unittest.TestCase):
                 self.assertTrue(log_dir.exists())
                 self.assertFalse(first_log.exists())
                 self.assertTrue(second_log.exists())
-                self.assertIn(str(first_log), result["deleted_files"])
-                self.assertNotIn(str(second_log), result["deleted_files"])
+                deleted = {os.path.realpath(path) for path in result["deleted_files"]}
+                self.assertIn(os.path.realpath(str(first_log)), deleted)
+                self.assertNotIn(os.path.realpath(str(second_log)), deleted)
             finally:
                 try:
                     web_api._delete_run_logic(int(second["id"]))
@@ -564,6 +566,438 @@ class RunProfilesApiTests(unittest.TestCase):
         delete_response = self.client.delete(f"/api/v1/run-profiles/{profile_id}")
         self.assertEqual(delete_response.status_code, 200)
         self.assertTrue(delete_response.json()["deleted"])
+
+
+class SchedulesApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_auth = _FakeCookieAuthManager()
+        self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
+        self.auth_enabled_patch.start()
+        self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
+        self.auth_manager_patch.start()
+        self.run_simulation_patch = mock.patch.object(web_api, "_run_simulation", return_value=None)
+        self.run_simulation_patch.start()
+        web_api._set_allowed_timezones_setting(None)
+        self.client = TestClient(web_api.app)
+        login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
+        assert login.status_code == 200
+
+    def tearDown(self) -> None:
+        self.run_simulation_patch.stop()
+        self.auth_manager_patch.stop()
+        self.auth_enabled_patch.stop()
+        self.client.close()
+
+    def _create_profile(self) -> int:
+        response = self.client.post(
+            "/api/v1/run-profiles",
+            json={
+                "name": f"scheduled-doctor-{time.time_ns()}",
+                "flow": "doctor",
+                "plan": "sim_actors.json",
+                "timing": "fast",
+                "store_id": "FZY_123",
+                "phone": "+2348000001111",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        return int(response.json()["profile"]["id"])
+
+    def test_simple_schedule_crud_manual_trigger_and_state_controls(self) -> None:
+        profile_id = self._create_profile()
+        create_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"daily-doctor-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "cadence": "daily",
+                "timezone": "Africa/Lagos",
+                "active_from": "2026-05-06T08:00:00+01:00",
+                "run_window_start": "08:00",
+                "run_window_end": "18:00",
+                "blackout_dates": ["2026-12-25"],
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 200)
+        schedule = create_response.json()["schedule"]
+        schedule_id = schedule["id"]
+        self.assertEqual(schedule["status"], "active")
+        self.assertEqual(schedule["profile_id"], profile_id)
+        self.assertEqual(schedule["schedule_type"], "simple")
+        self.assertIsNotNone(schedule["next_run_at"])
+        self.assertEqual(schedule["execution_mode_label"], "automatic")
+        self.assertIn(schedule["next_run_reason"], {"computed", "shifted_to_window_start", "blackout_skipped"})
+
+        list_response = self.client.get("/api/v1/schedules")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertTrue(any(item["id"] == schedule_id for item in list_response.json()["schedules"]))
+
+        trigger_response = self.client.post(f"/api/v1/schedules/{schedule_id}/trigger")
+        self.assertEqual(trigger_response.status_code, 200)
+        self.assertEqual(trigger_response.json()["execution"]["status"], "launched")
+        self.assertEqual(trigger_response.json()["run"]["flow"], "doctor")
+
+        pause_response = self.client.post(f"/api/v1/schedules/{schedule_id}/pause")
+        self.assertEqual(pause_response.status_code, 200)
+        self.assertEqual(pause_response.json()["schedule"]["status"], "paused")
+
+        resume_response = self.client.post(f"/api/v1/schedules/{schedule_id}/resume")
+        self.assertEqual(resume_response.status_code, 200)
+        self.assertEqual(resume_response.json()["schedule"]["status"], "active")
+
+        disable_response = self.client.post(f"/api/v1/schedules/{schedule_id}/disable")
+        self.assertEqual(disable_response.status_code, 200)
+        self.assertEqual(disable_response.json()["schedule"]["status"], "disabled")
+        self.assertIsNone(disable_response.json()["schedule"]["next_run_at"])
+
+        restore_response = self.client.post(f"/api/v1/schedules/{schedule_id}/restore")
+        self.assertEqual(restore_response.status_code, 200)
+        self.assertEqual(restore_response.json()["schedule"]["status"], "active")
+        self.assertIsNotNone(restore_response.json()["schedule"]["next_run_at"])
+
+    def test_campaign_schedule_persists_steps_and_rejects_empty_campaigns(self) -> None:
+        profile_id = self._create_profile()
+
+        bad_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": "empty-campaign",
+                "schedule_type": "campaign",
+                "cadence": "custom",
+                "timezone": "UTC",
+                "campaign_steps": [],
+            },
+        )
+        self.assertEqual(bad_response.status_code, 400)
+
+        create_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"doctor-campaign-{time.time_ns()}",
+                "schedule_type": "campaign",
+                "cadence": "custom",
+                "timezone": "UTC",
+                "custom_anchor_at": "2026-05-10T14:20:00+00:00",
+                "custom_every_n_days": 3,
+                "failure_policy": "continue",
+                "campaign_steps": [
+                    {
+                        "profile_id": profile_id,
+                        "repeat_count": 2,
+                        "spacing_seconds": 30,
+                        "timeout_seconds": 900,
+                        "failure_policy": "continue",
+                        "execution_mode": "saved_profile",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 200)
+        campaign = create_response.json()["schedule"]
+        self.assertEqual(campaign["schedule_type"], "campaign")
+        self.assertEqual(campaign["failure_policy"], "continue")
+        self.assertEqual(campaign["campaign_steps"][0]["repeat_count"], 2)
+        self.assertEqual(campaign["execution_mode_label"], "automatic")
+
+        trigger_response = self.client.post(f"/api/v1/schedules/{campaign['id']}/trigger")
+        self.assertEqual(trigger_response.status_code, 200)
+        self.assertEqual(trigger_response.json()["execution"]["status"], "launched")
+        self.assertEqual(len(trigger_response.json()["runs"]), 2)
+
+    def test_schedule_rejects_invalid_date_range_and_blackout_dates(self) -> None:
+        profile_id = self._create_profile()
+
+        invalid_range_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"invalid-range-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "cadence": "daily",
+                "active_from": "2026-05-08T10:00:00+01:00",
+                "active_until": "2026-05-08T09:00:00+01:00",
+            },
+        )
+        self.assertEqual(invalid_range_response.status_code, 400)
+        self.assertIn("Active until", invalid_range_response.json()["detail"])
+
+        invalid_blackout_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"invalid-blackout-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "cadence": "daily",
+                "blackout_dates": ["2026/12/25"],
+            },
+        )
+        self.assertEqual(invalid_blackout_response.status_code, 400)
+        self.assertIn("Blackout dates", invalid_blackout_response.json()["detail"])
+
+    def test_custom_cadence_requires_custom_fields_and_rejects_them_for_non_custom(self) -> None:
+        profile_id = self._create_profile()
+        missing_custom = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"custom-missing-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "cadence": "custom",
+                "timezone": "UTC",
+            },
+        )
+        self.assertEqual(missing_custom.status_code, 400)
+        self.assertIn("custom_anchor_at", missing_custom.json()["detail"])
+
+        unexpected_custom = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"daily-with-custom-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "cadence": "daily",
+                "timezone": "UTC",
+                "custom_anchor_at": "2026-05-10T14:20:00+00:00",
+                "custom_every_n_days": 3,
+            },
+        )
+        self.assertEqual(unexpected_custom.status_code, 400)
+        self.assertIn("only allowed", unexpected_custom.json()["detail"])
+
+    def test_new_period_window_contract_fields_and_preview_metadata(self) -> None:
+        profile_id = self._create_profile()
+        future_anchor = (datetime.now(timezone.utc) + timedelta(minutes=3)).replace(second=0, microsecond=0)
+        response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"period-window-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "timezone": "UTC",
+                "anchor_start_at": future_anchor.isoformat(),
+                "period": "daily",
+                "stop_rule": "duration",
+                "duration_seconds": 18000,
+                "runs_per_period": 5,
+                "run_window_start": "08:00",
+                "run_window_end": "18:00",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        schedule = response.json()["schedule"]
+        self.assertEqual(schedule["period"], "daily")
+        self.assertEqual(schedule["stop_rule"], "duration")
+        self.assertEqual(schedule["runs_per_period"], 5)
+        self.assertEqual(schedule["requested_runs_per_period"], 5)
+        self.assertTrue(isinstance(schedule["feasible_runs_per_period"], int))
+        self.assertTrue(isinstance(schedule["schedule_warnings"], list))
+        self.assertEqual(schedule["next_run_at"], future_anchor.isoformat())
+
+    def test_schedule_hydration_does_not_clear_persisted_next_run(self) -> None:
+        profile_id = self._create_profile()
+        anchor = (datetime.now(timezone.utc) + timedelta(seconds=10)).replace(microsecond=0)
+        create_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"persisted-next-run-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "timezone": "UTC",
+                "anchor_start_at": anchor.isoformat(),
+                "period": "daily",
+                "stop_rule": "end_at",
+                "end_at": (anchor + timedelta(minutes=2)).isoformat(),
+                "runs_per_period": 1,
+            },
+        )
+        self.assertEqual(create_response.status_code, 200)
+        schedule_id = int(create_response.json()["schedule"]["id"])
+        initial_next_run = create_response.json()["schedule"]["next_run_at"]
+        self.assertEqual(initial_next_run, anchor.isoformat())
+
+        # Listing should preserve persisted next_run_at instead of nulling it during hydration.
+        list_response = self.client.get("/api/v1/schedules")
+        self.assertEqual(list_response.status_code, 200)
+        listed = next(item for item in list_response.json()["schedules"] if int(item["id"]) == schedule_id)
+        self.assertEqual(listed["next_run_at"], initial_next_run)
+
+    def test_viewer_can_read_but_cannot_mutate_schedules(self) -> None:
+        viewer_client = TestClient(web_api.app)
+        try:
+            login = viewer_client.post("/api/v1/auth/login", json={"username": "bob", "password": "secret"})
+            self.assertEqual(login.status_code, 200)
+
+            list_response = viewer_client.get("/api/v1/schedules")
+            self.assertEqual(list_response.status_code, 200)
+
+            create_response = viewer_client.post(
+                "/api/v1/schedules",
+                json={"name": "viewer-schedule", "schedule_type": "simple", "profile_id": 1},
+            )
+            self.assertEqual(create_response.status_code, 403)
+        finally:
+            viewer_client.close()
+
+
+class SystemTimezonesApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_auth = _FakeCookieAuthManager()
+        self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
+        self.auth_enabled_patch.start()
+        self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
+        self.auth_manager_patch.start()
+        self.run_simulation_patch = mock.patch.object(web_api, "_run_simulation", return_value=None)
+        self.run_simulation_patch.start()
+        web_api._set_allowed_timezones_setting(None)
+        self.client = TestClient(web_api.app)
+        login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
+        assert login.status_code == 200
+
+    def tearDown(self) -> None:
+        self.run_simulation_patch.stop()
+        self.auth_manager_patch.stop()
+        self.auth_enabled_patch.stop()
+        self.client.close()
+
+    def _create_profile(self) -> int:
+        response = self.client.post(
+            "/api/v1/run-profiles",
+            json={
+                "name": f"scheduled-doctor-{time.time_ns()}",
+                "flow": "doctor",
+                "plan": "sim_actors.json",
+                "timing": "fast",
+                "store_id": "FZY_123",
+                "phone": "+2348000001111",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        return int(response.json()["profile"]["id"])
+
+    def test_default_policy_allows_valid_timezones(self) -> None:
+        get_response = self.client.get("/api/v1/system/timezones")
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(get_response.json()["mode"], "all")
+        self.assertIsNone(get_response.json()["allowed_timezones"])
+        self.assertTrue(len(get_response.json()["available_timezones"]) > 10)
+
+        profile_id = self._create_profile()
+        create_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"tz-default-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "cadence": "daily",
+                "timezone": "America/New_York",
+            },
+        )
+        self.assertEqual(create_response.status_code, 200)
+
+    def test_allowlist_rejects_disallowed_schedule_timezone(self) -> None:
+        put_response = self.client.put(
+            "/api/v1/system/timezones",
+            json={"mode": "allowlist", "allowed_timezones": ["UTC"]},
+        )
+        self.assertEqual(put_response.status_code, 200)
+        self.assertEqual(put_response.json()["mode"], "allowlist")
+        self.assertEqual(put_response.json()["allowed_timezones"], ["UTC"])
+
+        profile_id = self._create_profile()
+        rejected = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"tz-reject-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "cadence": "daily",
+                "timezone": "Africa/Lagos",
+            },
+        )
+        self.assertEqual(rejected.status_code, 400)
+
+        accepted = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"tz-accept-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "cadence": "daily",
+                "timezone": "UTC",
+            },
+        )
+        self.assertEqual(accepted.status_code, 200)
+
+    def test_put_rejects_unknown_timezones(self) -> None:
+        response = self.client.put(
+            "/api/v1/system/timezones",
+            json={"mode": "allowlist", "allowed_timezones": ["Not/AZone"]},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_viewer_cannot_read_or_configure_system_timezones(self) -> None:
+        viewer_client = TestClient(web_api.app)
+        try:
+            login = viewer_client.post("/api/v1/auth/login", json={"username": "bob", "password": "secret"})
+            self.assertEqual(login.status_code, 200)
+
+            get_response = viewer_client.get("/api/v1/system/timezones")
+            self.assertEqual(get_response.status_code, 403)
+
+            put_response = viewer_client.put(
+                "/api/v1/system/timezones",
+                json={"mode": "all"},
+            )
+            self.assertEqual(put_response.status_code, 403)
+        finally:
+            viewer_client.close()
+
+
+class AlertsAndRetentionApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_auth = _FakeCookieAuthManager()
+        self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
+        self.auth_enabled_patch.start()
+        self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
+        self.auth_manager_patch.start()
+        self.run_simulation_patch = mock.patch.object(web_api, "_run_simulation", return_value=None)
+        self.run_simulation_patch.start()
+        self.client = TestClient(web_api.app)
+        login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
+        assert login.status_code == 200
+
+    def tearDown(self) -> None:
+        self.run_simulation_patch.stop()
+        self.auth_manager_patch.stop()
+        self.auth_enabled_patch.stop()
+        self.client.close()
+
+    def test_alerts_surface_failed_runs_and_retention_backlog(self) -> None:
+        failed_run = web_api._create_run(
+            web_api.RunCreateRequest(flow="doctor", plan="sim_actors.json", timing="fast")
+        )
+        old_date = "2025-10-01T00:00:00+00:00"
+        web_api._update_run(int(failed_run["id"]), status="failed", created_at=old_date, error="forced failure")
+
+        response = self.client.get("/api/v1/alerts")
+
+        self.assertEqual(response.status_code, 200)
+        alerts = response.json()["alerts"]
+        self.assertTrue(any(item["domain"] == "runs" and item["severity"] == "critical" for item in alerts))
+        self.assertTrue(any(item["domain"] == "retention" for item in alerts))
+
+    def test_retention_summary_includes_lifecycle_policy_and_retained_summary_fields(self) -> None:
+        response = self.client.get("/api/v1/retention/summary")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("retained_summary_fields", payload)
+        self.assertIn("verdict", payload["retained_summary_fields"])
+        self.assertEqual(payload["policies"]["active_days"], web_api.ACTIVE_RETENTION_DAYS)
+        self.assertEqual(payload["policies"]["archive_days"], web_api.ARCHIVE_RETENTION_DAYS)
 
 
 class SimulationPlansApiTests(unittest.TestCase):

@@ -131,3 +131,52 @@ export function formatRunDuration(
   const endMs = parseTimestamp(finishedAt) ?? Date.now();
   return formatDuration(startMs, endMs);
 }
+
+export function formatDateTime(
+  timestamp: string | null | undefined,
+  options?: { timeZone?: string; fallback?: string }
+): string {
+  if (!timestamp) return options?.fallback ?? "—";
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return options?.fallback ?? "—";
+
+  const formatOptions: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  };
+
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      ...formatOptions,
+      timeZone: options?.timeZone || undefined,
+    }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(undefined, formatOptions).format(date);
+  }
+}
+
+export function formatTimeUntil(timestamp: string | null | undefined): string {
+  if (!timestamp) return "No automatic trigger";
+  const targetMs = parseTimestamp(timestamp);
+  if (targetMs == null) return "Trigger time unavailable";
+
+  const diffMs = targetMs - Date.now();
+  if (diffMs <= 0) return "Due now";
+
+  const totalMinutes = Math.ceil(diffMs / 60000);
+  if (totalMinutes < 60) return totalMinutes <= 1 ? "in 1m" : `in ${totalMinutes}m`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours < 24) return minutes ? `in ${hours}h ${minutes}m` : `in ${hours}h`;
+
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  if (days < 14) return remainingHours ? `in ${days}d ${remainingHours}h` : `in ${days}d`;
+
+  return `in ${days}d`;
+}

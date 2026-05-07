@@ -31,11 +31,11 @@ export function EventTimeline({ events, startTime, endTime }: EventTimelineProps
 
   const getCategoryColor = (category: string) => {
     switch (category) {
-      case "scenario": return "#22c55e";
-      case "http": return "#3b82f6";
-      case "websocket": return "#a855f7";
-      case "actor": return "#f59e0b";
-      default: return "#374151";
+      case "scenario": return "var(--chart-success)";
+      case "http": return "var(--chart-info)";
+      case "websocket": return "var(--chart-purple)";
+      case "actor": return "var(--chart-warning)";
+      default: return "var(--chart-axis)";
     }
   };
 

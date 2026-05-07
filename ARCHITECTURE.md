@@ -31,6 +31,9 @@ active websocket connection. There are no shared queues between simulators.
 | `reporting` | `events.json`, `report.md`, and `story.md` artifacts |
 | `run_plan` | JSON run-plan parsing and validation for operator input |
 | `api/app/simulation_plans` | Web API for GUI-owned plan files stored under `runs/gui-plans/` |
+| `api/app/schedules` | Web API for profile-backed simple schedules, campaign schedules, manual triggers, pause/resume/disable/delete/restore, and schedule execution history |
+| `api/app/alerts` | Web API for operational alerts from failed runs, retention backlog, paused schedules, and degraded campaigns |
+| `api/app/archives` / `api/app/retention` | Web API for archive/raw-purge candidate browsing, policy windows, retained summaries, and purge-safety posture |
 | `app_probes` | Real-app API probes outside the core order mutation |
 | `post_order_actions` | Receipt, review, and reorder probes after completed orders |
 | `health` | Daily doctor summary, latency, bottleneck, websocket, and issue metrics |

@@ -24,10 +24,10 @@ export function LatencyBarChart({ data }: LatencyBarChartProps) {
   const maxLatency = Math.max(...sortedData.map((d) => d.latency));
 
   const getStatusColor = (status: number) => {
-    if (status >= 200 && status < 300) return "#22c55e"; // Green
-    if (status >= 300 && status < 400) return "#f59e0b"; // Yellow
-    if (status >= 400 && status < 500) return "#ef4444"; // Red
-    return "#dc2626"; // Dark red for 5xx
+    if (status >= 200 && status < 300) return "var(--chart-success)";
+    if (status >= 300 && status < 400) return "var(--chart-warning)";
+    if (status >= 400 && status < 500) return "var(--chart-danger)";
+    return "var(--chart-danger)";
   };
 
   return (

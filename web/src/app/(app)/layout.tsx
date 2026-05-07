@@ -1,18 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { AppNav } from "../../components/AppNav";
 import AuthGuard from "../../components/AuthGuard";
 import UserProfile from "../../components/UserProfile";
 import { ThemeToggle } from "../../components/ThemeToggle";
-
-const navItems = [
-  { href: "/overview", label: "Overview" },
-  { href: "/runs", label: "Runs" },
-  { href: "/config", label: "Config" },
-  { href: "/schedules", label: "Schedules" },
-  { href: "/archives", label: "Archives" },
-  { href: "/retention", label: "Retention" },
-  { href: "/admin/users", label: "Admin" },
-];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
@@ -62,29 +53,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 Fainzy Simulator
               </Link>
 
-              <nav
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "14px",
-                  flexWrap: "wrap",
-                }}
-              >
-                {navItems.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    style={{
-                      color: "var(--text-secondary)",
-                      textDecoration: "none",
-                      fontSize: "14px",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {item.label}
-                  </Link>
-                ))}
-              </nav>
+              <AppNav />
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>

@@ -1,0 +1,1 @@
+"""Generated operational alert routes."""

@@ -11,9 +11,10 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, HTTPException, Request
@@ -21,6 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from flow_presets import FLOW_PRESETS
 from .admin.routes import router as admin_router
+from .alerts.routes import router as alerts_router
+from .alerts.service import configure_runtime as configure_alerts_runtime
 from .archives.routes import router as archives_router
 from .archives.service import configure_runtime as configure_archives_runtime
 from .auth import service as auth_service
@@ -28,6 +31,12 @@ from .auth.routes import router as auth_router
 from .auth.dependencies import SESSION_COOKIE_NAME
 from .retention.routes import router as retention_router
 from .retention.service import configure_runtime as configure_retention_runtime
+from .schedules.models import ScheduleUpsertRequest
+from .schedules.routes import router as schedules_router
+from .schedules.service import configure_runtime as configure_schedules_runtime
+from .system.models import TimezonePolicyUpdateRequest
+from .system.routes import router as system_router
+from .system.service import configure_runtime as configure_system_runtime
 from .simulation_plans.models import SimulationPlanUpsertRequest
 from .simulation_plans.routes import router as simulation_plans_router
 from .simulation_plans.service import configure_runtime as configure_simulation_plans_runtime
@@ -94,6 +103,8 @@ SLOW_REQUEST_THRESHOLD_MS = float(os.getenv("SIM_GUI_SLOW_REQUEST_THRESHOLD_MS",
 MONITORED_ENDPOINT_PREFIXES = (
     "/api/v1/runs",
     "/api/v1/dashboard/summary",
+    "/api/v1/schedules",
+    "/api/v1/alerts",
 )
 LOGGER = logging.getLogger("simulate.web_api")
 SIMULATION_PLAN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
@@ -197,6 +208,63 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                name TEXT NOT NULL,
+                description TEXT,
+                schedule_type TEXT NOT NULL DEFAULT 'simple',
+                status TEXT NOT NULL DEFAULT 'active',
+                profile_id INTEGER,
+                anchor_start_at TEXT,
+                period TEXT,
+                stop_rule TEXT,
+                end_at TEXT,
+                duration_seconds INTEGER,
+                runs_per_period INTEGER NOT NULL DEFAULT 1,
+                cadence TEXT NOT NULL DEFAULT 'daily',
+                timezone TEXT NOT NULL DEFAULT 'UTC',
+                active_from TEXT,
+                active_until TEXT,
+                run_window_start TEXT,
+                run_window_end TEXT,
+                custom_anchor_at TEXT,
+                custom_every_n_days INTEGER,
+                blackout_dates TEXT NOT NULL DEFAULT '[]',
+                failure_policy TEXT NOT NULL DEFAULT 'continue',
+                campaign_steps TEXT NOT NULL DEFAULT '[]',
+                last_triggered_at TEXT,
+                next_run_at TEXT,
+                next_run_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schedule_executions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER NOT NULL,
+                run_id INTEGER,
+                status TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '{}',
+                started_at TEXT NOT NULL,
+                finished_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
         _migrate_db(conn)
 
 
@@ -214,6 +282,25 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     profile_columns = [row[1] for row in conn.execute("PRAGMA table_info(run_profiles)").fetchall()]
     if profile_columns and "description" not in profile_columns:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN description TEXT")
+    schedule_columns = [row[1] for row in conn.execute("PRAGMA table_info(schedules)").fetchall()]
+    if schedule_columns and "custom_anchor_at" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN custom_anchor_at TEXT")
+    if schedule_columns and "custom_every_n_days" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN custom_every_n_days INTEGER")
+    if schedule_columns and "next_run_reason" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN next_run_reason TEXT")
+    if schedule_columns and "anchor_start_at" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN anchor_start_at TEXT")
+    if schedule_columns and "period" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN period TEXT")
+    if schedule_columns and "stop_rule" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN stop_rule TEXT")
+    if schedule_columns and "end_at" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN end_at TEXT")
+    if schedule_columns and "duration_seconds" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN duration_seconds INTEGER")
+    if schedule_columns and "runs_per_period" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN runs_per_period INTEGER NOT NULL DEFAULT 1")
 
 
 def _migrate_postgres_schema() -> None:
@@ -246,9 +333,219 @@ def _migrate_postgres_schema() -> None:
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schedules (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    name VARCHAR(160) NOT NULL,
+                    description TEXT,
+                    schedule_type VARCHAR(20) NOT NULL DEFAULT 'simple',
+                    status VARCHAR(20) NOT NULL DEFAULT 'active',
+                    profile_id INTEGER REFERENCES run_profiles(id) ON DELETE SET NULL,
+                    anchor_start_at TIMESTAMP WITH TIME ZONE,
+                    period VARCHAR(20),
+                    stop_rule VARCHAR(20),
+                    end_at TIMESTAMP WITH TIME ZONE,
+                    duration_seconds INTEGER,
+                    runs_per_period INTEGER NOT NULL DEFAULT 1,
+                    cadence VARCHAR(20) NOT NULL DEFAULT 'daily',
+                    timezone VARCHAR(80) NOT NULL DEFAULT 'UTC',
+                    active_from TIMESTAMP WITH TIME ZONE,
+                    active_until TIMESTAMP WITH TIME ZONE,
+                    run_window_start VARCHAR(8),
+                    run_window_end VARCHAR(8),
+                    custom_anchor_at TIMESTAMP WITH TIME ZONE,
+                    custom_every_n_days INTEGER,
+                    blackout_dates JSONB DEFAULT '[]',
+                    failure_policy VARCHAR(20) NOT NULL DEFAULT 'continue',
+                    campaign_steps JSONB DEFAULT '[]',
+                    last_triggered_at TIMESTAMP WITH TIME ZONE,
+                    next_run_at TIMESTAMP WITH TIME ZONE,
+                    next_run_reason VARCHAR(64),
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+                """
+            )
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS custom_anchor_at TIMESTAMP WITH TIME ZONE")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS custom_every_n_days INTEGER")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS next_run_reason VARCHAR(64)")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS anchor_start_at TIMESTAMP WITH TIME ZONE")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS period VARCHAR(20)")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS stop_rule VARCHAR(20)")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS end_at TIMESTAMP WITH TIME ZONE")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS duration_seconds INTEGER")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS runs_per_period INTEGER NOT NULL DEFAULT 1")
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schedule_executions (
+                    id SERIAL PRIMARY KEY,
+                    schedule_id INTEGER REFERENCES schedules(id) ON DELETE CASCADE,
+                    run_id INTEGER,
+                    status VARCHAR(20) NOT NULL,
+                    detail JSONB DEFAULT '{}',
+                    started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    finished_at TIMESTAMP WITH TIME ZONE
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value JSONB NOT NULL,
+                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                )
+                """
+            )
         conn.commit()
     finally:
         conn.close()
+
+
+SYSTEM_ALLOWED_TIMEZONES_KEY = "allowed_timezones"
+
+
+def _available_timezones_sorted() -> list[str]:
+    # `zoneinfo.available_timezones()` is the canonical IANA source for this runtime.
+    return sorted(available_timezones())
+
+
+def _coerce_timezone_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = value
+        value = parsed
+    if isinstance(value, list):
+        return [str(item) for item in value if isinstance(item, (str, bytes)) or item is not None]
+    return []
+
+
+def _get_allowed_timezones_setting() -> list[str] | None:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT value FROM system_settings WHERE key = %s", (SYSTEM_ALLOWED_TIMEZONES_KEY,))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                value = row[0]
+                allowed = _coerce_timezone_list(value)
+                return allowed
+        finally:
+            conn.close()
+    with DB_LOCK, _db() as conn:
+        row = conn.execute(
+            "SELECT value FROM system_settings WHERE key = ?",
+            (SYSTEM_ALLOWED_TIMEZONES_KEY,),
+        ).fetchone()
+        if row is None:
+            return None
+        allowed = _coerce_timezone_list(row["value"])
+        return allowed
+
+
+def _set_allowed_timezones_setting(allowed: list[str] | None) -> None:
+    now = _utc_now()
+    if allowed is None:
+        if USE_POSTGRES:
+            conn = _get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("DELETE FROM system_settings WHERE key = %s", (SYSTEM_ALLOWED_TIMEZONES_KEY,))
+                conn.commit()
+            finally:
+                conn.close()
+            return
+        with DB_LOCK, _db() as conn:
+            conn.execute("DELETE FROM system_settings WHERE key = ?", (SYSTEM_ALLOWED_TIMEZONES_KEY,))
+        return
+
+    payload = json.dumps(list(allowed))
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO system_settings (key, value, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (key)
+                    DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+                    """,
+                    (SYSTEM_ALLOWED_TIMEZONES_KEY, payload),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return
+
+    with DB_LOCK, _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO system_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (SYSTEM_ALLOWED_TIMEZONES_KEY, payload, now),
+        )
+
+
+def _system_timezones_payload() -> dict[str, Any]:
+    available = _available_timezones_sorted()
+    allowed = _get_allowed_timezones_setting()
+    if allowed is None:
+        return {
+            "mode": "all",
+            "allowed_timezones": None,
+            "available_timezones": available,
+        }
+    return {
+        "mode": "allowlist",
+        "allowed_timezones": allowed,
+        "available_timezones": available,
+    }
+
+
+def _validate_timezone_policy_update(request: TimezonePolicyUpdateRequest) -> tuple[str, list[str] | None]:
+    available = set(_available_timezones_sorted())
+    mode = request.mode or "all"
+    if mode == "all":
+        return ("all", None)
+
+    allowed = request.allowed_timezones or []
+    normalized = [str(item).strip() for item in allowed if str(item).strip()]
+    unknown = sorted({item for item in normalized if item not in available})
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown timezones: {', '.join(unknown[:8])}")
+    return ("allowlist", normalized)
+
+
+def _set_system_timezones_policy(request: TimezonePolicyUpdateRequest) -> dict[str, Any]:
+    mode, allowed = _validate_timezone_policy_update(request)
+    if mode == "all":
+        _set_allowed_timezones_setting(None)
+        return _system_timezones_payload()
+    _set_allowed_timezones_setting(allowed or [])
+    return _system_timezones_payload()
+
+
+def _validate_schedule_timezone(requested: str | None) -> None:
+    tz = (requested or "").strip()
+    if not tz:
+        raise HTTPException(status_code=400, detail="Timezone is required.")
+    available = set(_available_timezones_sorted())
+    if tz not in available:
+        raise HTTPException(status_code=400, detail="Timezone must be a valid IANA timezone.")
+    allowed = _get_allowed_timezones_setting()
+    if allowed is not None and tz not in set(allowed):
+        raise HTTPException(status_code=400, detail="Timezone is not allowed by system policy.")
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     payload = dict(row)
@@ -291,6 +588,80 @@ def _profile_row_to_dict_any(row) -> dict[str, Any]:
     if isinstance(extra_args, str):
         payload["extra_args"] = json.loads(extra_args or "[]")
     return payload
+
+
+def _model_payload(model: Any) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def _jsonable_datetime(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _load_json_field(value: Any, fallback: Any) -> Any:
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        try:
+            return json.loads(value or "null") or fallback
+        except json.JSONDecodeError:
+            return fallback
+    return value
+
+
+def _schedule_row_to_dict_any(row) -> dict[str, Any]:
+    payload = dict(row)
+    payload["blackout_dates"] = _load_json_field(payload.get("blackout_dates"), [])
+    payload["campaign_steps"] = _load_json_field(payload.get("campaign_steps"), [])
+    for key in (
+        "anchor_start_at",
+        "end_at",
+        "active_from",
+        "active_until",
+        "custom_anchor_at",
+        "last_triggered_at",
+        "next_run_at",
+        "created_at",
+        "updated_at",
+    ):
+        payload[key] = _jsonable_datetime(payload.get(key))
+    custom_every_n_days = payload.get("custom_every_n_days")
+    payload["custom_every_n_days"] = int(custom_every_n_days) if custom_every_n_days is not None else None
+    runs_per_period = payload.get("runs_per_period")
+    payload["runs_per_period"] = int(runs_per_period) if runs_per_period is not None else 1
+    duration_seconds = payload.get("duration_seconds")
+    payload["duration_seconds"] = int(duration_seconds) if duration_seconds is not None else None
+    payload["requested_runs_per_period"] = payload["runs_per_period"]
+    payload["feasible_runs_per_period"] = payload["runs_per_period"]
+    payload["schedule_warnings"] = []
+    payload["current_period_runs"] = []
+    if payload.get("period") and payload.get("anchor_start_at"):
+        bundle = _calculate_new_contract_bundle(payload, datetime.now(timezone.utc))
+        payload["requested_runs_per_period"] = bundle["requested_runs_per_period"]
+        payload["feasible_runs_per_period"] = bundle["feasible_runs_per_period"]
+        payload["schedule_warnings"] = bundle["schedule_warnings"]
+        payload["current_period_runs"] = bundle["current_period_runs"]
+        # Keep persisted scheduling state authoritative for scheduler due-checks.
+        # Hydration preview metadata must not erase stored next_run_at/next_run_reason.
+        if payload.get("next_run_reason") is None:
+            payload["next_run_reason"] = bundle["next_run_reason"]
+    if payload.get("next_run_reason") is None:
+        payload["next_run_reason"] = "computed" if payload.get("next_run_at") else "no_future_run"
+    payload["execution_mode_label"] = "automatic" if _schedule_is_automatic(payload) else "manual_only"
+    return payload
+
+
+def _schedule_execution_row_to_dict_any(row) -> dict[str, Any]:
+    payload = dict(row)
+    payload["detail"] = _load_json_field(payload.get("detail"), {})
+    for key in ("started_at", "finished_at"):
+        payload[key] = _jsonable_datetime(payload.get(key))
+    return payload
+
 
 def _list_runs(limit: int = 100, offset: int = 0, user_id: Optional[int] = None) -> list[dict[str, Any]]:
     _cleanup_stale_processes()
@@ -1064,6 +1435,893 @@ def _launch_run_profile(profile_id: int, user_id: Optional[int] = None) -> dict[
     return {"profile": profile, "run": run}
 
 
+def _datetime_as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _validate_schedule_request(request: ScheduleUpsertRequest) -> None:
+    if not request.name.strip():
+        raise HTTPException(status_code=400, detail="Schedule name is required.")
+
+    _validate_schedule_timezone(request.timezone)
+
+    active_from = _parse_run_timestamp(request.active_from)
+    active_until = _parse_run_timestamp(request.active_until)
+    if request.active_from and active_from is None:
+        raise HTTPException(status_code=400, detail="Active from must be a valid ISO date-time.")
+    if request.active_until and active_until is None:
+        raise HTTPException(status_code=400, detail="Active until must be a valid ISO date-time.")
+    active_from_utc = _datetime_as_utc(active_from)
+    active_until_utc = _datetime_as_utc(active_until)
+    if active_from_utc and active_until_utc and active_until_utc <= active_from_utc:
+        raise HTTPException(status_code=400, detail="Active until must be after active from.")
+
+    for field_name, value in (
+        ("Run window start", request.run_window_start),
+        ("Run window end", request.run_window_end),
+    ):
+        if value:
+            parsed_time = _parse_schedule_time(value)
+            if parsed_time is None or not (0 <= parsed_time[0] <= 23 and 0 <= parsed_time[1] <= 59):
+                raise HTTPException(status_code=400, detail=f"{field_name} must use HH:MM 24-hour time.")
+
+    for blackout_date in request.blackout_dates:
+        try:
+            datetime.strptime(blackout_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Blackout dates must use YYYY-MM-DD format.") from None
+
+    using_new_contract = bool(request.period or request.anchor_start_at or request.stop_rule or request.end_at or request.duration_seconds is not None)
+    if using_new_contract:
+        anchor_start_at = _parse_run_timestamp(request.anchor_start_at)
+        if anchor_start_at is None:
+            raise HTTPException(status_code=400, detail="anchor_start_at is required and must be a valid ISO date-time.")
+        if request.period not in {"hourly", "daily", "weekly", "monthly"}:
+            raise HTTPException(status_code=400, detail="period must be one of hourly, daily, weekly, monthly.")
+        if request.stop_rule not in {"never", "end_at", "duration"}:
+            raise HTTPException(status_code=400, detail="stop_rule must be one of never, end_at, duration.")
+        if request.runs_per_period < 1:
+            raise HTTPException(status_code=400, detail="runs_per_period must be >= 1.")
+        if request.stop_rule == "end_at":
+            end_at = _parse_run_timestamp(request.end_at)
+            if end_at is None:
+                raise HTTPException(status_code=400, detail="end_at is required when stop_rule is end_at.")
+            if end_at.astimezone(timezone.utc) <= anchor_start_at.astimezone(timezone.utc):
+                raise HTTPException(status_code=400, detail="end_at must be after anchor_start_at.")
+        elif request.end_at is not None:
+            raise HTTPException(status_code=400, detail="end_at is only allowed when stop_rule is end_at.")
+        if request.stop_rule == "duration":
+            if request.duration_seconds is None or int(request.duration_seconds) <= 0:
+                raise HTTPException(status_code=400, detail="duration_seconds must be > 0 when stop_rule is duration.")
+        elif request.duration_seconds is not None:
+            raise HTTPException(status_code=400, detail="duration_seconds is only allowed when stop_rule is duration.")
+
+    if request.cadence == "custom":
+        custom_anchor_at = _parse_run_timestamp(request.custom_anchor_at)
+        if custom_anchor_at is None:
+            raise HTTPException(status_code=400, detail="Custom cadence requires a valid custom_anchor_at ISO date-time.")
+        if request.custom_every_n_days is None or int(request.custom_every_n_days) < 1:
+            raise HTTPException(status_code=400, detail="Custom cadence requires custom_every_n_days >= 1.")
+    else:
+        if request.custom_anchor_at is not None or request.custom_every_n_days is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="custom_anchor_at/custom_every_n_days are only allowed when cadence is custom.",
+            )
+
+    if request.schedule_type == "simple":
+        if request.profile_id is None:
+            raise HTTPException(status_code=400, detail="Simple schedules require a run profile.")
+        _get_run_profile(int(request.profile_id))
+        return
+    if not request.campaign_steps:
+        raise HTTPException(status_code=400, detail="Campaign schedules require at least one campaign step.")
+    for step in request.campaign_steps:
+        _get_run_profile(int(step.profile_id))
+
+
+def _schedule_timezone(schedule: dict[str, Any]) -> ZoneInfo:
+    try:
+        return ZoneInfo(str(schedule.get("timezone") or "UTC"))
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+def _schedule_reference(schedule: dict[str, Any], reference: Optional[datetime] = None) -> datetime:
+    base = reference or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    return base.astimezone(_schedule_timezone(schedule))
+
+
+def _parse_schedule_time(value: str | None) -> tuple[int, int] | None:
+    if not value:
+        return None
+    try:
+        hour, minute = value.split(":", 1)
+        return int(hour), int(minute)
+    except (ValueError, AttributeError):
+        return None
+
+
+def _schedule_is_automatic(schedule: dict[str, Any]) -> bool:
+    if schedule.get("period") and schedule.get("anchor_start_at"):
+        return True
+    cadence = str(schedule.get("cadence") or "daily")
+    if cadence != "custom":
+        return True
+    anchor = _parse_run_timestamp(schedule.get("custom_anchor_at"))
+    every = schedule.get("custom_every_n_days")
+    try:
+        days = int(every) if every is not None else None
+    except (TypeError, ValueError):
+        days = None
+    return bool(anchor and days and days >= 1)
+
+
+def _window_bounds_minutes(schedule: dict[str, Any]) -> tuple[int, int] | None:
+    start = _parse_schedule_time(schedule.get("run_window_start"))
+    end = _parse_schedule_time(schedule.get("run_window_end"))
+    if not start or not end:
+        return None
+    return start[0] * 60 + start[1], end[0] * 60 + end[1]
+
+
+def _minutes_in_window(schedule: dict[str, Any], value: datetime) -> bool:
+    bounds = _window_bounds_minutes(schedule)
+    if bounds is None:
+        return True
+    start_minutes, end_minutes = bounds
+    current_minutes = value.hour * 60 + value.minute
+    if start_minutes <= end_minutes:
+        return start_minutes <= current_minutes <= end_minutes
+    return current_minutes >= start_minutes or current_minutes <= end_minutes
+
+
+def _window_start_for_local_date(schedule: dict[str, Any], value_date: date, timezone_info: ZoneInfo) -> datetime | None:
+    bounds = _window_bounds_minutes(schedule)
+    if bounds is None:
+        return None
+    start_minutes, _ = bounds
+    return datetime(
+        value_date.year,
+        value_date.month,
+        value_date.day,
+        start_minutes // 60,
+        start_minutes % 60,
+        tzinfo=timezone_info,
+    )
+
+
+def _schedule_in_window(schedule: dict[str, Any], reference: Optional[datetime] = None) -> bool:
+    return _minutes_in_window(schedule, _schedule_reference(schedule, reference))
+
+
+def _schedule_blackout(schedule: dict[str, Any], reference: Optional[datetime] = None) -> bool:
+    local_now = _schedule_reference(schedule, reference)
+    blackout_dates = set(schedule.get("blackout_dates") or [])
+    return local_now.date().isoformat() in blackout_dates
+
+
+def _cadence_delta(cadence: str) -> timedelta | None:
+    if cadence == "hourly":
+        return timedelta(hours=1)
+    if cadence == "daily":
+        return timedelta(days=1)
+    if cadence == "weekdays":
+        return timedelta(days=1)
+    if cadence == "weekly":
+        return timedelta(days=7)
+    if cadence == "monthly":
+        return timedelta(days=30)
+    return None
+
+
+def _last_day_of_month(year: int, month: int) -> int:
+    if month == 12:
+        next_month = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        next_month = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    return int((next_month - timedelta(days=1)).day)
+
+
+def _with_same_time(target_date: date, source: datetime, timezone_info: ZoneInfo) -> datetime:
+    return datetime(
+        target_date.year,
+        target_date.month,
+        target_date.day,
+        source.hour,
+        source.minute,
+        source.second,
+        source.microsecond,
+        tzinfo=timezone_info,
+    )
+
+
+def _period_window_bounds(period: str, local_reference: datetime) -> tuple[datetime, datetime]:
+    timezone_info = local_reference.tzinfo or timezone.utc
+    if period == "hourly":
+        start = local_reference.replace(minute=0, second=0, microsecond=0)
+        return start, start + timedelta(hours=1)
+    if period == "daily":
+        start = local_reference.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, start + timedelta(days=1)
+    if period == "weekly":
+        start = (local_reference - timedelta(days=local_reference.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, start + timedelta(days=7)
+    if period == "monthly":
+        start = local_reference.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if start.month == 12:
+            end = start.replace(year=start.year + 1, month=1)
+        else:
+            end = start.replace(month=start.month + 1)
+        return start, end
+    # fallback daily
+    start = local_reference.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=1)
+
+
+def _calculate_new_contract_bundle(schedule: dict[str, Any], reference: Optional[datetime] = None) -> dict[str, Any]:
+    timezone_info = _schedule_timezone(schedule)
+    local_reference = _schedule_reference(schedule, reference)
+    anchor_start_at = _parse_run_timestamp(schedule.get("anchor_start_at"))
+    period = str(schedule.get("period") or "")
+    stop_rule = str(schedule.get("stop_rule") or "never")
+    runs_per_period = int(schedule.get("runs_per_period") or 1)
+    if anchor_start_at is None or period not in {"hourly", "daily", "weekly", "monthly"}:
+        return {
+            "next_run_at": None,
+            "next_run_reason": "no_future_run",
+            "current_period_runs": [],
+            "requested_runs_per_period": runs_per_period,
+            "feasible_runs_per_period": 0,
+            "schedule_warnings": ["Missing or invalid new scheduling fields."],
+        }
+    anchor_local = anchor_start_at.astimezone(timezone_info)
+    window_start, window_end = _period_window_bounds(period, local_reference)
+    window_seconds = max(1.0, (window_end - window_start).total_seconds())
+    candidates: list[datetime] = []
+    last_triggered_at = _parse_run_timestamp(schedule.get("last_triggered_at"))
+    # First run is explicitly anchored to the user-provided Start At time.
+    if last_triggered_at is None:
+        candidates.append(anchor_local)
+    if runs_per_period <= 1:
+        anchor_window_start, _ = _period_window_bounds(period, anchor_local)
+        offset = max(0.0, (anchor_local - anchor_window_start).total_seconds())
+        base = window_start + timedelta(seconds=min(offset, window_seconds - 1))
+        candidates = [base]
+    else:
+        step = window_seconds / runs_per_period
+        for idx in range(runs_per_period):
+            candidates.append(window_start + timedelta(seconds=idx * step))
+    filtered: list[datetime] = []
+    warnings: list[str] = []
+    for candidate in candidates:
+        if candidate < anchor_local:
+            continue
+        if not _minutes_in_window(schedule, candidate):
+            continue
+        if candidate.date().isoformat() in set(schedule.get("blackout_dates") or []):
+            continue
+        filtered.append(candidate)
+    if stop_rule == "end_at":
+        end_at = _parse_run_timestamp(schedule.get("end_at"))
+        if end_at:
+            end_local = end_at.astimezone(timezone_info)
+            filtered = [item for item in filtered if item <= end_local]
+    elif stop_rule == "duration":
+        duration_seconds = int(schedule.get("duration_seconds") or 0)
+        end_local = anchor_local + timedelta(seconds=duration_seconds)
+        filtered = [item for item in filtered if item <= end_local]
+    future = [item for item in filtered if item.astimezone(timezone.utc) >= local_reference.astimezone(timezone.utc)]
+    if not future:
+        if period == "hourly":
+            next_reference = local_reference + timedelta(hours=1)
+        elif period == "daily":
+            next_reference = local_reference + timedelta(days=1)
+        elif period == "weekly":
+            next_reference = local_reference + timedelta(days=7)
+        else:
+            next_reference = local_reference + timedelta(days=32)
+            next_reference = next_reference.replace(day=1)
+        next_start, next_end = _period_window_bounds(period, next_reference)
+        next_window_seconds = max(1.0, (next_end - next_start).total_seconds())
+        next_candidates: list[datetime] = []
+        if runs_per_period <= 1:
+            anchor_window_start, _ = _period_window_bounds(period, anchor_local)
+            offset = max(0.0, (anchor_local - anchor_window_start).total_seconds())
+            next_candidates = [next_start + timedelta(seconds=min(offset, next_window_seconds - 1))]
+        else:
+            next_step = next_window_seconds / runs_per_period
+            for idx in range(runs_per_period):
+                next_candidates.append(next_start + timedelta(seconds=idx * next_step))
+        for candidate in next_candidates:
+            if candidate < anchor_local:
+                continue
+            if not _minutes_in_window(schedule, candidate):
+                continue
+            if candidate.date().isoformat() in set(schedule.get("blackout_dates") or []):
+                continue
+            if stop_rule == "end_at":
+                end_at = _parse_run_timestamp(schedule.get("end_at"))
+                if end_at and candidate > end_at.astimezone(timezone_info):
+                    continue
+            elif stop_rule == "duration":
+                duration_seconds = int(schedule.get("duration_seconds") or 0)
+                end_local = anchor_local + timedelta(seconds=duration_seconds)
+                if candidate > end_local:
+                    continue
+            future.append(candidate)
+            break
+    if len(filtered) < runs_per_period:
+        warnings.append("Requested runs per period exceed feasible runs under current constraints.")
+    next_run = future[0].astimezone(timezone.utc).isoformat() if future else None
+    reason = "computed" if next_run else "no_future_run"
+    return {
+        "next_run_at": next_run,
+        "next_run_reason": reason,
+        "current_period_runs": [item.astimezone(timezone.utc).isoformat() for item in filtered],
+        "requested_runs_per_period": runs_per_period,
+        "feasible_runs_per_period": len(filtered),
+        "schedule_warnings": warnings,
+    }
+
+
+def _next_automatic_candidate(schedule: dict[str, Any], local_reference: datetime) -> datetime | None:
+    cadence = str(schedule.get("cadence") or "daily")
+    timezone_info = _schedule_timezone(schedule)
+    active_from = _parse_run_timestamp(schedule.get("active_from"))
+    active_from_local = active_from.astimezone(timezone_info) if active_from else None
+    anchor = active_from_local or local_reference
+    if cadence == "custom":
+        custom_anchor = _parse_run_timestamp(schedule.get("custom_anchor_at"))
+        every = schedule.get("custom_every_n_days")
+        if custom_anchor is None or every is None:
+            return None
+        try:
+            step_days = int(every)
+        except (TypeError, ValueError):
+            return None
+        if step_days < 1:
+            return None
+        custom_anchor_local = custom_anchor.astimezone(timezone_info)
+        candidate = custom_anchor_local
+        while candidate <= local_reference:
+            candidate += timedelta(days=step_days)
+        return candidate
+    if cadence == "hourly":
+        candidate = local_reference.replace(
+            minute=anchor.minute,
+            second=anchor.second,
+            microsecond=anchor.microsecond,
+        )
+        if candidate <= local_reference:
+            candidate += timedelta(hours=1)
+        return candidate
+    if cadence == "daily":
+        candidate = _with_same_time(local_reference.date(), anchor, timezone_info)
+        if candidate <= local_reference:
+            candidate += timedelta(days=1)
+        return candidate
+    if cadence == "weekdays":
+        candidate = _with_same_time(local_reference.date(), anchor, timezone_info)
+        if candidate <= local_reference:
+            candidate += timedelta(days=1)
+        while candidate.weekday() >= 5:
+            candidate += timedelta(days=1)
+        return candidate
+    if cadence == "weekly":
+        anchor_weekday = anchor.weekday()
+        days_ahead = (anchor_weekday - local_reference.weekday()) % 7
+        candidate = _with_same_time(local_reference.date() + timedelta(days=days_ahead), anchor, timezone_info)
+        if candidate <= local_reference:
+            candidate += timedelta(days=7)
+        return candidate
+    if cadence == "monthly":
+        anchor_day = anchor.day
+        candidate_year = local_reference.year
+        candidate_month = local_reference.month
+        for _ in range(24):
+            month_last_day = _last_day_of_month(candidate_year, candidate_month)
+            day = min(anchor_day, month_last_day)
+            candidate = datetime(
+                candidate_year,
+                candidate_month,
+                day,
+                anchor.hour,
+                anchor.minute,
+                anchor.second,
+                anchor.microsecond,
+                tzinfo=timezone_info,
+            )
+            if candidate > local_reference:
+                return candidate
+            if candidate_month == 12:
+                candidate_month = 1
+                candidate_year += 1
+            else:
+                candidate_month += 1
+        return None
+    return None
+
+
+def _calculate_next_run(schedule: dict[str, Any], reference: Optional[datetime] = None) -> tuple[str | None, str]:
+    if schedule.get("period") and schedule.get("anchor_start_at"):
+        bundle = _calculate_new_contract_bundle(schedule, reference)
+        return bundle["next_run_at"], bundle["next_run_reason"]
+    if not _schedule_is_automatic(schedule):
+        return None, "no_future_run"
+    timezone_info = _schedule_timezone(schedule)
+    local_reference = _schedule_reference(schedule, reference)
+    active_until = _parse_run_timestamp(schedule.get("active_until"))
+    active_until_local = active_until.astimezone(timezone_info) if active_until else None
+    blackout_dates = set(schedule.get("blackout_dates") or [])
+    shifted = False
+    blackout_skipped = False
+    candidate = _next_automatic_candidate(schedule, local_reference)
+    for _ in range(366):
+        if candidate is None:
+            return None, "no_future_run"
+        if active_until_local and candidate > active_until_local:
+            return None, "outside_active_range"
+        if not _minutes_in_window(schedule, candidate):
+            shifted = True
+            window_start = _window_start_for_local_date(schedule, candidate.date(), timezone_info)
+            if window_start is None:
+                window_start = candidate
+            if window_start < candidate and _window_bounds_minutes(schedule) is not None:
+                window_start += timedelta(days=1)
+            candidate = window_start
+            continue
+        if candidate.date().isoformat() in blackout_dates:
+            blackout_skipped = True
+            candidate = candidate + timedelta(days=1)
+            if candidate <= local_reference:
+                candidate = local_reference + timedelta(minutes=1)
+            continue
+        reason = "computed"
+        if blackout_skipped:
+            reason = "blackout_skipped"
+        elif shifted:
+            reason = "shifted_to_window_start"
+        return candidate.astimezone(timezone.utc).isoformat(), reason
+    return None, "no_future_run"
+
+
+def _calculate_next_run_at(
+    schedule: dict[str, Any],
+    reference: Optional[datetime] = None,
+) -> str | None:
+    next_run_at, _ = _calculate_next_run(schedule, reference)
+    return next_run_at
+
+
+def _schedule_fields_from_request(
+    request: ScheduleUpsertRequest,
+    user_id: Optional[int],
+    updated_at: str,
+) -> dict[str, Any]:
+    _validate_schedule_request(request)
+    steps = [_model_payload(step) for step in request.campaign_steps]
+    profile_id = int(request.profile_id) if request.profile_id is not None else None
+    if request.schedule_type == "campaign":
+        profile_id = None
+    else:
+        steps = []
+    fields: dict[str, Any] = {
+        "name": request.name.strip(),
+        "description": request.description,
+        "schedule_type": request.schedule_type,
+        "profile_id": profile_id,
+        "anchor_start_at": request.anchor_start_at,
+        "period": request.period,
+        "stop_rule": request.stop_rule,
+        "end_at": request.end_at,
+        "duration_seconds": request.duration_seconds,
+        "runs_per_period": request.runs_per_period,
+        "cadence": request.cadence,
+        "timezone": request.timezone.strip() or "UTC",
+        "active_from": request.active_from,
+        "active_until": request.active_until,
+        "run_window_start": request.run_window_start,
+        "run_window_end": request.run_window_end,
+        "custom_anchor_at": request.custom_anchor_at,
+        "custom_every_n_days": request.custom_every_n_days,
+        "blackout_dates": json.dumps(request.blackout_dates),
+        "failure_policy": request.failure_policy,
+        "campaign_steps": json.dumps(steps),
+        "updated_at": updated_at,
+    }
+    next_run_at, next_run_reason = _calculate_next_run(
+        {
+            **fields,
+            "blackout_dates": request.blackout_dates,
+            "campaign_steps": steps,
+        },
+        _parse_run_timestamp(updated_at),
+    )
+    fields["next_run_at"] = next_run_at
+    fields["next_run_reason"] = next_run_reason
+    persisted_user_id = _resolve_persisted_user_id(user_id)
+    if persisted_user_id is not None:
+        fields["user_id"] = persisted_user_id
+    return fields
+
+
+def _list_schedules(include_deleted: bool = False) -> dict[str, Any]:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                if include_deleted:
+                    cursor.execute("SELECT * FROM schedules ORDER BY updated_at DESC, id DESC")
+                else:
+                    cursor.execute(
+                        "SELECT * FROM schedules WHERE status <> %s ORDER BY updated_at DESC, id DESC",
+                        ("deleted",),
+                    )
+                rows = cursor.fetchall()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            if include_deleted:
+                rows = conn.execute("SELECT * FROM schedules ORDER BY updated_at DESC, id DESC").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM schedules WHERE status <> ? ORDER BY updated_at DESC, id DESC",
+                    ("deleted",),
+                ).fetchall()
+    return {"schedules": [_schedule_row_to_dict_any(row) for row in rows]}
+
+
+def _get_schedule(schedule_id: int) -> dict[str, Any]:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute("SELECT * FROM schedules WHERE id = %s", (schedule_id,))
+                row = cursor.fetchone()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Schedule {schedule_id} not found.")
+    return _schedule_row_to_dict_any(row)
+
+
+def _create_schedule(request: ScheduleUpsertRequest, user_id: Optional[int] = None) -> dict[str, Any]:
+    created_at = _utc_now()
+    fields = _schedule_fields_from_request(request, user_id, created_at)
+    fields["created_at"] = created_at
+    fields["status"] = "active"
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                keys = list(fields.keys())
+                values = [fields[key] for key in keys]
+                placeholders = ", ".join(["%s"] * len(keys))
+                cursor.execute(
+                    f"INSERT INTO schedules ({', '.join(keys)}) VALUES ({placeholders}) RETURNING *",
+                    values,
+                )
+                row = cursor.fetchone()
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            keys = list(fields.keys())
+            values = [fields[key] for key in keys]
+            placeholders = ", ".join(["?"] * len(keys))
+            cursor = conn.execute(
+                f"INSERT INTO schedules ({', '.join(keys)}) VALUES ({placeholders})",
+                values,
+            )
+            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (int(cursor.lastrowid),)).fetchone()
+    return {"schedule": _schedule_row_to_dict_any(row)}
+
+
+def _update_schedule(
+    schedule_id: int,
+    request: ScheduleUpsertRequest,
+    user_id: Optional[int] = None,
+) -> dict[str, Any]:
+    _get_schedule(schedule_id)
+    fields = _schedule_fields_from_request(request, user_id, _utc_now())
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                keys = list(fields.keys())
+                values = [fields[key] for key in keys]
+                assignment = ", ".join(f"{key} = %s" for key in keys)
+                cursor.execute(
+                    f"UPDATE schedules SET {assignment} WHERE id = %s RETURNING *",
+                    (*values, schedule_id),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            keys = list(fields.keys())
+            values = [fields[key] for key in keys]
+            assignment = ", ".join(f"{key} = ?" for key in keys)
+            conn.execute(
+                f"UPDATE schedules SET {assignment} WHERE id = ?",
+                (*values, schedule_id),
+            )
+            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+    return {"schedule": _schedule_row_to_dict_any(row)}
+
+
+def _set_schedule_status(schedule_id: int, status: str) -> dict[str, Any]:
+    if status not in {"active", "paused", "disabled", "deleted"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported schedule status {status!r}.")
+    schedule = _get_schedule(schedule_id)
+    updated_at = _utc_now()
+    if status == "active":
+        next_run_at, next_run_reason = _calculate_next_run(schedule, _parse_run_timestamp(updated_at))
+    else:
+        next_run_at, next_run_reason = (None, "no_future_run")
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    "UPDATE schedules SET status = %s, next_run_at = %s, next_run_reason = %s, updated_at = %s WHERE id = %s RETURNING *",
+                    (status, next_run_at, next_run_reason, updated_at, schedule_id),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute(
+                "UPDATE schedules SET status = ?, next_run_at = ?, next_run_reason = ?, updated_at = ? WHERE id = ?",
+                (status, next_run_at, next_run_reason, updated_at, schedule_id),
+            )
+            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+    return {"schedule": _schedule_row_to_dict_any(row)}
+
+
+def _record_schedule_execution(
+    schedule_id: int,
+    run_id: Optional[int],
+    status: str,
+    detail: dict[str, Any],
+    started_at: str,
+    finished_at: Optional[str] = None,
+) -> dict[str, Any]:
+    detail_payload = json.dumps(detail)
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO schedule_executions (schedule_id, run_id, status, detail, started_at, finished_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                    """,
+                    (schedule_id, run_id, status, detail_payload, started_at, finished_at),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO schedule_executions (schedule_id, run_id, status, detail, started_at, finished_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (schedule_id, run_id, status, detail_payload, started_at, finished_at),
+            )
+            row = conn.execute("SELECT * FROM schedule_executions WHERE id = ?", (int(cursor.lastrowid),)).fetchone()
+    return _schedule_execution_row_to_dict_any(row)
+
+
+def _list_schedule_executions(limit: int = 10) -> list[dict[str, Any]]:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    "SELECT * FROM schedule_executions ORDER BY started_at DESC, id DESC LIMIT %s",
+                    (limit,),
+                )
+                rows = cursor.fetchall()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM schedule_executions ORDER BY started_at DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    return [_schedule_execution_row_to_dict_any(row) for row in rows]
+
+
+def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> dict[str, Any]:
+    schedule = _get_schedule(schedule_id)
+    if schedule["status"] in {"disabled", "deleted"}:
+        raise HTTPException(status_code=409, detail=f"Schedule {schedule_id} is {schedule['status']}.")
+    started_at = _utc_now()
+    runs: list[dict[str, Any]] = []
+    try:
+        if schedule["schedule_type"] == "campaign":
+            for step_index, step in enumerate(schedule.get("campaign_steps") or [], start=1):
+                repeat_count = int(step.get("repeat_count") or 1)
+                profile_id = int(step["profile_id"])
+                for repeat_index in range(1, repeat_count + 1):
+                    launched = _launch_run_profile(profile_id, user_id)["run"]
+                    launched["campaign_step_index"] = step_index
+                    launched["campaign_repeat_index"] = repeat_index
+                    runs.append(launched)
+        else:
+            launched = _launch_run_profile(int(schedule["profile_id"]), user_id)["run"]
+            runs.append(launched)
+    except Exception as exc:
+        execution = _record_schedule_execution(
+            schedule_id,
+            runs[0]["id"] if runs else None,
+            "failed",
+            {"error": str(exc), "run_ids": [run["id"] for run in runs]},
+            started_at,
+            _utc_now(),
+        )
+        raise HTTPException(status_code=500, detail={"execution": execution, "error": str(exc)}) from exc
+
+    finished_at = _utc_now()
+    execution = _record_schedule_execution(
+        schedule_id,
+        runs[0]["id"] if runs else None,
+        "launched",
+        {
+            "schedule_type": schedule["schedule_type"],
+            "run_ids": [run["id"] for run in runs],
+        },
+        started_at,
+        finished_at,
+    )
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE schedules SET last_triggered_at = %s, updated_at = %s WHERE id = %s",
+                    (started_at, finished_at, schedule_id),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute(
+                "UPDATE schedules SET last_triggered_at = ?, updated_at = ? WHERE id = ?",
+                (started_at, finished_at, schedule_id),
+            )
+    payload = {
+        "schedule": _get_schedule(schedule_id),
+        "execution": execution,
+        "runs": runs,
+    }
+    if runs:
+        payload["run"] = runs[0]
+    return payload
+
+
+def _schedule_summary_payload() -> dict[str, Any]:
+    schedules = _list_schedules(include_deleted=True)["schedules"]
+    status_breakdown: dict[str, int] = {}
+    type_breakdown: dict[str, int] = {}
+    for schedule in schedules:
+        status = str(schedule.get("status") or "unknown")
+        schedule_type = str(schedule.get("schedule_type") or "unknown")
+        status_breakdown[status] = status_breakdown.get(status, 0) + 1
+        type_breakdown[schedule_type] = type_breakdown.get(schedule_type, 0) + 1
+    visible_count = sum(count for status, count in status_breakdown.items() if status != "deleted")
+    degraded_campaigns = sum(
+        1
+        for schedule in schedules
+        if schedule.get("schedule_type") == "campaign"
+        and schedule.get("status") != "deleted"
+        and not schedule.get("campaign_steps")
+    )
+    return {
+        "total": visible_count,
+        "status_breakdown": status_breakdown,
+        "type_breakdown": type_breakdown,
+        "health": {
+            "active": status_breakdown.get("active", 0),
+            "paused": status_breakdown.get("paused", 0),
+            "disabled": status_breakdown.get("disabled", 0),
+            "degraded_campaigns": degraded_campaigns,
+        },
+        "recent_executions": _list_schedule_executions(limit=10),
+    }
+
+
+def _update_schedule_next_run(
+    schedule_id: int,
+    next_run_at: str | None,
+    next_run_reason: str = "computed",
+    updated_at: Optional[str] = None,
+) -> None:
+    updated_at = updated_at or _utc_now()
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE schedules SET next_run_at = %s, next_run_reason = %s, updated_at = %s WHERE id = %s",
+                    (next_run_at, next_run_reason, updated_at, schedule_id),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute(
+                "UPDATE schedules SET next_run_at = ?, next_run_reason = ?, updated_at = ? WHERE id = ?",
+                (next_run_at, next_run_reason, updated_at, schedule_id),
+            )
+
+
+def _schedule_is_due(schedule: dict[str, Any], reference: datetime) -> bool:
+    if schedule.get("status") != "active":
+        return False
+    next_run_at = _parse_run_timestamp(schedule.get("next_run_at"))
+    if next_run_at is None or next_run_at > reference:
+        return False
+    active_from = _parse_run_timestamp(schedule.get("active_from"))
+    active_until = _parse_run_timestamp(schedule.get("active_until"))
+    if active_from and reference < active_from:
+        return False
+    if active_until and reference > active_until:
+        _set_schedule_status(int(schedule["id"]), "disabled")
+        return False
+    return True
+
+
+def _run_scheduled_jobs() -> None:
+    reference = datetime.now(timezone.utc)
+    for schedule in _list_schedules(include_deleted=False)["schedules"]:
+        if not _schedule_is_due(schedule, reference):
+            continue
+        if _schedule_blackout(schedule, reference) or not _schedule_in_window(schedule, reference):
+            next_run_at, next_run_reason = _calculate_next_run(schedule, reference)
+            _update_schedule_next_run(
+                int(schedule["id"]),
+                next_run_at,
+                next_run_reason,
+            )
+            continue
+        try:
+            _trigger_schedule_logic(int(schedule["id"]))
+        except Exception as exc:
+            LOGGER.error("scheduled trigger failed schedule_id=%s error=%s", schedule.get("id"), exc)
+        finally:
+            next_run_at, next_run_reason = _calculate_next_run(schedule, reference)
+            _update_schedule_next_run(
+                int(schedule["id"]),
+                next_run_at,
+                next_run_reason,
+            )
+
+
 def _run_execution_snapshot_payload(run_id: int) -> dict[str, Any]:
     run = _get_run(run_id)
     snapshot = run.get("execution_snapshot") or {}
@@ -1371,6 +2629,73 @@ def _retention_buckets(runs: list[dict[str, Any]]) -> dict[str, list[dict[str, A
     return buckets
 
 
+def _run_age_days(run: dict[str, Any]) -> int | None:
+    created_at = _parse_run_timestamp(run.get("created_at"))
+    if created_at is None:
+        return None
+    return max(0, int((datetime.now(timezone.utc) - created_at).total_seconds() // 86400))
+
+
+def _run_lifecycle_state(run: dict[str, Any]) -> str:
+    age_days = _run_age_days(run)
+    if age_days is None or age_days < ACTIVE_RETENTION_DAYS:
+        return "active"
+    if age_days < ARCHIVE_RETENTION_DAYS:
+        return "archive_candidate"
+    return "raw_purge_candidate"
+
+
+def _retained_summary_fields() -> list[str]:
+    return [
+        "verdict",
+        "flow",
+        "schedule_or_campaign_source",
+        "actor_summary",
+        "duration",
+        "latency",
+        "top_failure_signals",
+        "narrative",
+        "audit_attribution",
+    ]
+
+
+def _retained_run_summary(run: dict[str, Any]) -> dict[str, Any]:
+    snapshot = run.get("execution_snapshot") if isinstance(run.get("execution_snapshot"), dict) else {}
+    status = str(run.get("status") or "unknown")
+    started_at = _parse_run_timestamp(run.get("started_at"))
+    finished_at = _parse_run_timestamp(run.get("finished_at"))
+    duration_seconds = None
+    if started_at and finished_at:
+        duration_seconds = max(0, round((finished_at - started_at).total_seconds(), 2))
+    failure_signals = []
+    if run.get("error"):
+        failure_signals.append(str(run["error"]))
+    return {
+        "verdict": status,
+        "flow": run.get("flow"),
+        "schedule_or_campaign_source": snapshot.get("source") or "manual_or_profile",
+        "actor_summary": {
+            "store_id": run.get("store_id"),
+            "phone": run.get("phone"),
+            "store_name": run.get("store_name"),
+            "user_name": run.get("user_name"),
+        },
+        "duration": {
+            "seconds": duration_seconds,
+            "started_at": run.get("started_at"),
+            "finished_at": run.get("finished_at"),
+        },
+        "latency": {"avg_http_latency_ms": None},
+        "top_failure_signals": failure_signals,
+        "narrative": f"{run.get('flow', 'simulation')} run {run.get('id')} ended as {status}.",
+        "audit_attribution": {
+            "run_id": run.get("id"),
+            "created_at": run.get("created_at"),
+            "artifact_available": any(run.get(field) for field in ARTIFACT_FIELDS) or bool(run.get("log_path")),
+        },
+    }
+
+
 def _event_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
     actors: dict[str, int] = {}
     actions: dict[str, int] = {}
@@ -1471,8 +2796,17 @@ def _archives_runs_payload(limit: int, offset: int) -> dict[str, Any]:
     buckets = _retention_buckets(runs)
     archive_runs = buckets["archive"] + buckets["purge"]
     page = archive_runs[offset : offset + limit]
+    enriched = [
+        {
+            **run,
+            "lifecycle_state": _run_lifecycle_state(run),
+            "age_days": _run_age_days(run),
+            "retained_summary": _retained_run_summary(run),
+        }
+        for run in page
+    ]
     return {
-        "runs": page,
+        "runs": enriched,
         "total": len(archive_runs),
         "limit": limit,
         "offset": offset,
@@ -1493,8 +2827,81 @@ def _retention_summary_payload() -> dict[str, Any]:
             "purge_ready": len(buckets["purge"]),
             "artifact_backed_runs": raw_artifact_runs,
         },
+        "lifecycle_states": {
+            "active": len(buckets["active"]),
+            "archive_candidate": len(buckets["archive"]),
+            "raw_purge_candidate": len(buckets["purge"]),
+        },
+        "retained_summary_fields": _retained_summary_fields(),
+        "purge_safety": {
+            "mode": "manual-review",
+            "raw_artifact_purge_enabled": False,
+            "retained_summary_required": True,
+        },
         "status": "observation-only",
     }
+
+
+def _alerts_payload() -> dict[str, Any]:
+    alerts: list[dict[str, Any]] = []
+    runs = _list_runs(limit=200)
+    now = _utc_now()
+    for run in runs:
+        status = str(run.get("status") or "").lower()
+        if status == "failed":
+            alerts.append(
+                {
+                    "id": f"run-{run['id']}-failed",
+                    "domain": "runs",
+                    "severity": "critical",
+                    "title": f"Run {run['id']} failed",
+                    "message": run.get("error") or f"{run.get('flow', 'simulation')} failed.",
+                    "href": f"/runs/{run['id']}",
+                    "created_at": run.get("finished_at") or run.get("created_at") or now,
+                }
+            )
+    buckets = _retention_buckets(runs)
+    if buckets["archive"] or buckets["purge"]:
+        alerts.append(
+            {
+                "id": "retention-backlog",
+                "domain": "retention",
+                "severity": "warning" if buckets["purge"] else "info",
+                "title": "Retention queue needs review",
+                "message": f"{len(buckets['archive'])} archive candidates and {len(buckets['purge'])} raw purge candidates.",
+                "href": "/retention",
+                "created_at": now,
+            }
+        )
+    for schedule in _list_schedules(include_deleted=False)["schedules"]:
+        status = str(schedule.get("status") or "")
+        if status == "paused":
+            alerts.append(
+                {
+                    "id": f"schedule-{schedule['id']}-paused",
+                    "domain": "schedules",
+                    "severity": "warning",
+                    "title": f"{schedule['name']} is paused",
+                    "message": "Scheduled execution is paused until it is resumed.",
+                    "href": "/schedules",
+                    "created_at": schedule.get("updated_at") or now,
+                }
+            )
+        if schedule.get("schedule_type") == "campaign" and not schedule.get("campaign_steps"):
+            alerts.append(
+                {
+                    "id": f"schedule-{schedule['id']}-degraded",
+                    "domain": "schedules",
+                    "severity": "warning",
+                    "title": f"{schedule['name']} campaign is degraded",
+                    "message": "Campaign schedule has no executable steps.",
+                    "href": "/schedules",
+                    "created_at": schedule.get("updated_at") or now,
+                }
+            )
+    severity_order = {"critical": 0, "warning": 1, "info": 2}
+    alerts.sort(key=lambda item: (severity_order.get(str(item["severity"]), 3), str(item.get("created_at") or "")), reverse=False)
+    return {"alerts": alerts, "total": len(alerts)}
 
 
 def _run_log_payload(run_id: int, tail: int) -> dict[str, Any]:
@@ -1708,6 +3115,13 @@ def _run_autopilot_job() -> None:
 
 _init_db()
 scheduler = BackgroundScheduler(timezone="UTC")
+scheduler.add_job(
+    _run_scheduled_jobs,
+    trigger="interval",
+    seconds=60,
+    id="schedule-runner",
+    replace_existing=True,
+)
 if _as_bool(os.getenv("SIM_GUI_ENABLE_DAILY_DOCTOR"), default=False):
     scheduler.add_job(
         _run_autopilot_job,
@@ -1716,7 +3130,7 @@ if _as_bool(os.getenv("SIM_GUI_ENABLE_DAILY_DOCTOR"), default=False):
         id="doctor-autopilot",
         replace_existing=True,
     )
-    scheduler.start()
+scheduler.start()
 
 app = FastAPI(title="Fainzy Simulator Web API", version="0.1.0")
 app.add_middleware(
@@ -1756,12 +3170,27 @@ configure_archives_runtime(
 configure_retention_runtime(
     summary=lambda: _retention_summary_payload(),
 )
+configure_schedules_runtime(
+    list_schedules=lambda include_deleted: _list_schedules(include_deleted),
+    summary=lambda: _schedule_summary_payload(),
+    create_schedule=lambda request, user_id: _create_schedule(request, user_id),
+    update_schedule=lambda schedule_id, request, user_id: _update_schedule(schedule_id, request, user_id),
+    set_status=lambda schedule_id, status: _set_schedule_status(schedule_id, status),
+    trigger_schedule=lambda schedule_id, user_id: _trigger_schedule_logic(schedule_id, user_id),
+)
+configure_alerts_runtime(
+    list_alerts=lambda: _alerts_payload(),
+)
 configure_simulation_plans_runtime(
     list_plans=lambda: _list_simulation_plans_payload(),
     get_plan=lambda plan_id: _get_simulation_plan_payload(plan_id),
     create_plan=lambda request: _create_simulation_plan(request),
     update_plan=lambda plan_id, request: _update_simulation_plan(plan_id, request),
     delete_plan=lambda plan_id: _delete_simulation_plan(plan_id),
+)
+configure_system_runtime(
+    get_timezones_policy=lambda: _system_timezones_payload(),
+    set_timezones_policy=lambda request: _set_system_timezones_policy(request),
 )
 
 
@@ -1804,4 +3233,7 @@ app.include_router(admin_router)
 app.include_router(runs_router)
 app.include_router(archives_router)
 app.include_router(retention_router)
+app.include_router(schedules_router)
+app.include_router(alerts_router)
 app.include_router(simulation_plans_router)
+app.include_router(system_router)

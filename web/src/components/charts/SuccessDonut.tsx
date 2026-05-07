@@ -87,17 +87,17 @@ export function SuccessDonut({ data }: SuccessDonutProps) {
       <div className="donut-grid">
         <DonutSegment
           percentage={httpSuccessPct}
-          color="#22c55e"
+          color="var(--chart-success)"
           label={`HTTP (${data.httpSuccess}/${totalHttp})`}
         />
         <DonutSegment
           percentage={wsSuccessPct}
-          color="#3b82f6"
+          color="var(--chart-info)"
           label={`WebSocket (${data.wsSuccess}/${totalWs})`}
         />
         <DonutSegment
           percentage={scenarioSuccessPct}
-          color="#a855f7"
+          color="var(--chart-purple)"
           label={`Scenarios (${data.scenariosPassed}/${totalScenarios})`}
         />
       </div>

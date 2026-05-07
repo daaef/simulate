@@ -98,6 +98,39 @@ export type ArchiveSummary = {
   };
 };
 
+export type RetainedRunSummary = {
+  verdict: string;
+  flow: string | null;
+  schedule_or_campaign_source: string;
+  actor_summary: {
+    store_id: string | null;
+    phone: string | null;
+    store_name: string | null;
+    user_name: string | null;
+  };
+  duration: {
+    seconds: number | null;
+    started_at: string | null;
+    finished_at: string | null;
+  };
+  latency: {
+    avg_http_latency_ms: number | null;
+  };
+  top_failure_signals: string[];
+  narrative: string;
+  audit_attribution: {
+    run_id: number;
+    created_at: string;
+    artifact_available: boolean;
+  };
+};
+
+export type ArchiveRun = RunRow & {
+  lifecycle_state?: "active" | "archive_candidate" | "raw_purge_candidate";
+  age_days?: number | null;
+  retained_summary?: RetainedRunSummary;
+};
+
 export type RetentionSummary = {
   policies: {
     active_days: number;
@@ -108,7 +141,127 @@ export type RetentionSummary = {
     purge_ready: number;
     artifact_backed_runs: number;
   };
+  lifecycle_states?: {
+    active: number;
+    archive_candidate: number;
+    raw_purge_candidate: number;
+  };
+  retained_summary_fields?: string[];
+  purge_safety?: {
+    mode: string;
+    raw_artifact_purge_enabled: boolean;
+    retained_summary_required: boolean;
+  };
   status: string;
+};
+
+export type ScheduleStatus = "active" | "paused" | "disabled" | "deleted";
+export type ScheduleType = "simple" | "campaign";
+export type ScheduleCadence = "hourly" | "daily" | "weekdays" | "weekly" | "monthly" | "custom";
+export type SchedulePeriod = "hourly" | "daily" | "weekly" | "monthly";
+export type ScheduleStopRule = "never" | "end_at" | "duration";
+
+export type CampaignStep = {
+  profile_id: number;
+  repeat_count: number;
+  spacing_seconds: number;
+  timeout_seconds: number;
+  failure_policy: "continue" | "stop";
+  execution_mode: "saved_profile" | "exact_snapshot";
+};
+
+export type Schedule = {
+  id: number;
+  user_id?: number | null;
+  name: string;
+  description: string | null;
+  schedule_type: ScheduleType;
+  status: ScheduleStatus;
+  profile_id: number | null;
+  anchor_start_at: string | null;
+  period: SchedulePeriod | null;
+  stop_rule: ScheduleStopRule | null;
+  end_at: string | null;
+  duration_seconds: number | null;
+  runs_per_period: number;
+  cadence: ScheduleCadence;
+  timezone: string;
+  active_from: string | null;
+  active_until: string | null;
+  run_window_start: string | null;
+  run_window_end: string | null;
+  custom_anchor_at: string | null;
+  custom_every_n_days: number | null;
+  blackout_dates: string[];
+  failure_policy: "continue" | "stop";
+  campaign_steps: CampaignStep[];
+  last_triggered_at: string | null;
+  next_run_at: string | null;
+  next_run_reason: string;
+  execution_mode_label: "automatic" | "manual_only";
+  current_period_runs?: string[];
+  requested_runs_per_period?: number;
+  feasible_runs_per_period?: number;
+  schedule_warnings?: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduleUpsertRequest = {
+  name: string;
+  description?: string;
+  schedule_type: ScheduleType;
+  profile_id?: number;
+  anchor_start_at?: string;
+  period?: SchedulePeriod;
+  stop_rule?: ScheduleStopRule;
+  end_at?: string;
+  duration_seconds?: number;
+  runs_per_period?: number;
+  cadence?: ScheduleCadence;
+  timezone?: string;
+  active_from?: string;
+  active_until?: string;
+  run_window_start?: string;
+  run_window_end?: string;
+  custom_anchor_at?: string;
+  custom_every_n_days?: number;
+  blackout_dates?: string[];
+  failure_policy?: "continue" | "stop";
+  campaign_steps?: CampaignStep[];
+};
+
+export type ScheduleExecution = {
+  id: number;
+  schedule_id: number;
+  run_id: number | null;
+  status: string;
+  detail: Record<string, unknown>;
+  started_at: string;
+  finished_at: string | null;
+};
+
+export type ScheduleSummary = {
+  total: number;
+  status_breakdown: Record<string, number>;
+  type_breakdown: Record<string, number>;
+  health: {
+    active: number;
+    paused: number;
+    disabled: number;
+    degraded_campaigns: number;
+  };
+  recent_executions: ScheduleExecution[];
+};
+
+export type AlertItem = {
+  id: string;
+  domain: "runs" | "retention" | "schedules" | string;
+  severity: "critical" | "warning" | "info" | string;
+  title: string;
+  message: string;
+  href: string;
+  created_at: string;
 };
 
 export type RunMetrics = {
@@ -152,6 +305,14 @@ export type SimulationPlan = {
 export type SimulationPlanUpsertRequest = {
   name: string;
   content: SimulationPlanContent;
+};
+
+export type TimezonePolicyMode = "all" | "allowlist";
+
+export type SystemTimezonesPolicy = {
+  mode: TimezonePolicyMode;
+  allowed_timezones: string[] | null;
+  available_timezones: string[];
 };
 
 export class ApiRequestError extends Error {
@@ -284,12 +445,102 @@ export async function fetchArchiveSummary(): Promise<ArchiveSummary> {
   return unwrap<ArchiveSummary>(await fetch("/api/v1/archives/summary", withSession()), "archives-summary");
 }
 
+export async function fetchArchiveRuns(limit: number = 50, offset: number = 0): Promise<{ runs: ArchiveRun[]; total: number; limit: number; offset: number }> {
+  return unwrap<{ runs: ArchiveRun[]; total: number; limit: number; offset: number }>(
+    await fetch(`/api/v1/archives/runs?limit=${limit}&offset=${offset}`, withSession()),
+    "archives-runs"
+  );
+}
+
 export async function fetchRetentionSummary(): Promise<RetentionSummary> {
   return unwrap<RetentionSummary>(await fetch("/api/v1/retention/summary", withSession()), "retention-summary");
 }
 
+export async function fetchSchedules(includeDeleted: boolean = false): Promise<Schedule[]> {
+  const payload = await unwrap<{ schedules: Schedule[] }>(
+    await fetch(`/api/v1/schedules?include_deleted=${includeDeleted ? "true" : "false"}`, withSession()),
+    "schedules"
+  );
+  return payload.schedules;
+}
+
+export async function fetchScheduleSummary(): Promise<ScheduleSummary> {
+  return unwrap<ScheduleSummary>(await fetch("/api/v1/schedules/summary", withSession()), "schedules-summary");
+}
+
+export async function createSchedule(request: ScheduleUpsertRequest): Promise<Schedule> {
+  const payload = await unwrap<{ schedule: Schedule }>(
+    await fetch("/api/v1/schedules", {
+      method: "POST",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "create-schedule"
+  );
+  return payload.schedule;
+}
+
+export async function updateSchedule(scheduleId: number, request: ScheduleUpsertRequest): Promise<Schedule> {
+  const payload = await unwrap<{ schedule: Schedule }>(
+    await fetch(`/api/v1/schedules/${scheduleId}`, {
+      method: "PUT",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "update-schedule"
+  );
+  return payload.schedule;
+}
+
+export async function triggerSchedule(scheduleId: number): Promise<{ schedule: Schedule; execution: ScheduleExecution; run?: RunRow; runs: RunRow[] }> {
+  return unwrap<{ schedule: Schedule; execution: ScheduleExecution; run?: RunRow; runs: RunRow[] }>(
+    await fetch(`/api/v1/schedules/${scheduleId}/trigger`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "trigger-schedule"
+  );
+}
+
+export async function setScheduleStatus(scheduleId: number, action: "pause" | "resume" | "disable" | "delete" | "restore"): Promise<Schedule> {
+  const payload = await unwrap<{ schedule: Schedule }>(
+    await fetch(`/api/v1/schedules/${scheduleId}/${action}`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    `${action}-schedule`
+  );
+  return payload.schedule;
+}
+
+export async function fetchAlerts(): Promise<AlertItem[]> {
+  const payload = await unwrap<{ alerts: AlertItem[]; total: number }>(
+    await fetch("/api/v1/alerts", withSession()),
+    "alerts"
+  );
+  return payload.alerts;
+}
+
 export async function fetchHealth(): Promise<HealthResponse> {
   return unwrap<HealthResponse>(await fetch("/healthz"), "healthz");
+}
+
+export async function fetchSystemTimezones(): Promise<SystemTimezonesPolicy> {
+  return unwrap<SystemTimezonesPolicy>(await fetch("/api/v1/system/timezones", withSession()), "system-timezones");
+}
+
+export async function updateSystemTimezones(request: {
+  mode: TimezonePolicyMode;
+  allowed_timezones?: string[];
+}): Promise<SystemTimezonesPolicy> {
+  return unwrap<SystemTimezonesPolicy>(
+    await fetch("/api/v1/system/timezones", {
+      method: "PUT",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "system-timezones-update"
+  );
 }
 
 export async function createRun(request: RunCreateRequest): Promise<RunRow> {

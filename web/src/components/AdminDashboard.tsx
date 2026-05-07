@@ -21,6 +21,13 @@ interface CreateUserData {
   role: string;
 }
 
+function roleClass(role: string): string {
+  if (role === "admin") return "status-info";
+  if (role === "operator") return "status-success";
+  if (role === "runner") return "status-warning";
+  return "status-info";
+}
+
 function withSession(init: RequestInit = {}): RequestInit {
   return {
     ...init,
@@ -185,13 +192,7 @@ export default function AdminDashboard() {
       </div>
 
       {error && (
-        <div style={{
-          backgroundColor: '#fee',
-          color: '#c00',
-          padding: '12px',
-          borderRadius: '4px',
-          marginBottom: '16px',
-        }}>
+        <div className="error-banner" style={{ padding: '12px', marginBottom: '16px' }}>
           {error}
         </div>
       )}
@@ -226,38 +227,12 @@ export default function AdminDashboard() {
                   </td>
                   <td style={{ padding: '12px' }}>{user.email || '-'}</td>
                   <td style={{ padding: '12px' }}>
-                    <span style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      fontSize: '12px',
-                      backgroundColor:
-                        user.role === "admin"
-                          ? "#e3f2fd"
-                          : user.role === "operator"
-                            ? "#e8f5e9"
-                            : user.role === "runner"
-                              ? "#fff8e1"
-                              : "#f3e5f5",
-                      color:
-                        user.role === "admin"
-                          ? "#1976d2"
-                          : user.role === "operator"
-                            ? "#2e7d32"
-                            : user.role === "runner"
-                              ? "#f57f17"
-                              : "#7b1fa2",
-                    }}>
+                    <span className={`status-pill ${roleClass(user.role)}`}>
                       {user.role}
                     </span>
                   </td>
                   <td style={{ padding: '12px' }}>
-                    <span style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      fontSize: '12px',
-                      backgroundColor: user.is_active ? '#e8f5e8' : '#ffebee',
-                      color: user.is_active ? '#2e7d32' : '#c62828',
-                    }}>
+                    <span className={`status-pill ${user.is_active ? 'status-success' : 'status-danger'}`}>
                       {user.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
@@ -295,9 +270,9 @@ export default function AdminDashboard() {
                         style={{
                           padding: '4px 8px',
                           fontSize: '12px',
-                          backgroundColor: '#ff9800',
-                          color: 'white',
-                          border: 'none',
+                          backgroundColor: 'var(--status-warning-bg)',
+                          color: 'var(--status-warning-text)',
+                          border: '1px solid var(--status-warning-border)',
                           borderRadius: '4px',
                           cursor: 'pointer',
                         }}
@@ -310,9 +285,9 @@ export default function AdminDashboard() {
                         style={{
                           padding: '4px 8px',
                           fontSize: '12px',
-                          backgroundColor: '#f44336',
-                          color: 'white',
-                          border: 'none',
+                          backgroundColor: 'var(--status-danger-bg)',
+                          color: 'var(--status-danger-text)',
+                          border: '1px solid var(--status-danger-border)',
                           borderRadius: '4px',
                           cursor: user.id === currentUser?.id ? 'not-allowed' : 'pointer',
                           opacity: user.id === currentUser?.id ? 0.5 : 1,
