@@ -707,6 +707,51 @@ class SchedulesApiTests(unittest.TestCase):
         self.assertEqual(trigger_response.json()["execution"]["status"], "launched")
         self.assertEqual(len(trigger_response.json()["runs"]), 2)
 
+    def test_new_contract_schedule_shifts_into_run_window(self) -> None:
+        profile_id = self._create_profile()
+
+        now = datetime.now(timezone.utc)
+        anchor = now - timedelta(minutes=30)
+        window_start_dt = now + timedelta(minutes=1)
+        window_end_dt = now + timedelta(hours=2)
+        run_window_start = f"{window_start_dt.hour:02d}:{window_start_dt.minute:02d}"
+        run_window_end = f"{window_end_dt.hour:02d}:{window_end_dt.minute:02d}"
+
+        create_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"new-contract-window-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "anchor_start_at": anchor.isoformat(),
+                "period": "daily",
+                "stop_rule": "never",
+                "runs_per_period": 1,
+                "timezone": "UTC",
+                "run_window_start": run_window_start,
+                "run_window_end": run_window_end,
+                "blackout_dates": [],
+            },
+        )
+
+        self.assertEqual(create_response.status_code, 200)
+        schedule = create_response.json()["schedule"]
+        next_run_at = datetime.fromisoformat(schedule["next_run_at"].replace("Z", "+00:00"))
+
+        expected = datetime(
+            now.year,
+            now.month,
+            now.day,
+            window_start_dt.hour,
+            window_start_dt.minute,
+            tzinfo=timezone.utc,
+        )
+        if expected <= now:
+            expected += timedelta(days=1)
+
+        self.assertEqual(next_run_at, expected)
+        self.assertEqual(schedule["next_run_reason"], "shifted_to_window_start")
+
     def test_schedule_rejects_invalid_date_range_and_blackout_dates(self) -> None:
         profile_id = self._create_profile()
 
@@ -794,7 +839,12 @@ class SchedulesApiTests(unittest.TestCase):
         self.assertEqual(schedule["requested_runs_per_period"], 5)
         self.assertTrue(isinstance(schedule["feasible_runs_per_period"], int))
         self.assertTrue(isinstance(schedule["schedule_warnings"], list))
-        self.assertEqual(schedule["next_run_at"], future_anchor.isoformat())
+        expected_next = future_anchor
+        if expected_next.hour * 60 + expected_next.minute < 8 * 60:
+            expected_next = expected_next.replace(hour=8, minute=0)
+        elif expected_next.hour * 60 + expected_next.minute > 18 * 60:
+            expected_next = (expected_next + timedelta(days=1)).replace(hour=8, minute=0)
+        self.assertEqual(schedule["next_run_at"], expected_next.isoformat())
 
     def test_schedule_hydration_does_not_clear_persisted_next_run(self) -> None:
         profile_id = self._create_profile()

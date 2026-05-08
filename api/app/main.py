@@ -1597,6 +1597,37 @@ def _window_start_for_local_date(schedule: dict[str, Any], value_date: date, tim
     )
 
 
+def _shift_into_run_window(
+    schedule: dict[str, Any],
+    candidate: datetime,
+    timezone_info: ZoneInfo,
+) -> tuple[datetime, bool]:
+    bounds = _window_bounds_minutes(schedule)
+    if bounds is None:
+        return candidate, False
+
+    start_minutes, end_minutes = bounds
+    current_minutes = candidate.hour * 60 + candidate.minute
+
+    # Non-wrapping window (e.g., 08:00-18:00)
+    if start_minutes <= end_minutes:
+        if start_minutes <= current_minutes <= end_minutes:
+            return candidate, False
+        if current_minutes < start_minutes:
+            shifted = _window_start_for_local_date(schedule, candidate.date(), timezone_info) or candidate
+            return shifted, True
+        shifted = _window_start_for_local_date(schedule, candidate.date() + timedelta(days=1), timezone_info) or candidate
+        return shifted, True
+
+    # Wrapping window (e.g., 22:00-02:00) -> allowed if >= start OR <= end
+    if current_minutes >= start_minutes or current_minutes <= end_minutes:
+        return candidate, False
+    shifted = _window_start_for_local_date(schedule, candidate.date(), timezone_info) or candidate
+    if shifted <= candidate:
+        shifted = _window_start_for_local_date(schedule, candidate.date() + timedelta(days=1), timezone_info) or candidate
+    return shifted, True
+
+
 def _schedule_in_window(schedule: dict[str, Any], reference: Optional[datetime] = None) -> bool:
     return _minutes_in_window(schedule, _schedule_reference(schedule, reference))
 
@@ -1687,25 +1718,34 @@ def _calculate_new_contract_bundle(schedule: dict[str, Any], reference: Optional
     candidates: list[datetime] = []
     last_triggered_at = _parse_run_timestamp(schedule.get("last_triggered_at"))
     # First run is explicitly anchored to the user-provided Start At time.
-    if last_triggered_at is None:
-        candidates.append(anchor_local)
     if runs_per_period <= 1:
         anchor_window_start, _ = _period_window_bounds(period, anchor_local)
         offset = max(0.0, (anchor_local - anchor_window_start).total_seconds())
         base = window_start + timedelta(seconds=min(offset, window_seconds - 1))
-        candidates = [base]
+        candidates = [anchor_local] if last_triggered_at is None else [base]
     else:
-        step = window_seconds / runs_per_period
-        for idx in range(runs_per_period):
-            candidates.append(window_start + timedelta(seconds=idx * step))
+        step_seconds = window_seconds / runs_per_period
+        if last_triggered_at is None:
+            candidates.append(anchor_local)
+            for idx in range(1, runs_per_period):
+                candidates.append(anchor_local + timedelta(seconds=idx * step_seconds))
+        else:
+            anchor_window_start, _ = _period_window_bounds(period, anchor_local)
+            offset = max(0.0, (anchor_local - anchor_window_start).total_seconds())
+            phase = offset % step_seconds if step_seconds else 0.0
+            for idx in range(runs_per_period):
+                candidates.append(window_start + timedelta(seconds=phase + idx * step_seconds))
     filtered: list[datetime] = []
     warnings: list[str] = []
+    shifted_to_window = False
+    blackout_skipped = False
     for candidate in candidates:
+        candidate, shifted = _shift_into_run_window(schedule, candidate, timezone_info)
+        shifted_to_window = shifted_to_window or shifted
         if candidate < anchor_local:
             continue
-        if not _minutes_in_window(schedule, candidate):
-            continue
         if candidate.date().isoformat() in set(schedule.get("blackout_dates") or []):
+            blackout_skipped = True
             continue
         filtered.append(candidate)
     if stop_rule == "end_at":
@@ -1760,7 +1800,14 @@ def _calculate_new_contract_bundle(schedule: dict[str, Any], reference: Optional
     if len(filtered) < runs_per_period:
         warnings.append("Requested runs per period exceed feasible runs under current constraints.")
     next_run = future[0].astimezone(timezone.utc).isoformat() if future else None
-    reason = "computed" if next_run else "no_future_run"
+    if not next_run:
+        reason = "no_future_run"
+    elif blackout_skipped:
+        reason = "blackout_skipped"
+    elif shifted_to_window:
+        reason = "shifted_to_window_start"
+    else:
+        reason = "computed"
     return {
         "next_run_at": next_run,
         "next_run_reason": reason,

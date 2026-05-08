@@ -102,8 +102,8 @@ export default function SchedulesPage() {
   const [durationHours, setDurationHours] = useState(5);
   const [runsPerPeriod, setRunsPerPeriod] = useState(1);
   const [timezone, setTimezone] = useState(defaultScheduleTimezone);
-  const [runWindowStart, setRunWindowStart] = useState("08:00");
-  const [runWindowEnd, setRunWindowEnd] = useState("18:00");
+  const [runWindowStart, setRunWindowStart] = useState("");
+  const [runWindowEnd, setRunWindowEnd] = useState("");
   const [blackoutDates, setBlackoutDates] = useState<string[]>([]);
   const [blackoutDateInput, setBlackoutDateInput] = useState("");
   const [campaignSteps, setCampaignSteps] = useState<CampaignStep[]>([]);

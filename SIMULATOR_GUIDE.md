@@ -587,7 +587,7 @@ Scheduling procedure:
 2. Open `/schedules`, choose `simple` for one profile or `campaign` for ordered campaign steps, then set cadence and timezone.
 3. For `custom` cadence, set `custom_anchor_at` and `custom_every_n_days`; non-custom cadences must not send custom fields.
 4. Use `Active From` and `Active Until` to define optional automatic scheduling date-time bounds. Leave either side blank for no start or end boundary.
-5. Use `Window Start` and `Window End` for allowed local time-of-day execution. If a candidate is outside window, it shifts to next window start.
+5. Use `Window Start` and `Window End` to restrict allowed local time-of-day execution (leave blank for no window; the UI defaults to blank). If a candidate is outside window, it shifts to the next window start.
 6. Add blackout dates for full local calendar days when automatic triggers must not run. Manual `Trigger` still launches immediately.
 7. Save the schedule, then confirm the `Next Automatic Trigger` panel and table metadata.
 8. Use `Pause`, `Resume`, `Disable`, `Delete`, and `Restore` for lifecycle control. `pause`, `disable`, and `delete` clear `next_run_at`; `resume` and `restore` recalculate it.

@@ -1,0 +1,779 @@
+=== BASIC ===
+Fri May  8 15:13:43 +08 2026
+vmi1072359.contaboserver.net
+root
+Linux vmi1072359.contaboserver.net 5.4.0-105-generic #119-Ubuntu SMP Mon Mar 7 18:49:24 UTC 2022 x86_64 x86_64 x86_64 GNU/Linux
+
+=== PUBLIC IP / DNS ===
+154.26.138.170
+127.0.1.1
+154.26.138.170
+
+=== OS / FIREWALL ===
+NAME="Ubuntu"
+VERSION="20.04.5 LTS (Focal Fossa)"
+ID=ubuntu
+ID_LIKE=debian
+PRETTY_NAME="Ubuntu 20.04.5 LTS"
+VERSION_ID="20.04"
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+VERSION_CODENAME=focal
+UBUNTU_CODENAME=focal
+Status: inactive
+/tmp/audit-subdomain-setup.sh: line 23: firewall-cmd: command not found
+
+=== LISTENING PORTS ===
+Netid  State    Recv-Q   Send-Q      Local Address:Port      Peer Address:Port  Process                                                                         
+udp    UNCONN   0        0                 0.0.0.0:48136          0.0.0.0:*      ino:45439 sk:1 <->                                                             
+udp    UNCONN   0        0          100.122.25.186:53             0.0.0.0:*      users:(("netbird",pid=519,fd=10)) ino:41833 sk:2 <->                           
+udp    UNCONN   0        0           127.0.0.53%lo:53             0.0.0.0:*      users:(("systemd-resolve",pid=501,fd=12)) uid:101 ino:18133 sk:3 <->           
+udp    UNCONN   0        0                 0.0.0.0:631            0.0.0.0:*      users:(("cups-browsed",pid=491551,fd=7)) ino:23640885 sk:4 <->                 
+udp    UNCONN   0        0                 0.0.0.0:51820          0.0.0.0:*      ino:42236 sk:5 <->                                                             
+udp    UNCONN   0        0                 0.0.0.0:3478           0.0.0.0:*      users:(("docker-proxy",pid=1495,fd=4)) ino:32916 sk:6 <->                      
+udp    UNCONN   0        0                 0.0.0.0:45888          0.0.0.0:*      users:(("avahi-daemon",pid=429,fd=14)) uid:114 ino:20701 sk:7 <->              
+udp    UNCONN   0        0                 0.0.0.0:5353           0.0.0.0:*      users:(("avahi-daemon",pid=429,fd=12)) uid:114 ino:20699 sk:8 <->              
+udp    UNCONN   0        0                    [::]:48136             [::]:*      ino:45440 sk:9 v6only:1 <->                                                    
+udp    UNCONN   0        0                    [::]:51820             [::]:*      ino:42237 sk:a v6only:1 <->                                                    
+udp    UNCONN   0        0                    [::]:52965             [::]:*      users:(("avahi-daemon",pid=429,fd=15)) uid:114 ino:20702 sk:b v6only:1 <->     
+udp    UNCONN   0        0                    [::]:5353              [::]:*      users:(("avahi-daemon",pid=429,fd=13)) uid:114 ino:20700 sk:c v6only:1 <->     
+tcp    LISTEN   0        4096            127.0.0.1:8083           0.0.0.0:*      users:(("docker-proxy",pid=2131,fd=4)) ino:30389 sk:d <->                      
+tcp    LISTEN   0        4096            127.0.0.1:8084           0.0.0.0:*      users:(("docker-proxy",pid=1443,fd=4)) ino:28024 sk:e <->                      
+tcp    LISTEN   0        4096            127.0.0.1:8020           0.0.0.0:*      users:(("docker-proxy",pid=1330,fd=4)) ino:26374 sk:f <->                      
+tcp    LISTEN   0        4096        127.0.0.53%lo:53             0.0.0.0:*      users:(("systemd-resolve",pid=501,fd=13)) uid:101 ino:18134 sk:10 <->          
+tcp    LISTEN   0        128               0.0.0.0:22             0.0.0.0:*      users:(("sshd",pid=544,fd=3)) ino:19252 sk:11 <->                              
+tcp    LISTEN   0        5               127.0.0.1:631            0.0.0.0:*      users:(("cupsd",pid=491545,fd=7)) ino:23640859 sk:12 <->                       
+tcp    LISTEN   0        4096            127.0.0.1:3000           0.0.0.0:*      users:(("docker-proxy",pid=1949,fd=4)) ino:28213 sk:13 <->                     
+tcp    LISTEN   0        4096            127.0.0.1:5432           0.0.0.0:*      users:(("docker-proxy",pid=1538,fd=4)) ino:32950 sk:14 <->                     
+tcp    LISTEN   0        4096            127.0.0.1:3001           0.0.0.0:*      users:(("docker-proxy",pid=1619,fd=4)) ino:31401 sk:15 <->                     
+tcp    LISTEN   0        4096            127.0.0.1:5434           0.0.0.0:*      users:(("docker-proxy",pid=1602,fd=4)) ino:28147 sk:16 <->                     
+tcp    LISTEN   0        4096            127.0.0.1:5435           0.0.0.0:*      users:(("docker-proxy",pid=1629,fd=4)) ino:31406 sk:17 <->                     
+tcp    LISTEN   0        511               0.0.0.0:443            0.0.0.0:*      users:(("nginx",pid=566,fd=10),("nginx",pid=565,fd=10),("nginx",pid=564,fd=10),("nginx",pid=563,fd=10),("nginx",pid=562,fd=10),("nginx",pid=561,fd=10),("nginx",pid=560,fd=10)) ino:22928 sk:18 <->
+tcp    LISTEN   0        4096              0.0.0.0:5437           0.0.0.0:*      users:(("docker-proxy",pid=1481,fd=4)) ino:31159 sk:19 <->                     
+tcp    LISTEN   0        4096            127.0.0.1:3008           0.0.0.0:*      users:(("docker-proxy",pid=1358,fd=4)) ino:26385 sk:1a <->                     
+tcp    LISTEN   0        4096            127.0.0.1:8000           0.0.0.0:*      users:(("docker-proxy",pid=1298,fd=4)) ino:26356 sk:1b <->                     
+tcp    LISTEN   0        4096            127.0.0.1:8002           0.0.0.0:*      users:(("docker-proxy",pid=1370,fd=4)) ino:27919 sk:1c <->                     
+tcp    LISTEN   0        4096            127.0.0.1:8004           0.0.0.0:*      users:(("docker-proxy",pid=1346,fd=4)) ino:30975 sk:1d <->                     
+tcp    LISTEN   0        4096            127.0.0.1:27017          0.0.0.0:*      users:(("docker-proxy",pid=1441,fd=4)) ino:31114 sk:1e <->                     
+tcp    LISTEN   0        4096            127.0.0.1:44233          0.0.0.0:*      users:(("containerd",pid=524,fd=12)) ino:18377 sk:1f <->                       
+tcp    LISTEN   0        4096            127.0.0.1:10000          0.0.0.0:*      users:(("docker-proxy",pid=2084,fd=4)) ino:33110 sk:20 <->                     
+tcp    LISTEN   0        4096            127.0.0.1:8080           0.0.0.0:*      users:(("docker-proxy",pid=1572,fd=4)) ino:30305 sk:21 <->                     
+tcp    LISTEN   0        511               0.0.0.0:80             0.0.0.0:*      users:(("nginx",pid=566,fd=8),("nginx",pid=565,fd=8),("nginx",pid=564,fd=8),("nginx",pid=563,fd=8),("nginx",pid=562,fd=8),("nginx",pid=561,fd=8),("nginx",pid=560,fd=8)) ino:22926 sk:22 <->
+tcp    LISTEN   0        4096            127.0.0.1:8081           0.0.0.0:*      users:(("docker-proxy",pid=1379,fd=4)) ino:30988 sk:23 <->                     
+tcp    LISTEN   0        4096              0.0.0.0:8082           0.0.0.0:*      users:(("docker-proxy",pid=1366,fd=4)) ino:30983 sk:24 <->                     
+tcp    LISTEN   0        128                  [::]:22                [::]:*      users:(("sshd",pid=544,fd=4)) ino:19254 sk:25 v6only:1 <->                     
+tcp    LISTEN   0        511                  [::]:443               [::]:*      users:(("nginx",pid=566,fd=11),("nginx",pid=565,fd=11),("nginx",pid=564,fd=11),("nginx",pid=563,fd=11),("nginx",pid=562,fd=11),("nginx",pid=561,fd=11),("nginx",pid=560,fd=11)) ino:22929 sk:26 v6only:1 <->
+tcp    LISTEN   0        511                  [::]:80                [::]:*      users:(("nginx",pid=566,fd=9),("nginx",pid=565,fd=9),("nginx",pid=564,fd=9),("nginx",pid=563,fd=9),("nginx",pid=562,fd=9),("nginx",pid=561,fd=9),("nginx",pid=560,fd=9)) ino:22927 sk:27 v6only:1 <->
+
+=== WEB PROXY SERVICES ===
+  nginx.service                        loaded active running A high performance web server and a reverse proxy server 
+active
+inactive
+inactive
+inactive
+inactive
+
+=== DOCKER ===
+Docker version 20.10.12, build 20.10.12-0ubuntu2~20.04.1
+Docker Compose version v5.0.1
+NAMES                    IMAGE                                                           PORTS                                                STATUS
+lastmile_backend         lastmile_backend_lastmile                                       127.0.0.1:8002->8002/tcp                             Up 4 days
+lastmile_redis           redis:8-alpine                                                  6379/tcp                                             Up 4 days
+lastmile_postgres        postgres:15                                                     127.0.0.1:5434->5432/tcp                             Up 4 days (healthy)
+rds                      rds_backend_rds                                                 127.0.0.1:8000->8000/tcp                             Up 4 days
+rds_redis                redis:6-alpine                                                  6379/tcp                                             Up 4 days
+rds_postgres             rds_backend_db                                                  127.0.0.1:5432->5432/tcp                             Up 4 days (healthy)
+dashboard                dashboard_app                                                   127.0.0.1:3008->3008/tcp                             Up 4 days
+cms-prod_migrate_1       ghcr.io/fainzy-technologies/fainzy-website-cms:latest-migrate                                                        Up 4 days
+cms-prod_app_1           ghcr.io/fainzy-technologies/fainzy-website-cms:latest           127.0.0.1:3000->3000/tcp                             Up 4 days
+cms-prod_jobs-worker_1   ghcr.io/fainzy-technologies/fainzy-website-cms:latest-migrate                                                        Up 4 days
+cms-prod_postgres_1      postgres:15-alpine                                              5432/tcp                                             Up 4 days (healthy)
+cms-dev_migrate_1        ghcr.io/fainzy-technologies/fainzy-website-cms:dev-migrate                                                           Up 4 days
+cms-dev_app_1            ghcr.io/fainzy-technologies/fainzy-website-cms:dev              127.0.0.1:3001->3000/tcp                             Up 4 days
+cms-dev_jobs-worker_1    ghcr.io/fainzy-technologies/fainzy-website-cms:dev-migrate                                                           Up 4 days
+cms-dev_postgres_1       postgres:15-alpine                                              5432/tcp                                             Up 4 days (healthy)
+netbird-relay            netbirdio/relay:latest                                          0.0.0.0:3478->3478/udp, 127.0.0.1:8084->80/tcp       Up 4 days
+netbird-signal           netbirdio/signal:latest                                         127.0.0.1:10000->10000/tcp, 127.0.0.1:8083->80/tcp   Up 4 days
+netbird-dashboard        netbirdio/dashboard:latest                                      443/tcp, 127.0.0.1:8080->80/tcp                      Up 4 days
+netbird-management       netbirdio/management:latest                                     127.0.0.1:8081->80/tcp                               Up 4 days
+wireguard                lscr.io/linuxserver/wireguard:latest                                                                                 Up 4 days
+ros_bridge               ros_bridge_app                                                  127.0.0.1:8020->8020/tcp                             Up 4 days
+rb_redis                 redis:7-alpine                                                  6379/tcp                                             Up 4 days
+rb_postgres              postgres:15                                                     127.0.0.1:5435->5432/tcp                             Up 4 days (healthy)
+ros_mongo                mongo:6.0                                                       127.0.0.1:27017->27017/tcp                           Up 4 days
+docker-leantime-1        leantime/leantime:3.4.12                                        9000/tcp, 0.0.0.0:8082->8080/tcp                     Up 4 days (healthy)
+mysql_leantime           mysql:8.4                                                       3306/tcp, 33060/tcp                                  Up 4 days (healthy)
+website_backend          web_backend_website                                             127.0.0.1:8004->8004/tcp                             Up 4 days
+website_postgres         027eba2e8939                                                    0.0.0.0:5437->5432/tcp                               Up 4 days (healthy)
+web_redis                redis:6-alpine                                                  6379/tcp                                             Up 4 days
+NETWORK ID     NAME                       DRIVER    SCOPE
+2502a9588b2e   bridge                     bridge    local
+42659f5124d7   cms-dev_default            bridge    local
+906342ae3193   cms-prod_default           bridge    local
+ff2318237fc3   dashboard_default          bridge    local
+32cd0f39b4eb   docker_leantime-net        bridge    local
+a6b4203dc49a   host                       host      local
+8b47b3d48489   lastmile_backend_default   bridge    local
+079374ef7588   netbird_netbird            bridge    local
+aa95f7e7d45a   none                       null      local
+472775298afe   rds_backend_default        bridge    local
+a5d612f29b16   ros_bridge_default         bridge    local
+2422d9d86502   web_backend_default        bridge    local
+DRIVER    VOLUME NAME
+local     0a99dcf3e96af47963f7d6bb94ef5c4b2f11a4465b5913bd2d2a2b6e5117f08d
+local     4e9488220906de7d59adb8da39eeff386d286b02d975844340a36fef7e1d21dc
+local     9bb635c670308b087872820dbe6535cce18b82adacbeb0cdc11bc92deb27effa
+local     79f0974e2475f76c374199374bae1e3d69b31d03a67d73bacba058c3809809c4
+local     92a5ddfe65801aa46d2273701e29ddc7078bff1b1e02a71a4ab4ab147c7f7539
+local     241b474b3035756eaa093e21bbd2dc34fbad74e95cb2af41bf27d543cbae35e0
+local     621b574f57624a6f87deb338868c6b870be984aea536583761514804b77030bf
+local     3107a28166c5a0c9e3cabc9ba634b958c1a0c0bc388b1abc102bf89d8032f3ee
+local     19139e6101ae7ca7ac1f4df04ea2e17b922984503c6e6cfc06eb2a9748247466
+local     22342c31dfb11636d166b9968643ff02d925d2c5925b01673b4919cc06307f75
+local     538986360c2f95df31e1378a0e8e16f573954c59a33eb8191ad52f622bf64ecd
+local     b6b912af363e8efd80750d06588c0b1d4e600115e8345af25e39d76b9030bbf5
+local     c212de5cf15d95e5aaaf5fb9eb823cf5ebe7c90fbba8401fbdfded4779e73b90
+local     ceedd1aac50376386229c58858a8a8605c145bbc6442c57c0f901ac118230481
+local     cms-app_media-data
+local     cms-app_postgres-data
+local     cms-dev_media-data
+local     cms-dev_postgres-data
+local     cms-prod_media-data
+local     cms-prod_postgres-data
+local     docker_db_data
+local     docker_logs
+local     docker_plugins
+local     docker_public_userfiles
+local     docker_userfiles
+local     e320b8854e23dea4f2273c55664f1970c534b2b1973f76972adbe97b4797011a
+local     e749c4290653f3b05c65822c221e5af80fe3d804d6e26cf558e03dc899f318eb
+local     ea74a642ac47eeb72b2f2edf66a6b51ceb00664496f34782a43d868d979d86f2
+local     edaf6bd50bd808539c7f667d919dab8093017a90d259a00833685136971eb25e
+local     f17b15f229004d7a951f1a8b50a184f0d50c87da88e3d4d649c58e0692b99499
+local     f919982f56920a2e9a201a7478334e08de4c695ad6349b2931ef9647e22d1bd1
+local     fainzy-website-cms_data
+local     fainzy-website-cms_node_modules
+local     netbird_netbird_management
+local     ros_bridge_media
+local     ros_bridge_mongodb
+local     ros_bridge_postgres_data
+local     ros_bridge_staticfiles
+local     web_backend_media
+local     web_backend_postgres_data
+local     web_backend_static
+
+=== CADDY CONFIG ===
+
+=== NGINX ENABLED SITES ===
+total 24
+drwxr-xr-x 3 root root 4096 Apr 23 10:42 .
+drwxr-xr-x 8 root root 4096 Apr 23 10:34 ..
+drwxr-xr-x 8 root root 4096 Apr  1 18:13 .git
+-rw-r--r-- 1 root root    9 Jan 17  2023 .gitignore
+lrwxrwxrwx 1 root root   34 Nov  6  2022 default -> /etc/nginx/sites-available/default
+-rw-r--r-- 1 root root 6464 Apr  6 12:00 fainzy.conf
+lrwxrwxrwx 1 root root   39 Feb  5 14:00 netbird.conf -> /etc/nginx/sites-available/netbird.conf
+--- /etc/nginx/nginx.conf ---
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+	worker_connections 768;
+	# multi_accept on;
+}
+
+http {
+
+	##
+	# Basic Settings
+	##
+
+	sendfile on;
+	tcp_nopush on;
+	tcp_nodelay on;
+	keepalive_timeout 65;
+	types_hash_max_size 2048;
+	# server_tokens off;
+
+	# server_names_hash_bucket_size 64;
+	# server_name_in_redirect off;
+
+	include /etc/nginx/mime.types;
+	default_type application/octet-stream;
+
+	##
+	# SSL Settings
+	##
+
+	ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3; # Dropping SSLv3, ref: POODLE
+	ssl_prefer_server_ciphers on;
+
+	##
+	# Logging Settings
+	##
+
+	access_log /var/log/nginx/access.log;
+	error_log /var/log/nginx/error.log;
+
+	##
+	# Gzip Settings
+	##
+
+	gzip on;
+
+	# gzip_vary on;
+	# gzip_proxied any;
+	# gzip_comp_level 6;
+	# gzip_buffers 16 8k;
+	# gzip_http_version 1.1;
+	# gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+	##
+	# Virtual Host Configs
+	##
+
+	include /etc/nginx/conf.d/*.conf;
+	include /etc/nginx/sites-enabled/*;
+}
+
+
+#mail {
+#	# See sample authentication script at:
+#	# http://wiki.nginx.org/ImapAuthenticateWithApachePhpScript
+# 
+#	# auth_http localhost/auth.php;
+#	# pop3_capabilities "TOP" "USER";
+#	# imap_capabilities "IMAP4rev1" "UIDPLUS";
+# 
+#	server {
+#		listen     localhost:110;
+#		protocol   pop3;
+#		proxy      on;
+#	}
+# 
+#	server {
+#		listen     localhost:143;
+#		protocol   imap;
+#		proxy      on;
+#	}
+#}
+--- /etc/nginx/sites-enabled/default ---
+##
+# You should look at the following URL's in order to grasp a solid understanding
+# of Nginx configuration files in order to fully unleash the power of Nginx.
+# https://www.nginx.com/resources/wiki/start/
+# https://www.nginx.com/resources/wiki/start/topics/tutorials/config_pitfalls/
+# https://wiki.debian.org/Nginx/DirectoryStructure
+#
+# In most cases, administrators will remove this file from sites-enabled/ and
+# leave it as reference inside of sites-available where it will continue to be
+# updated by the nginx packaging team.
+#
+# This file will automatically load configuration files provided by other
+# applications, such as Drupal or Wordpress. These applications will be made
+# available underneath a path with that package name, such as /drupal8.
+#
+# Please see /usr/share/doc/nginx-doc/examples/ for more detailed examples.
+##
+
+# Default server configuration
+#
+server {
+	listen 80 default_server;
+	listen [::]:80 default_server;
+
+	# SSL configuration
+	#
+	# listen 443 ssl default_server;
+	# listen [::]:443 ssl default_server;
+	#
+	# Note: You should disable gzip for SSL traffic.
+	# See: https://bugs.debian.org/773332
+	#
+	# Read up on ssl_ciphers to ensure a secure configuration.
+	# See: https://bugs.debian.org/765782
+	#
+	# Self signed certs generated by the ssl-cert package
+	# Don't use them in a production server!
+	#
+	# include snippets/snakeoil.conf;
+
+	root /var/www/html;
+
+	# Add index.php to the list if you are using PHP
+	index index.html index.htm index.nginx-debian.html;
+
+	server_name _;
+
+	location / {
+		# First attempt to serve request as file, then
+		# as directory, then fall back to displaying a 404.
+		try_files $uri $uri/ =404;
+	}
+
+	# pass PHP scripts to FastCGI server
+	#
+	#location ~ \.php$ {
+	#	include snippets/fastcgi-php.conf;
+	#
+	#	# With php-fpm (or other unix sockets):
+	#	fastcgi_pass unix:/var/run/php/php7.4-fpm.sock;
+	#	# With php-cgi (or other tcp sockets):
+	#	fastcgi_pass 127.0.0.1:9000;
+	#}
+
+	# deny access to .htaccess files, if Apache's document root
+	# concurs with nginx's one
+	#
+	#location ~ /\.ht {
+	#	deny all;
+	#}
+}
+
+
+# Virtual Host configuration for example.com
+#
+# You can move that to a different file under sites-available/ and symlink that
+# to sites-enabled/ to enable it.
+#
+#server {
+#	listen 80;
+#	listen [::]:80;
+#
+#	server_name example.com;
+#
+#	root /var/www/example.com;
+#	index index.html;
+#
+#	location / {
+#		try_files $uri $uri/ =404;
+#	}
+#}
+--- /etc/nginx/sites-enabled/fainzy.conf ---
+upstream daphne {
+	server 0.0.0.0:8003;
+}
+
+upstream ros_bridge_daphne {
+	server 0.0.0.0:8085;
+}
+
+server {
+	listen 443 ssl http2;
+	listen [::]:443;
+	server_name www.fainzy.tech fainzy.tech;
+
+	ssl_certificate /etc/ssl/certs/fainzy.tech.pem;
+	ssl_certificate_key /etc/ssl/private/fainzy.tech.key;
+
+	location /static/ {
+		alias ~/rds_backend/fainzytech/staticfiles/;
+		include proxy_params;
+		proxy_pass http://localhost:8000;
+	}
+
+	location /media/ {
+		alias ~/rds_backend/fainzytech/media/;
+		include proxy_params;
+		proxy_pass http://localhost:8000;
+	}
+
+	location = /favicon.ico { access_log off; log_not_found off; }
+
+	location / {
+		proxy_pass http://localhost:8000;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection 'upgrade';
+		proxy_set_header Host $host;
+		proxy_cache_bypass $http_upgrade;
+		fastcgi_connect_timeout 90s;
+		fastcgi_send_timeout 90s;
+		fastcgi_read_timeout 90s;
+		proxy_read_timeout 90s;
+	}
+
+	# location /v1/site/ {
+	# 	proxy_pass https://localhost:8004;
+	# 	proxy_http_version 1.1;
+	# 	proxy_set_header Upgrade $http_upgrade;
+	# 	proxy_set_header Connection 'upgrade';
+	# 	proxy_set_header Host $host;
+	# 	proxy_cache_bypass $http_upgrade;
+	# }
+
+	location /ws/ {
+	alias ~/rds_backend/;
+		proxy_pass http://localhost:8001;
+	}
+
+	client_max_body_size 30M;
+}
+
+server {
+	listen 443 ssl http2;
+	listen [::]:443;
+	server_name lastmile.fainzy.tech www.lastmile.fainzy.tech;
+	
+	ssl_certificate /etc/ssl/certs/fainzy.tech.pem;
+	ssl_certificate_key /etc/ssl/private/fainzy.tech.key;
+
+	location /static/ {
+		alias ~/lastmile_backend/staticfiles/;
+		include proxy_params;
+		proxy_pass http://localhost:8002;
+	}
+
+	location /media/ {
+		alias ~/lastmile_backend/media/;
+		access_log off;
+	}
+
+	location = /favicon.ico { access_log off; log_not_found off; }
+
+	location / {
+		alias ~/lastmile_backend/;
+		proxy_pass http://localhost:8002;
+		proxy_set_header Host $host;
+		proxy_cache_bypass $http_upgrade;
+	}
+
+	location /ws/ {
+		alias ~/lastmile_backend/;
+		proxy_pass https://daphne;
+		proxy_http_version 1.1;
+		proxy_redirect off;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+		proxy_read_timeout 86400;
+	}
+}
+
+server {
+	listen 443 ssl http2;
+	listen [::]:443;
+	server_name rosbridge.fainzy.tech www.rosbridge.fainzy.tech;
+				
+	ssl_certificate /etc/ssl/certs/fainzy.tech.pem;
+	ssl_certificate_key /etc/ssl/private/fainzy.tech.key;
+
+	location /static/ {
+		alias ~/ros_bridge/fainzytech/staticfiles/;
+		include proxy_params;
+		proxy_pass http://localhost:8020;
+	}
+
+	location /media/ {
+		alias ~/ros_bridge/fainzytech/media/;
+		include proxy_params;
+		proxy_pass http://localhost:8020;
+	}
+
+	location = /favicon.ico { access_log off; log_not_found off; }
+
+	location / {
+		proxy_pass http://localhost:8020;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection 'upgrade';
+		proxy_set_header Host $host;
+		proxy_cache_bypass $http_upgrade;
+	}
+
+	location /ws/ {
+		alias ~/ros_bridge/;
+		proxy_pass https://ros_bridge_daphne;
+		proxy_http_version 1.1;
+		proxy_redirect off;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+		proxy_read_timeout 86400;
+	}
+
+	client_max_body_size 5G;
+}
+
+server {
+	listen 443 ssl http2;
+	listen [::]:443;
+	server_name web.fainzy.tech www.web.fainzy.tech;
+
+	ssl_certificate /etc/ssl/certs/fainzy.tech.pem;
+	ssl_certificate_key /etc/ssl/private/fainzy.tech.key;
+
+	location /static/ {
+		alias ~/web_backend/fainzytech/staticfiles/;
+		include proxy_params;
+		proxy_pass http://localhost:8004;
+	}
+
+	location /media/ {
+		alias ~/web_backend/fainzytech/media/;
+		include proxy_params;
+		proxy_pass http://localhost:8004;
+	}
+
+	location = /favicon.ico { access_log off; log_not_found off; }
+
+	location / {
+		proxy_pass http://localhost:8004;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection 'upgrade';
+		proxy_set_header Host $host;
+		proxy_cache_bypass $http_upgrade;
+	}
+	client_max_body_size 30M;
+}
+
+server {
+	listen 443 ssl http2;
+	listen [::]:443;
+	server_name www.fainzy.ai fainzy.ai;
+
+	ssl_certificate /etc/ssl/certs/fainzy.ai.pem;
+	ssl_certificate_key /etc/ssl/private/fainzy.ai.key;
+
+	location = /favicon.ico { 
+		alias /usr/share/nginx/fainzy_web/favicon.ico;
+		access_log off; log_not_found off;
+	}
+
+	location / {
+		proxy_pass http://localhost:3000;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection 'upgrade';
+		proxy_set_header Host $host;
+		proxy_read_timeout 300s;
+		proxy_connect_timeout 60s;
+		proxy_send_timeout 300s;
+		proxy_buffer_size 128k;
+		proxy_buffers 4 256k;
+		proxy_busy_buffers_size 256k;
+	}
+	client_max_body_size 100M;
+}
+
+server {
+	listen 443 ssl http2;
+	listen [::]:443;
+	server_name dashboard.fainzy.ai;
+
+	ssl_certificate /etc/ssl/certs/fainzy.ai.pem;
+	ssl_certificate_key /etc/ssl/private/fainzy.ai.key;
+
+	location = /favicon.ico { 
+		alias /usr/share/nginx/dashboard/favicon.ico;
+		access_log off; log_not_found off;
+	}
+
+	location / {
+		proxy_pass http://localhost:3008;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection 'upgrade';
+		proxy_set_header Host $host;
+	}
+	client_max_body_size 30M;
+}
+
+server {
+	listen 443 ssl http2;
+	listen [::]:443;
+	server_name cms.fainzy.ai;
+
+	ssl_certificate /etc/ssl/certs/fainzy.ai.pem;
+	ssl_certificate_key /etc/ssl/private/fainzy.ai.key;
+
+	location = /favicon.ico { 
+		alias /usr/share/nginx/dashboard/favicon.ico;
+		access_log off; log_not_found off;
+	}
+--- /etc/nginx/sites-enabled/netbird.conf ---
+server {
+    listen 80;
+    server_name remote-monitoring.fainzy.ai;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name remote-monitoring.fainzy.ai;
+
+    ssl_certificate /etc/letsencrypt/live/remote-monitoring.fainzy.ai/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/remote-monitoring.fainzy.ai/privkey.pem;
+
+    access_log /var/log/nginx/netbird.access.log;
+    error_log /var/log/nginx/netbird.error.log;
+
+    # Defaults for Websockets & gRPC
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # --- Routes from Installer ---
+
+    # 1. Relay Service
+    location /relay {
+        proxy_pass http://127.0.0.1:8084;
+    }
+
+    # 2. Signal WebSocket
+    location /ws-proxy/signal {
+        proxy_pass http://127.0.0.1:8083;
+    }
+
+    # 3. Signal gRPC
+    location /signalexchange.SignalExchange/ {
+        grpc_pass grpc://127.0.0.1:10000;
+        grpc_read_timeout 1d;
+        grpc_send_timeout 1d;
+        grpc_set_header Host $host;
+        grpc_set_header X-Real-IP $remote_addr;
+        grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 4. Management API
+    location /api {
+        proxy_pass http://127.0.0.1:8081;
+    }
+
+    # 5. Management WebSocket
+    location /ws-proxy/management {
+        proxy_pass http://127.0.0.1:8081;
+    }
+
+    # 6. Management gRPC
+    location /management.ManagementService/ {
+        grpc_pass grpc://127.0.0.1:8081;
+        grpc_read_timeout 1d;
+        grpc_send_timeout 1d;
+        grpc_set_header Host $host;
+        grpc_set_header X-Real-IP $remote_addr;
+        grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # 7. Embedded Identity Provider (OAuth)
+    location /oauth2 {
+        proxy_pass http://127.0.0.1:8081;
+    }
+
+    # 8. Dashboard (Catch-all)
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+    }
+}
+
+=== APACHE VHOSTS ===
+
+=== TRAEFIK DYNAMIC CONFIG (common paths) ===
+
+=== TLS / CERTBOT ===
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Found the following certs:
+  Certificate Name: remote-monitoring.fainzy.ai
+    Domains: remote-monitoring.fainzy.ai
+    Expiry Date: 2026-07-05 05:41:58+00:00 (VALID: 57 days)
+    Certificate Path: /etc/letsencrypt/live/remote-monitoring.fainzy.ai/fullchain.pem
+    Private Key Path: /etc/letsencrypt/live/remote-monitoring.fainzy.ai/privkey.pem
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+total 16
+drwx------ 3 root root 4096 Feb  5 14:16 .
+drwxr-xr-x 9 root root 4096 May  8 15:14 ..
+-rw-r--r-- 1 root root  740 Feb  5 14:16 README
+drwxr-xr-x 2 root root 4096 Apr  6 14:40 remote-monitoring.fainzy.ai
+
+=== SYSTEMD SERVICES THAT MAY RUN APPS ===
+apport-autoreport.path                     enabled         enabled      
+apparmor.service                           enabled         enabled      
+apport-autoreport.service                  static          enabled      
+apport-forward@.service                    static          enabled      
+apport.service                             generated       enabled      
+docker.service                             enabled         enabled      
+kmod-static-nodes.service                  static          enabled      
+apport-forward.socket                      enabled         enabled      
+docker.socket                              enabled         enabled      
+
+=== COMMON APP PATHS ===
+--- /var/www ---
+--- /opt ---
+/opt/cms-app/docker-compose.prod.yml
+/opt/cms-app/docker-compose.yml
+/opt/cms-app-dev/docker-compose.prod.yml
+/opt/cms-app-dev/docker-compose.yml
+/opt/cms-app-prod/docker-compose.prod.yml
+/opt/cms-app-prod/docker-compose.yml
+--- /srv ---
+--- /home ---
+--- /root ---
+/root/fainzy_web/docker-compose.prod.yml
+/root/fainzy_web/docker-compose.dev.yml
+/root/fainzy_web/docker-compose.yml
+/root/fainzy_web/.env
+/root/wireguard_vpn/docker-compose.yml
+/root/dashboard/docker-compose.yml
+/root/dashboard/docker-compose.server.yml
+/root/lastmile_backend/.env.sample
+/root/lastmile_backend/docker-compose.prod.yml
+/root/lastmile_backend/docker-compose.yml
+/root/lastmile_backend/.env
+/root/lastmile_backend/docker-compose.staging.yml
+/root/monitoring_system/docker-compose.yml
+/root/leantime/.docker/docker-compose.yml
+/root/leantime/.docker/.env
+/root/ros_bridge/.env.save
+/root/ros_bridge/docker-compose.prod.yml
+/root/ros_bridge/docker-compose.dev.yml
+/root/ros_bridge/docker-compose.yml
+/root/ros_bridge/.env
+/root/simulate/.env.prod.example
+/root/simulate/docker-compose.prod.yml
+/root/simulate/.env.example
+/root/simulate/docker-compose.yml
+/root/simulate/.env.prod
+/root/fainzy-website-cms/docker-compose.prod.yml
+/root/fainzy-website-cms/.env.example
+/root/fainzy-website-cms/docker-compose.yml
+/root/fainzy-website-cms/.env
+/root/web_backend/.env.save
+/root/web_backend/docker-compose.dev.yml
+/root/web_backend/docker-compose.yml
+/root/web_backend/.env
+/root/rds_backend/.env.sample
+/root/rds_backend/docker-compose.prod.yml
+/root/rds_backend/docker-compose.yml
+/root/rds_backend/.env
+/root/rds_backend/docker-compose.staging.yml
+/root/netbird/docker-compose.yml
+/root/project-mgt/docker-compose.control.yml
+/root/project-mgt/.env.example
+/root/project-mgt/docker-compose.yml
+/root/project-mgt/.env
+
+=== GIT REPOS (common roots) ===
+/root/fainzy_web
+/root/wireguard_vpn
+/root/dashboard
+/root/lastmile_backend
+/root/monitoring_system
+/root/leantime
+/root/ros_bridge
+/root/simulate
+/root/fainzy-website-cms
+/root/web_backend
+/root/rds_backend
+/root/netbird
+/root/project-mgt
+
+=== DONE ===
+Audit saved to: /tmp/vps-audit-vmi1072359.contaboserver.net-2026-05-08-151343.log

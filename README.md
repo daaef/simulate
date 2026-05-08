@@ -30,7 +30,7 @@ The authenticated app shell includes active route highlighting for `Overview`, `
 
 - `Overview`: status cards, run status and success charts, flow distribution, failure trend, archive/purge backlog, schedule health, and alerts.
 - `Runs`: launch, cancel, replay, delete completed runs, and inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles.
-- `Schedules`: creates profile-backed simple schedules and campaign schedules with date/time active ranges, run windows, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, pause, resume, disable, soft delete, and restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
+- `Schedules`: creates profile-backed simple schedules and campaign schedules with date/time active ranges, optional run windows, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, pause, resume, disable, soft delete, and restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
 - `Archives`: searchable archive/raw-purge candidate browsing with retained run summaries.
 - `Retention`: policy windows, archive/purge queues, retained-summary fields, and purge-safety state.
 - `Admin`: manage users under `/admin/users` and configure system policies (including allowed scheduling timezones) under `/admin/system`.
@@ -44,6 +44,8 @@ Preferred schedule contract (for new/edited schedules):
 3. `stop_rule`: `never`, `end_at`, or `duration`.
 4. `runs_per_period`: number of runs to distribute in each period window.
 5. Optional constraints: `run_window_start/end` and `blackout_dates`.
+
+Note: the `/schedules` UI leaves `run_window_start/end` blank by default (no time-of-day restriction). If you set a window, candidates outside it shift forward to the next window start.
 
 The scheduler computes period candidates, applies stop rule, applies window/blackout constraints, then emits:
 
