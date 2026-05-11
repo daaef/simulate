@@ -81,7 +81,7 @@ jobs:
               echo "Recent nginx logs:"
               docker compose -f docker-compose.prod.yml logs --tail 80 nginx || true
             }
-            trap cleanup_on_error ERR
+            trap 'echo "FAILED at line $LINENO: $BASH_COMMAND"; cleanup_on_error' ERR
 
             git fetch origin main
             git checkout main
