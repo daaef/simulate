@@ -67,9 +67,9 @@ services:
     build:
       context: .
       dockerfile: web/Dockerfile
-    command: ["sh", "-c", "npm run build && npm run start -- --hostname 0.0.0.0 --port 3000"]
     environment:
       NEXT_TELEMETRY_DISABLED: "1"
+      NODE_ENV: production
     depends_on:
       api:
         condition: service_healthy
@@ -78,7 +78,7 @@ services:
       interval: 20s
       timeout: 5s
       retries: 10
-      start_period: 30s
+      start_period: 60s
     restart: unless-stopped
 
   nginx:
