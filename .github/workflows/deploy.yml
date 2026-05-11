@@ -15,12 +15,37 @@ jobs:
         env:
           DEPLOY_PATH: ${{ secrets.SIMULATOR_DEPLOY_PATH }}
           REPO_URL: git@github.com:Fainzy-Technologies/simulator.git
+
+          SIM_ENV: ${{ vars.SIM_ENV }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+          POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          WEB_CORS_ORIGINS: ${{ vars.WEB_CORS_ORIGINS }}
+          SIM_AUTH_DISABLED: ${{ vars.SIM_AUTH_DISABLED }}
+
+          SIMULATOR_HOST_BIND: ${{ vars.SIMULATOR_HOST_BIND }}
+          SIMULATOR_HOST_PORT: ${{ vars.SIMULATOR_HOST_PORT }}
+
+          SIMULATOR_SESSION_COOKIE_NAME: ${{ vars.SIMULATOR_SESSION_COOKIE_NAME }}
+          SIMULATOR_SESSION_MAX_AGE_SECONDS: ${{ vars.SIMULATOR_SESSION_MAX_AGE_SECONDS }}
+          SIMULATOR_SESSION_COOKIE_SECURE: ${{ vars.SIMULATOR_SESSION_COOKIE_SECURE }}
+          SIMULATOR_SESSION_COOKIE_SAMESITE: ${{ vars.SIMULATOR_SESSION_COOKIE_SAMESITE }}
+          SIMULATOR_EXTERNAL_BASE_URL: ${{ vars.SIMULATOR_EXTERNAL_BASE_URL }}
+
+          SIMULATOR_WEBHOOK_PROJECT_SECRETS: ${{ secrets.SIMULATOR_WEBHOOK_PROJECT_SECRETS }}
+          SIMULATOR_WEBHOOK_REPO_ALLOWLIST: ${{ vars.SIMULATOR_WEBHOOK_REPO_ALLOWLIST }}
+          SIMULATOR_GITHUB_STATUS_CONTEXT: ${{ vars.SIMULATOR_GITHUB_STATUS_CONTEXT }}
+          SIMULATOR_GITHUB_STATUS_TOKEN: ${{ secrets.SIMULATOR_GITHUB_STATUS_TOKEN }}
+
         with:
           host: ${{ secrets.SIMULATOR_DEPLOY_HOST }}
           username: ${{ secrets.SIMULATOR_DEPLOY_USERNAME }}
           key: ${{ secrets.SIMULATOR_DEPLOY_SSH_KEY }}
           port: ${{ secrets.SIMULATOR_DEPLOY_PORT || '22' }}
-          envs: DEPLOY_PATH,REPO_URL
+          envs: DEPLOY_PATH,REPO_URL,SIM_ENV,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,DATABASE_URL,JWT_SECRET_KEY,WEB_CORS_ORIGINS,SIM_AUTH_DISABLED,SIMULATOR_HOST_BIND,SIMULATOR_HOST_PORT,SIMULATOR_SESSION_COOKIE_NAME,SIMULATOR_SESSION_MAX_AGE_SECONDS,SIMULATOR_SESSION_COOKIE_SECURE,SIMULATOR_SESSION_COOKIE_SAMESITE,SIMULATOR_EXTERNAL_BASE_URL,SIMULATOR_WEBHOOK_PROJECT_SECRETS,SIMULATOR_WEBHOOK_REPO_ALLOWLIST,SIMULATOR_GITHUB_STATUS_CONTEXT,SIMULATOR_GITHUB_STATUS_TOKEN
           command_timeout: 45m
           script: |
             set -euo pipefail
@@ -48,13 +73,13 @@ jobs:
 
             cleanup_on_error() {
               echo "Deployment failed. Container status:"
-              docker compose -f docker-compose.prod.yml --env-file .env.prod ps || true
+              docker compose -f docker-compose.prod.yml ps || true
               echo "Recent API logs:"
-              docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 80 api || true
+              docker compose -f docker-compose.prod.yml logs --tail 80 api || true
               echo "Recent web logs:"
-              docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 80 web || true
+              docker compose -f docker-compose.prod.yml logs --tail 80 web || true
               echo "Recent nginx logs:"
-              docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 80 nginx || true
+              docker compose -f docker-compose.prod.yml logs --tail 80 nginx || true
             }
             trap cleanup_on_error ERR
 
@@ -62,19 +87,45 @@ jobs:
             git checkout main
             git reset --hard origin/main
 
-            if [ ! -f .env.prod ]; then
-              echo "ERROR: .env.prod is missing at $TARGET_PATH/.env.prod"
-              echo "Create it from .env.prod.example and rerun deployment."
-              exit 1
-            fi
+            echo "Writing production .env from GitHub Actions variables and secrets..."
+
+            cat > .env <<EOF
+            SIM_ENV=${SIM_ENV}
+
+            POSTGRES_DB=${POSTGRES_DB}
+            POSTGRES_USER=${POSTGRES_USER}
+            POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            DATABASE_URL=${DATABASE_URL}
+
+            JWT_SECRET_KEY=${JWT_SECRET_KEY}
+            WEB_CORS_ORIGINS=${WEB_CORS_ORIGINS}
+            SIM_AUTH_DISABLED=${SIM_AUTH_DISABLED}
+
+            SIMULATOR_HOST_BIND=${SIMULATOR_HOST_BIND}
+            SIMULATOR_HOST_PORT=${SIMULATOR_HOST_PORT}
+
+            SIMULATOR_SESSION_COOKIE_NAME=${SIMULATOR_SESSION_COOKIE_NAME}
+            SIMULATOR_SESSION_MAX_AGE_SECONDS=${SIMULATOR_SESSION_MAX_AGE_SECONDS}
+            SIMULATOR_SESSION_COOKIE_SECURE=${SIMULATOR_SESSION_COOKIE_SECURE}
+            SIMULATOR_SESSION_COOKIE_SAMESITE=${SIMULATOR_SESSION_COOKIE_SAMESITE}
+            SIMULATOR_EXTERNAL_BASE_URL=${SIMULATOR_EXTERNAL_BASE_URL}
+
+            GITHUB_WEBHOOK_PROJECT_SECRETS=${GITHUB_WEBHOOK_PROJECT_SECRETS}
+            GITHUB_WEBHOOK_REPO_ALLOWLIST=${GITHUB_WEBHOOK_REPO_ALLOWLIST}
+            GITHUB_STATUS_CONTEXT=${GITHUB_STATUS_CONTEXT}
+            GITHUB_STATUS_TOKEN=${GITHUB_STATUS_TOKEN}
+            EOF
+
+            sed -i 's/^[[:space:]]*//' .env
+            chmod 600 .env
 
             echo "Building production images..."
-            docker compose -f docker-compose.prod.yml --env-file .env.prod build
+            docker compose -f docker-compose.prod.yml build
 
             echo "Starting/updating production stack..."
-            docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --remove-orphans
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
-            HOST_PORT="$(grep -E '^SIMULATOR_HOST_PORT=' .env.prod | tail -1 | cut -d '=' -f2- | tr -d '"' || true)"
+            HOST_PORT="$(grep -E '^SIMULATOR_HOST_PORT=' .env | tail -1 | cut -d '=' -f2- | tr -d '"' || true)"
             if [ -z "$HOST_PORT" ]; then
               HOST_PORT="8090"
             fi
@@ -95,4 +146,4 @@ jobs:
             fi
 
             echo "Deployment successful"
-            docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+            docker compose -f docker-compose.prod.yml ps
