@@ -12,6 +12,7 @@ import {
   type SimulationPlan,
   type SimulationPlanContent,
 } from "../../../lib/api";
+import IntegrationMappingsPanel from "../../../components/config/IntegrationMappingsPanel";
 
 const PLAN_TEMPLATE: SimulationPlanContent = {
   schema_version: 2,
@@ -318,6 +319,7 @@ export default function ConfigPage() {
           </div>
         </section>
       </div>
+      <IntegrationMappingsPanel />
     </div>
   );
 }

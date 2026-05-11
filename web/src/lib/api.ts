@@ -316,6 +316,41 @@ export type SimulationPlanUpsertRequest = {
   content: SimulationPlanContent;
 };
 
+export type IntegrationMapping = {
+  id: number;
+  project: string;
+  environment: string;
+  profile_id: number;
+  enabled: boolean;
+  profile_name?: string | null;
+  created_by?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  [key: string]: unknown;
+};
+
+export type IntegrationMappingUpsertRequest = {
+  project: string;
+  environment: string;
+  profile_id: number;
+  enabled: boolean;
+};
+
+export type GitHubIntegrationTrigger = {
+  id: number;
+  project?: string | null;
+  environment?: string | null;
+  repository?: string | null;
+  status: string;
+  reason?: string | null;
+  run_id?: number | null;
+  deployment_id?: string | number | null;
+  delivery_id?: string | null;
+  created_at?: string | null;
+  meta?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
+
 export type TimezonePolicyMode = "all" | "allowlist";
 
 export type SystemTimezonesPolicy = {
@@ -753,5 +788,49 @@ export async function deleteSimulationPlan(planId: string): Promise<{ plan_id: s
       ...withSession(),
     }),
     "delete-simulation-plan"
+  );
+}
+
+export async function fetchGitHubIntegrationMappings(): Promise<IntegrationMapping[]> {
+  const payload = await unwrap<{ mappings: IntegrationMapping[] }>(
+    await fetch("/api/v1/integrations/github/mappings", withSession()),
+    "github-integration-mappings"
+  );
+  return payload.mappings;
+}
+
+export async function upsertGitHubIntegrationMapping(
+  request: IntegrationMappingUpsertRequest
+): Promise<IntegrationMapping> {
+  const payload = await unwrap<{ mapping: IntegrationMapping }>(
+    await fetch("/api/v1/integrations/github/mappings", {
+      method: "POST",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "github-integration-mapping-upsert"
+  );
+  return payload.mapping;
+}
+
+export async function deleteGitHubIntegrationMapping(
+  mappingId: number
+): Promise<{ mapping_id: number; deleted: boolean }> {
+  return unwrap<{ mapping_id: number; deleted: boolean }>(
+    await fetch(`/api/v1/integrations/github/mappings/${mappingId}`, {
+      method: "DELETE",
+      ...withSession(),
+    }),
+    "github-integration-mapping-delete"
+  );
+}
+
+export async function fetchGitHubIntegrationTriggers(
+  limit = 50,
+  offset = 0
+): Promise<{ triggers: GitHubIntegrationTrigger[]; total?: number; limit?: number; offset?: number }> {
+  return unwrap<{ triggers: GitHubIntegrationTrigger[]; total?: number; limit?: number; offset?: number }>(
+    await fetch(`/api/v1/integrations/github/triggers?limit=${limit}&offset=${offset}`, withSession()),
+    "github-integration-triggers"
   );
 }
