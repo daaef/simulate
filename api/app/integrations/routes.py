@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from ..auth.policies import require_permission
 from .models import IntegrationMappingUpsertRequest
 from . import service
+from .github_workflow_run import process_github_workflow_run_webhook
 
 router = APIRouter(tags=["integrations"])
 
@@ -24,15 +25,18 @@ async def github_deployment_complete(request: Request) -> dict[str, Any]:
             "message": "GitHub webhook ping received.",
         }
 
-    if github_event not in {"deployment_status", "deployment"}:
-        return {
-            "ok": True,
-            "event": github_event,
-            "ignored": True,
-            "reason": "unsupported_github_event",
-        }
+    if github_event == "workflow_run":
+        return process_github_workflow_run_webhook(body, headers)
 
-    return service.process_github_deployment_webhook(body, headers)
+    if github_event in {"deployment_status", "deployment"}:
+        return service.process_github_deployment_webhook(body, headers)
+
+    return {
+        "ok": True,
+        "event": github_event,
+        "ignored": True,
+        "reason": "unsupported_github_event",
+    }
 
 
 @router.get("/api/v1/integrations/github/mappings")
