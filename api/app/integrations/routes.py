@@ -15,6 +15,23 @@ router = APIRouter(tags=["integrations"])
 async def github_deployment_complete(request: Request) -> dict[str, Any]:
     body = await request.body()
     headers = {key.lower(): value for key, value in request.headers.items()}
+    github_event = headers.get("x-github-event", "")
+
+    if github_event == "ping":
+        return {
+            "ok": True,
+            "event": "ping",
+            "message": "GitHub webhook ping received.",
+        }
+
+    if github_event not in {"deployment_status", "deployment"}:
+        return {
+            "ok": True,
+            "event": github_event,
+            "ignored": True,
+            "reason": "unsupported_github_event",
+        }
+
     return service.process_github_deployment_webhook(body, headers)
 
 
@@ -46,4 +63,3 @@ def list_triggers(
     current_user: dict = Depends(require_permission("system", "read")),
 ) -> dict[str, Any]:
     return service.list_triggers(limit, offset)
-
