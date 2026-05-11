@@ -30,7 +30,7 @@ The authenticated app shell includes active route highlighting for `Overview`, `
 
 - `Overview`: status cards, run status and success charts, flow distribution, failure trend, archive/purge backlog, schedule health, and alerts.
 - `Runs`: launch, cancel, replay, delete completed runs, and inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles.
-- `Schedules`: creates profile-backed simple schedules and campaign schedules with date/time active ranges, optional run windows, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, pause, resume, disable, soft delete, and restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
+- `Schedules`: creates campaign-first schedules (simple requests are normalized to campaign execution), supports period-specific run slots, all-day mode, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, pause, resume, disable, soft delete, and restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
 - `Archives`: searchable archive/raw-purge candidate browsing with retained run summaries.
 - `Retention`: policy windows, archive/purge queues, retained-summary fields, and purge-safety state.
 - `Admin`: manage users under `/admin/users` and configure system policies (including allowed scheduling timezones) under `/admin/system`.
@@ -40,12 +40,17 @@ The authenticated app shell includes active route highlighting for `Overview`, `
 Preferred schedule contract (for new/edited schedules):
 
 1. `anchor_start_at`: when recurring automation starts.
-2. `period`: `hourly`, `daily`, `weekly`, or `monthly`.
-3. `stop_rule`: `never`, `end_at`, or `duration`.
-4. `runs_per_period`: number of runs to distribute in each period window.
-5. Optional constraints: `run_window_start/end` and `blackout_dates`.
+2. `period`: `daily`, `weekly`, or `monthly`.
+3. `repeat`: `none`, `daily`, `weekly`, `monthly`, `annually`, `weekdays`, or `custom`.
+4. `stop_rule`: `never`, `end_at`, or `duration`.
+5. `all_day`: when `true`, scheduler uses whole-day triggers and ignores slot times.
+6. `run_slots`: period-specific slot definitions:
+   - daily: `[{ "time": "HH:MM" }]`
+   - weekly: `[{ "weekday": "monday", "time": "HH:MM" }]`
+   - monthly: mixed `day_of_month` + `weekday_ordinal` slots
+7. Optional constraint: `blackout_dates`.
 
-Note: the `/schedules` UI leaves `run_window_start/end` blank by default (no time-of-day restriction). If you set a window, candidates outside it shift forward to the next window start.
+Custom repeat uses `recurrence_config.weekdays` and requires `stop_rule=end_at`.
 
 The scheduler computes period candidates, applies stop rule, applies window/blackout constraints, then emits:
 
@@ -56,9 +61,11 @@ The scheduler computes period candidates, applies stop rule, applies window/blac
 - `feasible_runs_per_period`
 - `schedule_warnings`
 
-Legacy cadence/custom fields remain accepted for compatibility with existing schedules.
+Legacy cadence/custom fields remain accepted for compatibility with existing schedules that have not been edited.
 
 The `/schedules` form shows pre-submit automation preview (next run, requested vs feasible runs, and warnings). See `SIMULATOR_GUIDE.md` section **Schedule and Campaign APIs** for full details and worked examples.
+
+Recent schedule executions now show lifecycle states (`queued`, `started`, `launched`, `failed`) and link `run_id` directly to run detail pages.
 
 ## CLI Simulator
 
@@ -104,5 +111,6 @@ Production deployment is handled by a portable SSH workflow in `.github/workflow
 - Requires host-managed `.env.prod`; workflow fails if `.env.prod` is missing.
 - Uses `git@github.com:daaef/simulate.git` and defaults deployment path to `/root/simulate`.
 - Defaults to `http://127.0.0.1:8090` via `SIMULATOR_HOST_BIND=127.0.0.1` and `SIMULATOR_HOST_PORT=8090`; set `0.0.0.0` only when intentionally exposing publicly.
+- Supports cross-repository GitHub `deployment_status` webhooks at `POST /api/v1/integrations/github/deployment-complete`, with HMAC verification, `(project, environment)` profile mapping, idempotent trigger records, async profile launch, and deployment-status callback to GitHub (`simulator/verification` context).
 
-See `docs/deployment.md` for first-time VPS setup, GitHub secrets, backup/rollback, health checks, and security hardening.
+See `docs/deployment.md` for first-time VPS setup, cross-project GitHub Actions trigger integration, verification, troubleshooting, and security hardening.

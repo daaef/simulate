@@ -9,11 +9,16 @@ import sqlite3
 import subprocess
 import threading
 import time
+import hashlib
+import hmac
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Optional
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -40,6 +45,9 @@ from .system.service import configure_runtime as configure_system_runtime
 from .simulation_plans.models import SimulationPlanUpsertRequest
 from .simulation_plans.routes import router as simulation_plans_router
 from .simulation_plans.service import configure_runtime as configure_simulation_plans_runtime
+from .integrations.models import IntegrationMappingUpsertRequest
+from .integrations.routes import router as integrations_router
+from .integrations.service import configure_runtime as configure_integrations_runtime
 from .runs.models import RunCreateRequest
 from .runs.routes import (
     router as runs_router,
@@ -76,6 +84,17 @@ def _as_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _json_env(value: str, default: Any) -> Any:
+    raw = os.getenv(value)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        LOGGER.warning("Invalid JSON in %s; falling back to default.", value)
+        return default
 
 
 SIMULATOR_WORKDIR = os.getenv("SIMULATOR_WORKDIR", "/workspace")
@@ -123,6 +142,13 @@ class EventCacheEntry:
 EVENT_CACHE: "OrderedDict[str, EventCacheEntry]" = OrderedDict()
 ACTIVE_RETENTION_DAYS = 30
 ARCHIVE_RETENTION_DAYS = 180
+GITHUB_WEBHOOK_PROJECT_SECRETS = _json_env("GITHUB_WEBHOOK_PROJECT_SECRETS", {})
+GITHUB_WEBHOOK_REPO_ALLOWLIST = _json_env("GITHUB_WEBHOOK_REPO_ALLOWLIST", {})
+GITHUB_STATUS_TOKEN = os.getenv("GITHUB_STATUS_TOKEN", "").strip()
+GITHUB_STATUS_API_BASE = os.getenv("GITHUB_STATUS_API_BASE", "https://api.github.com").rstrip("/")
+GITHUB_STATUS_CONTEXT = os.getenv("GITHUB_STATUS_CONTEXT", "simulator/verification")
+SIMULATOR_EXTERNAL_BASE_URL = os.getenv("SIMULATOR_EXTERNAL_BASE_URL", "").rstrip("/")
+TERMINAL_RUN_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
 # Database abstraction layer
@@ -224,6 +250,10 @@ def _init_db() -> None:
                 end_at TEXT,
                 duration_seconds INTEGER,
                 runs_per_period INTEGER NOT NULL DEFAULT 1,
+                repeat TEXT,
+                all_day INTEGER NOT NULL DEFAULT 0,
+                recurrence_config TEXT NOT NULL DEFAULT '{}',
+                run_slots TEXT NOT NULL DEFAULT '[]',
                 cadence TEXT NOT NULL DEFAULT 'daily',
                 timezone TEXT NOT NULL DEFAULT 'UTC',
                 active_from TEXT,
@@ -265,6 +295,43 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS integration_profile_mappings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project TEXT NOT NULL,
+                environment TEXT NOT NULL,
+                profile_id INTEGER NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(project, environment)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS integration_triggers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project TEXT NOT NULL,
+                environment TEXT NOT NULL,
+                repository TEXT NOT NULL,
+                sha TEXT NOT NULL,
+                deployment_id TEXT NOT NULL,
+                deployment_status_id TEXT,
+                dedupe_key TEXT NOT NULL UNIQUE,
+                event_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                reason TEXT,
+                payload TEXT NOT NULL DEFAULT '{}',
+                run_id INTEGER,
+                github_status_url TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                finished_at TEXT
+            )
+            """
+        )
         _migrate_db(conn)
 
 
@@ -301,6 +368,22 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE schedules ADD COLUMN duration_seconds INTEGER")
     if schedule_columns and "runs_per_period" not in schedule_columns:
         conn.execute("ALTER TABLE schedules ADD COLUMN runs_per_period INTEGER NOT NULL DEFAULT 1")
+    if schedule_columns and "repeat" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN repeat TEXT")
+    if schedule_columns and "all_day" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN all_day INTEGER NOT NULL DEFAULT 0")
+    if schedule_columns and "recurrence_config" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN recurrence_config TEXT NOT NULL DEFAULT '{}'")
+    if schedule_columns and "run_slots" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN run_slots TEXT NOT NULL DEFAULT '[]'")
+    mapping_columns = [row[1] for row in conn.execute("PRAGMA table_info(integration_profile_mappings)").fetchall()]
+    if mapping_columns and "enabled" not in mapping_columns:
+        conn.execute("ALTER TABLE integration_profile_mappings ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+    trigger_columns = [row[1] for row in conn.execute("PRAGMA table_info(integration_triggers)").fetchall()]
+    if trigger_columns and "deployment_status_id" not in trigger_columns:
+        conn.execute("ALTER TABLE integration_triggers ADD COLUMN deployment_status_id TEXT")
+    if trigger_columns and "github_status_url" not in trigger_columns:
+        conn.execute("ALTER TABLE integration_triggers ADD COLUMN github_status_url TEXT")
 
 
 def _migrate_postgres_schema() -> None:
@@ -349,6 +432,10 @@ def _migrate_postgres_schema() -> None:
                     end_at TIMESTAMP WITH TIME ZONE,
                     duration_seconds INTEGER,
                     runs_per_period INTEGER NOT NULL DEFAULT 1,
+                    repeat VARCHAR(20),
+                    all_day BOOLEAN NOT NULL DEFAULT FALSE,
+                    recurrence_config JSONB DEFAULT '{}'::jsonb,
+                    run_slots JSONB DEFAULT '[]'::jsonb,
                     cadence VARCHAR(20) NOT NULL DEFAULT 'daily',
                     timezone VARCHAR(80) NOT NULL DEFAULT 'UTC',
                     active_from TIMESTAMP WITH TIME ZONE,
@@ -377,6 +464,10 @@ def _migrate_postgres_schema() -> None:
             cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS end_at TIMESTAMP WITH TIME ZONE")
             cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS duration_seconds INTEGER")
             cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS runs_per_period INTEGER NOT NULL DEFAULT 1")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS repeat VARCHAR(20)")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS all_day BOOLEAN NOT NULL DEFAULT FALSE")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS recurrence_config JSONB DEFAULT '{}'::jsonb")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS run_slots JSONB DEFAULT '[]'::jsonb")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schedule_executions (
@@ -399,6 +490,46 @@ def _migrate_postgres_schema() -> None:
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS integration_profile_mappings (
+                    id SERIAL PRIMARY KEY,
+                    project VARCHAR(120) NOT NULL,
+                    environment VARCHAR(120) NOT NULL,
+                    profile_id INTEGER NOT NULL REFERENCES run_profiles(id) ON DELETE CASCADE,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    UNIQUE(project, environment)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS integration_triggers (
+                    id SERIAL PRIMARY KEY,
+                    project VARCHAR(120) NOT NULL,
+                    environment VARCHAR(120) NOT NULL,
+                    repository VARCHAR(255) NOT NULL,
+                    sha VARCHAR(80) NOT NULL,
+                    deployment_id VARCHAR(80) NOT NULL,
+                    deployment_status_id VARCHAR(80),
+                    dedupe_key VARCHAR(300) NOT NULL UNIQUE,
+                    event_name VARCHAR(80) NOT NULL,
+                    status VARCHAR(32) NOT NULL,
+                    reason TEXT,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+                    github_status_url TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                    finished_at TIMESTAMP WITH TIME ZONE
+                )
+                """
+            )
+            cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE")
+            cursor.execute("ALTER TABLE integration_triggers ADD COLUMN IF NOT EXISTS deployment_status_id VARCHAR(80)")
+            cursor.execute("ALTER TABLE integration_triggers ADD COLUMN IF NOT EXISTS github_status_url TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -617,6 +748,9 @@ def _schedule_row_to_dict_any(row) -> dict[str, Any]:
     payload = dict(row)
     payload["blackout_dates"] = _load_json_field(payload.get("blackout_dates"), [])
     payload["campaign_steps"] = _load_json_field(payload.get("campaign_steps"), [])
+    payload["recurrence_config"] = _load_json_field(payload.get("recurrence_config"), {})
+    payload["run_slots"] = _load_json_field(payload.get("run_slots"), [])
+    payload["all_day"] = bool(payload.get("all_day"))
     for key in (
         "anchor_start_at",
         "end_at",
@@ -853,6 +987,12 @@ def _update_run(run_id: int, **fields: Any) -> None:
                 f"UPDATE runs SET {assignment} WHERE id = ?",
                 (*values, run_id),
             )
+    status = str(fields.get("status") or "").lower()
+    if status in TERMINAL_RUN_STATUSES:
+        try:
+            _handle_integration_run_terminal_status(run_id, status)
+        except Exception as exc:
+            LOGGER.warning("Failed integration terminal-status callback for run %s: %s", run_id, exc)
 
 @dataclass
 class ScheduledRun:
@@ -1435,12 +1575,551 @@ def _launch_run_profile(profile_id: int, user_id: Optional[int] = None) -> dict[
     return {"profile": profile, "run": run}
 
 
+def _integration_mapping_row_to_dict_any(row: Any) -> dict[str, Any]:
+    payload = dict(row)
+    payload["enabled"] = bool(payload.get("enabled"))
+    return payload
+
+
+def _list_integration_mappings() -> dict[str, Any]:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    "SELECT * FROM integration_profile_mappings ORDER BY project ASC, environment ASC, id ASC"
+                )
+                rows = cursor.fetchall()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM integration_profile_mappings ORDER BY project ASC, environment ASC, id ASC"
+            ).fetchall()
+    return {"mappings": [_integration_mapping_row_to_dict_any(row) for row in rows]}
+
+
+def _upsert_integration_mapping(request: IntegrationMappingUpsertRequest, user_id: Optional[int] = None) -> dict[str, Any]:
+    _ = user_id
+    _get_run_profile(int(request.profile_id))
+    project = request.project.strip().lower()
+    environment = request.environment.strip().lower()
+    now = _utc_now()
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO integration_profile_mappings (project, environment, profile_id, enabled, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (project, environment)
+                    DO UPDATE SET profile_id = EXCLUDED.profile_id, enabled = EXCLUDED.enabled, updated_at = EXCLUDED.updated_at
+                    RETURNING *
+                    """,
+                    (project, environment, request.profile_id, request.enabled, now, now),
+                )
+                row = cursor.fetchone()
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute(
+                """
+                INSERT INTO integration_profile_mappings (project, environment, profile_id, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project, environment) DO UPDATE
+                SET profile_id = excluded.profile_id, enabled = excluded.enabled, updated_at = excluded.updated_at
+                """,
+                (project, environment, request.profile_id, int(request.enabled), now, now),
+            )
+            row = conn.execute(
+                "SELECT * FROM integration_profile_mappings WHERE project = ? AND environment = ?",
+                (project, environment),
+            ).fetchone()
+    return {"mapping": _integration_mapping_row_to_dict_any(row)}
+
+
+def _delete_integration_mapping(mapping_id: int) -> dict[str, Any]:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM integration_profile_mappings WHERE id = %s", (mapping_id,))
+                deleted = cursor.rowcount > 0
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            cursor = conn.execute("DELETE FROM integration_profile_mappings WHERE id = ?", (mapping_id,))
+            deleted = cursor.rowcount > 0
+    return {"mapping_id": mapping_id, "deleted": deleted}
+
+
+def _list_integration_triggers(limit: int, offset: int) -> dict[str, Any]:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    "SELECT * FROM integration_triggers ORDER BY id DESC LIMIT %s OFFSET %s",
+                    (limit, offset),
+                )
+                rows = cursor.fetchall()
+                cursor.execute("SELECT COUNT(*) FROM integration_triggers")
+                total = cursor.fetchone()[0]
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM integration_triggers ORDER BY id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+            total_row = conn.execute("SELECT COUNT(*) FROM integration_triggers").fetchone()
+            total = int(total_row[0]) if total_row else 0
+    return {
+        "triggers": [dict(row) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def _match_project_for_repository(repository: str) -> str | None:
+    repo = repository.strip().lower()
+    allowlist = GITHUB_WEBHOOK_REPO_ALLOWLIST if isinstance(GITHUB_WEBHOOK_REPO_ALLOWLIST, dict) else {}
+    for project, repos in allowlist.items():
+        if not isinstance(repos, list):
+            continue
+        normalized_repos = {str(item).strip().lower() for item in repos if str(item).strip()}
+        if repo in normalized_repos:
+            return str(project).strip().lower()
+    return None
+
+
+def _verify_github_signature(project: str, body: bytes, signature_header: str | None) -> bool:
+    if not signature_header or not signature_header.startswith("sha256="):
+        return False
+    secret_map = GITHUB_WEBHOOK_PROJECT_SECRETS if isinstance(GITHUB_WEBHOOK_PROJECT_SECRETS, dict) else {}
+    secret = str(secret_map.get(project, "")).strip()
+    if not secret:
+        return False
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    provided = signature_header.split("=", 1)[1].strip()
+    return hmac.compare_digest(digest, provided)
+
+
+def _integration_mapping_for(project: str, environment: str) -> dict[str, Any] | None:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT * FROM integration_profile_mappings
+                    WHERE project = %s AND environment = %s
+                    """,
+                    (project, environment),
+                )
+                row = cursor.fetchone()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM integration_profile_mappings
+                WHERE project = ? AND environment = ?
+                """,
+                (project, environment),
+            ).fetchone()
+    if row is None:
+        return None
+    return _integration_mapping_row_to_dict_any(row)
+
+
+def _create_integration_trigger(
+    *,
+    project: str,
+    environment: str,
+    repository: str,
+    sha: str,
+    deployment_id: str,
+    deployment_status_id: str | None,
+    event_name: str,
+    dedupe_key: str,
+    status: str,
+    reason: str | None,
+    payload: dict[str, Any],
+    github_status_url: str | None,
+) -> tuple[dict[str, Any], bool]:
+    created_at = _utc_now()
+    payload_json = json.dumps(payload)
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT * FROM integration_triggers WHERE dedupe_key = %s
+                    """,
+                    (dedupe_key,),
+                )
+                existing = cursor.fetchone()
+                if existing is not None:
+                    return dict(existing), False
+                cursor.execute(
+                    """
+                    INSERT INTO integration_triggers (
+                        project, environment, repository, sha, deployment_id, deployment_status_id,
+                        dedupe_key, event_name, status, reason, payload, github_status_url, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                    RETURNING *
+                    """,
+                    (
+                        project,
+                        environment,
+                        repository,
+                        sha,
+                        deployment_id,
+                        deployment_status_id,
+                        dedupe_key,
+                        event_name,
+                        status,
+                        reason,
+                        payload_json,
+                        github_status_url,
+                        created_at,
+                        created_at,
+                    ),
+                )
+                row = cursor.fetchone()
+            conn.commit()
+            return dict(row), True
+        finally:
+            conn.close()
+    with DB_LOCK, _db() as conn:
+        existing = conn.execute(
+            "SELECT * FROM integration_triggers WHERE dedupe_key = ?",
+            (dedupe_key,),
+        ).fetchone()
+        if existing is not None:
+            return dict(existing), False
+        cursor = conn.execute(
+            """
+            INSERT INTO integration_triggers (
+                project, environment, repository, sha, deployment_id, deployment_status_id,
+                dedupe_key, event_name, status, reason, payload, github_status_url, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project,
+                environment,
+                repository,
+                sha,
+                deployment_id,
+                deployment_status_id,
+                dedupe_key,
+                event_name,
+                status,
+                reason,
+                payload_json,
+                github_status_url,
+                created_at,
+                created_at,
+            ),
+        )
+        row = conn.execute("SELECT * FROM integration_triggers WHERE id = ?", (int(cursor.lastrowid),)).fetchone()
+        return dict(row), True
+
+
+def _update_integration_trigger(trigger_id: int, **fields: Any) -> None:
+    if not fields:
+        return
+    fields["updated_at"] = _utc_now()
+    keys = list(fields.keys())
+    values = [fields[key] for key in keys]
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                assignment = ", ".join(f"{key} = %s" for key in keys)
+                cursor.execute(
+                    f"UPDATE integration_triggers SET {assignment} WHERE id = %s",
+                    (*values, trigger_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return
+    with DB_LOCK, _db() as conn:
+        assignment = ", ".join(f"{key} = ?" for key in keys)
+        conn.execute(
+            f"UPDATE integration_triggers SET {assignment} WHERE id = ?",
+            (*values, trigger_id),
+        )
+
+
+def _github_status_url_from_payload(payload: dict[str, Any]) -> str | None:
+    status = payload.get("deployment_status")
+    if isinstance(status, dict):
+        value = status.get("statuses_url")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _enqueue_integration_profile_launch(trigger_id: int, profile_id: int) -> None:
+    def _runner() -> None:
+        try:
+            launch = _launch_run_profile(profile_id, None)
+            run_id = int(launch["run"]["id"])
+            _update_integration_trigger(trigger_id, status="launched", run_id=run_id)
+        except Exception as exc:
+            _update_integration_trigger(
+                trigger_id,
+                status="failed",
+                reason=f"launch_failed:{exc}",
+                finished_at=_utc_now(),
+            )
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+
+
+def _normalize_deployment_webhook_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    deployment = payload.get("deployment") if isinstance(payload.get("deployment"), dict) else {}
+    deployment_status = payload.get("deployment_status") if isinstance(payload.get("deployment_status"), dict) else {}
+    repository = payload.get("repository") if isinstance(payload.get("repository"), dict) else {}
+    repository_full_name = str(repository.get("full_name") or "").strip().lower()
+    environment = str(deployment.get("environment") or "").strip().lower()
+    sha = str(deployment.get("sha") or "").strip()
+    deployment_id = str(deployment.get("id") or "").strip()
+    deployment_status_id = str(deployment_status.get("id") or "").strip() or None
+    state = str(deployment_status.get("state") or "").strip().lower()
+    return {
+        "repository": repository_full_name,
+        "environment": environment,
+        "sha": sha,
+        "deployment_id": deployment_id,
+        "deployment_status_id": deployment_status_id,
+        "state": state,
+    }
+
+
+def _process_github_deployment_webhook(body: bytes, headers: dict[str, str]) -> dict[str, Any]:
+    event_name = str(headers.get("x-github-event") or "").strip().lower()
+    signature = headers.get("x-hub-signature-256")
+    if event_name != "deployment_status":
+        return {"accepted": False, "status": "rejected", "reason": "unsupported_event"}
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"accepted": False, "status": "rejected", "reason": "invalid_json"}
+
+    normalized = _normalize_deployment_webhook_payload(payload)
+    repository = normalized["repository"]
+    environment = normalized["environment"]
+    sha = normalized["sha"]
+    deployment_id = normalized["deployment_id"]
+    deployment_status_id = normalized["deployment_status_id"]
+    state = normalized["state"]
+    if not repository or not environment or not sha or not deployment_id:
+        return {"accepted": False, "status": "rejected", "reason": "missing_required_fields"}
+    project = _match_project_for_repository(repository)
+    if not project:
+        return {"accepted": False, "status": "rejected", "reason": "repository_not_allowlisted", "repository": repository}
+    if not _verify_github_signature(project, body, signature):
+        return {"accepted": False, "status": "rejected", "reason": "invalid_signature", "repository": repository}
+    if state != "success":
+        return {"accepted": False, "status": "rejected", "reason": "non_success_state", "repository": repository}
+
+    dedupe_key = f"{project}:{environment}:{deployment_id}:{sha}"
+    github_status_url = _github_status_url_from_payload(payload)
+    trigger, created = _create_integration_trigger(
+        project=project,
+        environment=environment,
+        repository=repository,
+        sha=sha,
+        deployment_id=deployment_id,
+        deployment_status_id=deployment_status_id,
+        event_name=event_name,
+        dedupe_key=dedupe_key,
+        status="validated",
+        reason=None,
+        payload=payload,
+        github_status_url=github_status_url,
+    )
+    if not created:
+        return {
+            "accepted": True,
+            "status": "duplicate",
+            "trigger_id": trigger["id"],
+            "run_id": trigger.get("run_id"),
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+        }
+
+    mapping = _integration_mapping_for(project, environment)
+    if mapping is None:
+        _update_integration_trigger(trigger["id"], status="rejected", reason="mapping_not_found", finished_at=_utc_now())
+        return {
+            "accepted": False,
+            "status": "rejected",
+            "reason": "mapping_not_found",
+            "trigger_id": trigger["id"],
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+        }
+    if not mapping.get("enabled", True):
+        _update_integration_trigger(trigger["id"], status="rejected", reason="mapping_disabled", finished_at=_utc_now())
+        return {
+            "accepted": False,
+            "status": "rejected",
+            "reason": "mapping_disabled",
+            "trigger_id": trigger["id"],
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+        }
+
+    _update_integration_trigger(trigger["id"], status="queued", reason=None)
+    _enqueue_integration_profile_launch(int(trigger["id"]), int(mapping["profile_id"]))
+    return {
+        "accepted": True,
+        "status": "queued",
+        "trigger_id": trigger["id"],
+        "project": project,
+        "environment": environment,
+        "repository": repository,
+    }
+
+
+def _post_github_deployment_status(trigger: dict[str, Any], run: dict[str, Any]) -> None:
+    status_url = str(trigger.get("github_status_url") or "").strip()
+    repository = str(trigger.get("repository") or "").strip()
+    if not status_url and repository and trigger.get("deployment_id"):
+        encoded_repo = urllib_parse.quote(repository, safe="")
+        status_url = f"{GITHUB_STATUS_API_BASE}/repos/{encoded_repo}/deployments/{trigger['deployment_id']}/statuses"
+    if not status_url or not GITHUB_STATUS_TOKEN:
+        return
+
+    run_id = run.get("id")
+    run_status = str(run.get("status") or "").lower()
+    state = "success" if run_status == "succeeded" else "failure"
+    run_url = f"{SIMULATOR_EXTERNAL_BASE_URL}/runs/{run_id}" if SIMULATOR_EXTERNAL_BASE_URL else None
+    body = {
+        "state": state,
+        "description": f"Simulator run {run_status}",
+        "context": GITHUB_STATUS_CONTEXT,
+    }
+    if run_url:
+        body["target_url"] = run_url
+    data = json.dumps(body).encode("utf-8")
+    req = urllib_request.Request(
+        status_url,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {GITHUB_STATUS_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "fainzy-simulator",
+        },
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=10) as response:
+            _ = response.read()
+    except urllib_error.URLError as exc:
+        LOGGER.warning("Failed to post GitHub deployment status for trigger %s: %s", trigger.get("id"), exc)
+
+
+def _handle_integration_run_terminal_status(run_id: int, status: str) -> None:
+    if status not in TERMINAL_RUN_STATUSES:
+        return
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT * FROM integration_triggers
+                    WHERE run_id = %s AND status IN ('launched', 'queued')
+                    ORDER BY id DESC
+                    """,
+                    (run_id,),
+                )
+                triggers = [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM integration_triggers
+                WHERE run_id = ? AND status IN ('launched', 'queued')
+                ORDER BY id DESC
+                """,
+                (run_id,),
+            ).fetchall()
+            triggers = [dict(row) for row in rows]
+    if not triggers:
+        return
+
+    run = _get_run(run_id)
+    final_status = "completed" if status == "succeeded" else "failed"
+    for trigger in triggers:
+        _update_integration_trigger(trigger["id"], status=final_status, reason=None, finished_at=_utc_now())
+        thread = threading.Thread(target=_post_github_deployment_status, args=(trigger, run), daemon=True)
+        thread.start()
+
+
 def _datetime_as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+WEEKDAY_TO_INT: dict[str, int] = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+
+def _parse_slot_time(value: Any) -> tuple[int, int] | None:
+    if not isinstance(value, str):
+        return None
+    parsed = _parse_schedule_time(value)
+    if parsed is None:
+        return None
+    hour, minute = parsed
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return hour, minute
+
+
+def _weekday_index(value: Any) -> int | None:
+    if isinstance(value, int) and 0 <= value <= 6:
+        return value
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in WEEKDAY_TO_INT:
+            return WEEKDAY_TO_INT[key]
+    return None
 
 
 def _validate_schedule_request(request: ScheduleUpsertRequest) -> None:
@@ -1475,17 +2154,26 @@ def _validate_schedule_request(request: ScheduleUpsertRequest) -> None:
         except ValueError:
             raise HTTPException(status_code=400, detail="Blackout dates must use YYYY-MM-DD format.") from None
 
-    using_new_contract = bool(request.period or request.anchor_start_at or request.stop_rule or request.end_at or request.duration_seconds is not None)
+    using_new_contract = bool(
+        request.period
+        or request.anchor_start_at
+        or request.stop_rule
+        or request.end_at
+        or request.duration_seconds is not None
+        or request.repeat
+        or request.run_slots
+        or request.all_day
+    )
     if using_new_contract:
         anchor_start_at = _parse_run_timestamp(request.anchor_start_at)
         if anchor_start_at is None:
             raise HTTPException(status_code=400, detail="anchor_start_at is required and must be a valid ISO date-time.")
-        if request.period not in {"hourly", "daily", "weekly", "monthly"}:
-            raise HTTPException(status_code=400, detail="period must be one of hourly, daily, weekly, monthly.")
+        if request.period not in {"daily", "weekly", "monthly"}:
+            raise HTTPException(status_code=400, detail="period must be one of daily, weekly, monthly.")
+        if request.repeat not in {"none", "daily", "weekly", "monthly", "annually", "weekdays", "custom"}:
+            raise HTTPException(status_code=400, detail="repeat must be one of none, daily, weekly, monthly, annually, weekdays, custom.")
         if request.stop_rule not in {"never", "end_at", "duration"}:
             raise HTTPException(status_code=400, detail="stop_rule must be one of never, end_at, duration.")
-        if request.runs_per_period < 1:
-            raise HTTPException(status_code=400, detail="runs_per_period must be >= 1.")
         if request.stop_rule == "end_at":
             end_at = _parse_run_timestamp(request.end_at)
             if end_at is None:
@@ -1499,6 +2187,50 @@ def _validate_schedule_request(request: ScheduleUpsertRequest) -> None:
                 raise HTTPException(status_code=400, detail="duration_seconds must be > 0 when stop_rule is duration.")
         elif request.duration_seconds is not None:
             raise HTTPException(status_code=400, detail="duration_seconds is only allowed when stop_rule is duration.")
+        if request.repeat == "custom":
+            recurrence = request.recurrence_config or {}
+            weekdays = recurrence.get("weekdays")
+            if not isinstance(weekdays, list) or not weekdays:
+                raise HTTPException(status_code=400, detail="custom repeat requires recurrence_config.weekdays.")
+            for weekday in weekdays:
+                if _weekday_index(weekday) is None:
+                    raise HTTPException(status_code=400, detail="custom repeat weekdays must be monday..sunday.")
+            if request.stop_rule != "end_at":
+                raise HTTPException(status_code=400, detail="custom repeat requires stop_rule=end_at.")
+
+        seen_slots: set[str] = set()
+        if not request.all_day:
+            if not request.run_slots:
+                raise HTTPException(status_code=400, detail="run_slots must include at least one slot when all_day=false.")
+            for slot in request.run_slots:
+                time_value = _parse_slot_time(slot.get("time"))
+                if time_value is None:
+                    raise HTTPException(status_code=400, detail="Each run slot requires valid HH:MM time.")
+                if request.period == "daily":
+                    key = f"{time_value[0]:02d}:{time_value[1]:02d}"
+                elif request.period == "weekly":
+                    weekday = _weekday_index(slot.get("weekday"))
+                    if weekday is None:
+                        raise HTTPException(status_code=400, detail="Weekly run slots require weekday.")
+                    key = f"{weekday}:{time_value[0]:02d}:{time_value[1]:02d}"
+                else:
+                    kind = str(slot.get("kind") or "")
+                    if kind == "day_of_month":
+                        day = int(slot.get("day") or 0)
+                        if day < 1 or day > 31:
+                            raise HTTPException(status_code=400, detail="Monthly day_of_month slots require day between 1 and 31.")
+                        key = f"dom:{day}:{time_value[0]:02d}:{time_value[1]:02d}"
+                    elif kind == "weekday_ordinal":
+                        ordinal = int(slot.get("ordinal") or 0)
+                        weekday = _weekday_index(slot.get("weekday"))
+                        if ordinal < 1 or ordinal > 5 or weekday is None:
+                            raise HTTPException(status_code=400, detail="Monthly weekday_ordinal slots require ordinal 1..5 and weekday.")
+                        key = f"ord:{ordinal}:{weekday}:{time_value[0]:02d}:{time_value[1]:02d}"
+                    else:
+                        raise HTTPException(status_code=400, detail="Monthly run slots require kind day_of_month or weekday_ordinal.")
+                if key in seen_slots:
+                    raise HTTPException(status_code=400, detail="Duplicate run slots are not allowed.")
+                seen_slots.add(key)
 
     if request.cadence == "custom":
         custom_anchor_at = _parse_run_timestamp(request.custom_anchor_at)
@@ -1513,15 +2245,14 @@ def _validate_schedule_request(request: ScheduleUpsertRequest) -> None:
                 detail="custom_anchor_at/custom_every_n_days are only allowed when cadence is custom.",
             )
 
-    if request.schedule_type == "simple":
-        if request.profile_id is None:
-            raise HTTPException(status_code=400, detail="Simple schedules require a run profile.")
+    if request.schedule_type == "simple" and request.profile_id is None:
+        raise HTTPException(status_code=400, detail="Simple schedules require a run profile.")
+    if request.schedule_type == "simple" and request.profile_id is not None:
         _get_run_profile(int(request.profile_id))
-        return
-    if not request.campaign_steps:
-        raise HTTPException(status_code=400, detail="Campaign schedules require at least one campaign step.")
     for step in request.campaign_steps:
         _get_run_profile(int(step.profile_id))
+    if request.schedule_type == "campaign" and not request.campaign_steps:
+        raise HTTPException(status_code=400, detail="Campaign schedules require at least one campaign step.")
 
 
 def _schedule_timezone(schedule: dict[str, Any]) -> ZoneInfo:
@@ -1696,13 +2427,87 @@ def _period_window_bounds(period: str, local_reference: datetime) -> tuple[datet
     return start, start + timedelta(days=1)
 
 
+def _nth_weekday_of_month(year: int, month: int, weekday: int, ordinal: int, tzinfo: ZoneInfo) -> datetime | None:
+    first = datetime(year, month, 1, tzinfo=tzinfo)
+    shift = (weekday - first.weekday()) % 7
+    day = 1 + shift + (ordinal - 1) * 7
+    if day > _last_day_of_month(year, month):
+        return None
+    return datetime(year, month, day, tzinfo=tzinfo)
+
+
+def _date_matches_repeat(local_dt: datetime, anchor_local: datetime, repeat: str, recurrence: dict[str, Any]) -> bool:
+    if repeat == "none":
+        return local_dt.date() == anchor_local.date()
+    if repeat == "daily":
+        return True
+    if repeat == "weekdays":
+        return local_dt.weekday() < 5
+    if repeat == "weekly":
+        return local_dt.weekday() == anchor_local.weekday()
+    if repeat == "annually":
+        return (local_dt.month, local_dt.day) == (anchor_local.month, anchor_local.day)
+    if repeat == "monthly":
+        return True
+    if repeat == "custom":
+        weekdays = recurrence.get("weekdays") or []
+        target_weekdays = {_weekday_index(item) for item in weekdays}
+        target_weekdays.discard(None)
+        return local_dt.weekday() in target_weekdays
+    return False
+
+
+def _daily_or_weekly_slot_datetimes(day_start: datetime, period: str, slots: list[dict[str, Any]]) -> list[datetime]:
+    out: list[datetime] = []
+    if period == "daily":
+        for slot in slots:
+            parsed = _parse_slot_time(slot.get("time"))
+            if parsed is None:
+                continue
+            out.append(day_start.replace(hour=parsed[0], minute=parsed[1], second=0, microsecond=0))
+        return out
+    for slot in slots:
+        weekday = _weekday_index(slot.get("weekday"))
+        parsed = _parse_slot_time(slot.get("time"))
+        if weekday is None or parsed is None:
+            continue
+        target_day = day_start + timedelta(days=(weekday - day_start.weekday()) % 7)
+        out.append(target_day.replace(hour=parsed[0], minute=parsed[1], second=0, microsecond=0))
+    return out
+
+
+def _monthly_slot_datetimes(day_start: datetime, slots: list[dict[str, Any]]) -> list[datetime]:
+    out: list[datetime] = []
+    for slot in slots:
+        parsed = _parse_slot_time(slot.get("time"))
+        if parsed is None:
+            continue
+        kind = str(slot.get("kind") or "")
+        if kind == "day_of_month":
+            day = int(slot.get("day") or 0)
+            if 1 <= day <= _last_day_of_month(day_start.year, day_start.month):
+                out.append(day_start.replace(day=day, hour=parsed[0], minute=parsed[1], second=0, microsecond=0))
+        elif kind == "weekday_ordinal":
+            ordinal = int(slot.get("ordinal") or 0)
+            weekday = _weekday_index(slot.get("weekday"))
+            if 1 <= ordinal <= 5 and weekday is not None:
+                day_candidate = _nth_weekday_of_month(day_start.year, day_start.month, weekday, ordinal, day_start.tzinfo or timezone.utc)
+                if day_candidate is not None:
+                    out.append(day_candidate.replace(hour=parsed[0], minute=parsed[1], second=0, microsecond=0))
+    return out
+
+
 def _calculate_new_contract_bundle(schedule: dict[str, Any], reference: Optional[datetime] = None) -> dict[str, Any]:
     timezone_info = _schedule_timezone(schedule)
     local_reference = _schedule_reference(schedule, reference)
     anchor_start_at = _parse_run_timestamp(schedule.get("anchor_start_at"))
     period = str(schedule.get("period") or "")
     stop_rule = str(schedule.get("stop_rule") or "never")
-    runs_per_period = int(schedule.get("runs_per_period") or 1)
+    repeat = str(schedule.get("repeat") or "daily")
+    run_slots = schedule.get("run_slots") or []
+    recurrence = schedule.get("recurrence_config") or {}
+    all_day = bool(schedule.get("all_day"))
+    runs_per_period = int(schedule.get("runs_per_period") or max(1, len(run_slots) or 1))
     if anchor_start_at is None or period not in {"hourly", "daily", "weekly", "monthly"}:
         return {
             "next_run_at": None,
@@ -1712,34 +2517,30 @@ def _calculate_new_contract_bundle(schedule: dict[str, Any], reference: Optional
             "feasible_runs_per_period": 0,
             "schedule_warnings": ["Missing or invalid new scheduling fields."],
         }
+    if period == "hourly":
+        period = "daily"
     anchor_local = anchor_start_at.astimezone(timezone_info)
     window_start, window_end = _period_window_bounds(period, local_reference)
-    window_seconds = max(1.0, (window_end - window_start).total_seconds())
     candidates: list[datetime] = []
-    last_triggered_at = _parse_run_timestamp(schedule.get("last_triggered_at"))
-    # First run is explicitly anchored to the user-provided Start At time.
-    if runs_per_period <= 1:
-        anchor_window_start, _ = _period_window_bounds(period, anchor_local)
-        offset = max(0.0, (anchor_local - anchor_window_start).total_seconds())
-        base = window_start + timedelta(seconds=min(offset, window_seconds - 1))
-        candidates = [anchor_local] if last_triggered_at is None else [base]
-    else:
-        step_seconds = window_seconds / runs_per_period
-        if last_triggered_at is None:
-            candidates.append(anchor_local)
-            for idx in range(1, runs_per_period):
-                candidates.append(anchor_local + timedelta(seconds=idx * step_seconds))
+    if all_day:
+        candidates = [window_start]
+    elif run_slots:
+        if period == "daily":
+            candidates = _daily_or_weekly_slot_datetimes(window_start, "daily", run_slots)
+        elif period == "weekly":
+            candidates = _daily_or_weekly_slot_datetimes(window_start, "weekly", run_slots)
         else:
-            anchor_window_start, _ = _period_window_bounds(period, anchor_local)
-            offset = max(0.0, (anchor_local - anchor_window_start).total_seconds())
-            phase = offset % step_seconds if step_seconds else 0.0
-            for idx in range(runs_per_period):
-                candidates.append(window_start + timedelta(seconds=phase + idx * step_seconds))
+            candidates = _monthly_slot_datetimes(window_start, run_slots)
+    else:
+        candidates = [anchor_local]
+
     filtered: list[datetime] = []
     warnings: list[str] = []
     shifted_to_window = False
     blackout_skipped = False
     for candidate in candidates:
+        if not _date_matches_repeat(candidate, anchor_local, repeat, recurrence):
+            continue
         candidate, shifted = _shift_into_run_window(schedule, candidate, timezone_info)
         shifted_to_window = shifted_to_window or shifted
         if candidate < anchor_local:
@@ -1757,46 +2558,51 @@ def _calculate_new_contract_bundle(schedule: dict[str, Any], reference: Optional
         duration_seconds = int(schedule.get("duration_seconds") or 0)
         end_local = anchor_local + timedelta(seconds=duration_seconds)
         filtered = [item for item in filtered if item <= end_local]
+
     future = [item for item in filtered if item.astimezone(timezone.utc) >= local_reference.astimezone(timezone.utc)]
     if not future:
-        if period == "hourly":
-            next_reference = local_reference + timedelta(hours=1)
-        elif period == "daily":
-            next_reference = local_reference + timedelta(days=1)
-        elif period == "weekly":
-            next_reference = local_reference + timedelta(days=7)
-        else:
-            next_reference = local_reference + timedelta(days=32)
-            next_reference = next_reference.replace(day=1)
-        next_start, next_end = _period_window_bounds(period, next_reference)
-        next_window_seconds = max(1.0, (next_end - next_start).total_seconds())
-        next_candidates: list[datetime] = []
-        if runs_per_period <= 1:
-            anchor_window_start, _ = _period_window_bounds(period, anchor_local)
-            offset = max(0.0, (anchor_local - anchor_window_start).total_seconds())
-            next_candidates = [next_start + timedelta(seconds=min(offset, next_window_seconds - 1))]
-        else:
-            next_step = next_window_seconds / runs_per_period
-            for idx in range(runs_per_period):
-                next_candidates.append(next_start + timedelta(seconds=idx * next_step))
-        for candidate in next_candidates:
-            if candidate < anchor_local:
-                continue
-            if not _minutes_in_window(schedule, candidate):
-                continue
-            if candidate.date().isoformat() in set(schedule.get("blackout_dates") or []):
-                continue
-            if stop_rule == "end_at":
-                end_at = _parse_run_timestamp(schedule.get("end_at"))
-                if end_at and candidate > end_at.astimezone(timezone_info):
+        cursor = local_reference
+        for _ in range(65):
+            if period == "daily":
+                cursor = (cursor + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period == "weekly":
+                cursor = (cursor + timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+                cursor = cursor - timedelta(days=cursor.weekday())
+            else:
+                cursor = (cursor + timedelta(days=32)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if all_day:
+                next_candidates = [cursor]
+            elif run_slots:
+                if period == "daily":
+                    next_candidates = _daily_or_weekly_slot_datetimes(cursor, "daily", run_slots)
+                elif period == "weekly":
+                    next_candidates = _daily_or_weekly_slot_datetimes(cursor, "weekly", run_slots)
+                else:
+                    next_candidates = _monthly_slot_datetimes(cursor, run_slots)
+            else:
+                next_candidates = [cursor.replace(hour=anchor_local.hour, minute=anchor_local.minute, second=0, microsecond=0)]
+            for candidate in next_candidates:
+                if candidate < anchor_local:
                     continue
-            elif stop_rule == "duration":
-                duration_seconds = int(schedule.get("duration_seconds") or 0)
-                end_local = anchor_local + timedelta(seconds=duration_seconds)
-                if candidate > end_local:
+                if not _date_matches_repeat(candidate, anchor_local, repeat, recurrence):
                     continue
-            future.append(candidate)
-            break
+                if not _minutes_in_window(schedule, candidate):
+                    continue
+                if candidate.date().isoformat() in set(schedule.get("blackout_dates") or []):
+                    continue
+                if stop_rule == "end_at":
+                    end_at = _parse_run_timestamp(schedule.get("end_at"))
+                    if end_at and candidate > end_at.astimezone(timezone_info):
+                        continue
+                elif stop_rule == "duration":
+                    duration_seconds = int(schedule.get("duration_seconds") or 0)
+                    end_local = anchor_local + timedelta(seconds=duration_seconds)
+                    if candidate > end_local:
+                        continue
+                future.append(candidate)
+                break
+            if future:
+                break
     if len(filtered) < runs_per_period:
         warnings.append("Requested runs per period exceed feasible runs under current constraints.")
     next_run = future[0].astimezone(timezone.utc).isoformat() if future else None
@@ -1954,22 +2760,38 @@ def _schedule_fields_from_request(
 ) -> dict[str, Any]:
     _validate_schedule_request(request)
     steps = [_model_payload(step) for step in request.campaign_steps]
-    profile_id = int(request.profile_id) if request.profile_id is not None else None
-    if request.schedule_type == "campaign":
-        profile_id = None
-    else:
-        steps = []
+    # Campaign-first normalization: simple requests become one-step campaigns.
+    if request.schedule_type == "simple":
+        if request.profile_id is None:
+            raise HTTPException(status_code=400, detail="Simple schedules require a run profile.")
+        if not steps:
+            steps = [
+                {
+                    "profile_id": int(request.profile_id),
+                    "repeat_count": 1,
+                    "spacing_seconds": 0,
+                    "timeout_seconds": 900,
+                    "failure_policy": request.failure_policy,
+                    "execution_mode": "saved_profile",
+                }
+            ]
+    if not steps:
+        raise HTTPException(status_code=400, detail="Campaign schedules require at least one campaign step.")
     fields: dict[str, Any] = {
         "name": request.name.strip(),
         "description": request.description,
-        "schedule_type": request.schedule_type,
-        "profile_id": profile_id,
+        "schedule_type": "campaign",
+        "profile_id": None,
         "anchor_start_at": request.anchor_start_at,
         "period": request.period,
         "stop_rule": request.stop_rule,
         "end_at": request.end_at,
         "duration_seconds": request.duration_seconds,
-        "runs_per_period": request.runs_per_period,
+        "runs_per_period": max(1, int(request.runs_per_period or len(request.run_slots) or 1)),
+        "repeat": request.repeat,
+        "all_day": bool(request.all_day),
+        "recurrence_config": json.dumps(request.recurrence_config or {}),
+        "run_slots": json.dumps(request.run_slots or []),
         "cadence": request.cadence,
         "timezone": request.timezone.strip() or "UTC",
         "active_from": request.active_from,
@@ -1988,6 +2810,8 @@ def _schedule_fields_from_request(
             **fields,
             "blackout_dates": request.blackout_dates,
             "campaign_steps": steps,
+            "recurrence_config": request.recurrence_config or {},
+            "run_slots": request.run_slots or [],
         },
         _parse_run_timestamp(updated_at),
     )
@@ -2207,6 +3031,22 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
         raise HTTPException(status_code=409, detail=f"Schedule {schedule_id} is {schedule['status']}.")
     started_at = _utc_now()
     runs: list[dict[str, Any]] = []
+    _record_schedule_execution(
+        schedule_id,
+        None,
+        "queued",
+        {"message": "Schedule accepted and queued for launch."},
+        started_at,
+        None,
+    )
+    _record_schedule_execution(
+        schedule_id,
+        None,
+        "started",
+        {"message": "Schedule launch execution started."},
+        started_at,
+        None,
+    )
     try:
         if schedule["schedule_type"] == "campaign":
             for step_index, step in enumerate(schedule.get("campaign_steps") or [], start=1):
@@ -2239,6 +3079,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
         {
             "schedule_type": schedule["schedule_type"],
             "run_ids": [run["id"] for run in runs],
+            "message": "Run launch submitted successfully.",
         },
         started_at,
         finished_at,
@@ -3239,6 +4080,13 @@ configure_system_runtime(
     get_timezones_policy=lambda: _system_timezones_payload(),
     set_timezones_policy=lambda request: _set_system_timezones_policy(request),
 )
+configure_integrations_runtime(
+    list_mappings=lambda: _list_integration_mappings(),
+    upsert_mapping=lambda request, user_id: _upsert_integration_mapping(request, user_id),
+    delete_mapping=lambda mapping_id: _delete_integration_mapping(mapping_id),
+    list_triggers=lambda limit, offset: _list_integration_triggers(limit, offset),
+    process_github_deployment_webhook=lambda body, headers: _process_github_deployment_webhook(body, headers),
+)
 
 
 @app.middleware("http")
@@ -3284,3 +4132,4 @@ app.include_router(schedules_router)
 app.include_router(alerts_router)
 app.include_router(simulation_plans_router)
 app.include_router(system_router)
+app.include_router(integrations_router)

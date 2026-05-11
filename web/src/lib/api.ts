@@ -160,6 +160,7 @@ export type ScheduleType = "simple" | "campaign";
 export type ScheduleCadence = "hourly" | "daily" | "weekdays" | "weekly" | "monthly" | "custom";
 export type SchedulePeriod = "hourly" | "daily" | "weekly" | "monthly";
 export type ScheduleStopRule = "never" | "end_at" | "duration";
+export type ScheduleRepeatRule = "none" | "daily" | "weekly" | "monthly" | "annually" | "weekdays" | "custom";
 
 export type CampaignStep = {
   profile_id: number;
@@ -184,6 +185,10 @@ export type Schedule = {
   end_at: string | null;
   duration_seconds: number | null;
   runs_per_period: number;
+  repeat?: ScheduleRepeatRule | null;
+  all_day?: boolean;
+  recurrence_config?: Record<string, unknown>;
+  run_slots?: Record<string, unknown>[];
   cadence: ScheduleCadence;
   timezone: string;
   active_from: string | null;
@@ -218,6 +223,10 @@ export type ScheduleUpsertRequest = {
   end_at?: string;
   duration_seconds?: number;
   runs_per_period?: number;
+  repeat?: ScheduleRepeatRule;
+  all_day?: boolean;
+  recurrence_config?: Record<string, unknown>;
+  run_slots?: Record<string, unknown>[];
   cadence?: ScheduleCadence;
   timezone?: string;
   active_from?: string;

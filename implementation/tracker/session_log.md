@@ -2401,3 +2401,60 @@ python3 -m pip install fastapi apscheduler
 python3 -m unittest discover -s tests
 cd web && npm run build
 ```
+
+## 2026-05-08 22:19
+
+### Summary
+
+Implemented GitHub deployment webhook integration for cross-project simulation triggers. Added inbound webhook API, mapping/trigger persistence with idempotency, async profile launch routing by `(project, environment)`, and terminal run callback posting status to GitHub deployment statuses.
+
+### Files Created / Modified
+
+- `api/app/integrations/__init__.py`
+- `api/app/integrations/models.py`
+- `api/app/integrations/routes.py`
+- `api/app/integrations/service.py`
+- `api/app/main.py`
+- `.env.prod.example`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `docs/deployment.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+git status --short
+rg -n "configure_runtime|launch_profile|scheduler|include_router" api/app -S
+sed -n '1,3345p' api/app/main.py
+sed -n '1,260p' api/app/runs/models.py
+sed -n '40,130p' .env.prod.example
+sed -n '85,140p' README.md
+sed -n '940,1045p' SIMULATOR_GUIDE.md
+sed -n '1,220p' docs/deployment.md
+```
+
+### Results
+
+- New integration APIs added:
+  - `POST /api/v1/integrations/github/deployment-complete`
+  - `GET/POST/DELETE /api/v1/integrations/github/mappings`
+  - `GET /api/v1/integrations/github/triggers`
+- SQLite and PostgreSQL schema support added for integration mappings and trigger audit records.
+- Webhook processing now validates event type/state, repository allowlist, and HMAC signature; duplicate deliveries are deduped.
+- Triggered profile launches are async and linked to trigger rows.
+- Final run states now update trigger lifecycle and attempt GitHub deployment status callbacks.
+- Docs and `.env.prod.example` were updated to the new webhook model.
+
+### Issues / Blockers
+
+- Runtime verification of GitHub callback POST requires a valid `GITHUB_STATUS_TOKEN` and reachable GitHub API from deployment environment.
+- Existing worktree had unrelated dirty files before this session; untouched.
+
+### Next Steps
+
+1. Run backend tests covering integration webhook flow and DB migrations.
+2. Execute a manual webhook payload test (valid signature + mapping) and confirm queued -> launched -> completed/failed trigger transitions.
+3. Validate GitHub deployment status callback with real token and repository.

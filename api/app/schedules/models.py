@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -10,6 +10,7 @@ ScheduleStatus = Literal["active", "paused", "disabled", "deleted"]
 Cadence = Literal["hourly", "daily", "weekdays", "weekly", "monthly", "custom"]
 Period = Literal["hourly", "daily", "weekly", "monthly"]
 StopRule = Literal["never", "end_at", "duration"]
+RepeatRule = Literal["none", "daily", "weekly", "monthly", "annually", "weekdays", "custom"]
 FailurePolicy = Literal["continue", "stop"]
 ExecutionMode = Literal["saved_profile", "exact_snapshot"]
 
@@ -34,6 +35,10 @@ class ScheduleUpsertRequest(BaseModel):
     end_at: Optional[str] = None
     duration_seconds: Optional[int] = Field(default=None, ge=1)
     runs_per_period: int = Field(default=1, ge=1)
+    repeat: Optional[RepeatRule] = None
+    all_day: bool = False
+    recurrence_config: Optional[dict[str, Any]] = None
+    run_slots: List[dict[str, Any]] = Field(default_factory=list)
     cadence: Cadence = "daily"
     timezone: str = "UTC"
     active_from: Optional[str] = None

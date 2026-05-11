@@ -8,6 +8,8 @@ import tempfile
 import threading
 import time
 import unittest
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
@@ -624,8 +626,10 @@ class SchedulesApiTests(unittest.TestCase):
         schedule = create_response.json()["schedule"]
         schedule_id = schedule["id"]
         self.assertEqual(schedule["status"], "active")
-        self.assertEqual(schedule["profile_id"], profile_id)
-        self.assertEqual(schedule["schedule_type"], "simple")
+        self.assertIsNone(schedule["profile_id"])
+        self.assertEqual(schedule["schedule_type"], "campaign")
+        self.assertEqual(len(schedule["campaign_steps"]), 1)
+        self.assertEqual(int(schedule["campaign_steps"][0]["profile_id"]), profile_id)
         self.assertIsNotNone(schedule["next_run_at"])
         self.assertEqual(schedule["execution_mode_label"], "automatic")
         self.assertIn(schedule["next_run_reason"], {"computed", "shifted_to_window_start", "blackout_skipped"})
@@ -725,8 +729,10 @@ class SchedulesApiTests(unittest.TestCase):
                 "profile_id": profile_id,
                 "anchor_start_at": anchor.isoformat(),
                 "period": "daily",
+                "repeat": "daily",
                 "stop_rule": "never",
                 "runs_per_period": 1,
+                "run_slots": [{"time": "00:00"}],
                 "timezone": "UTC",
                 "run_window_start": run_window_start,
                 "run_window_end": run_window_end,
@@ -824,11 +830,14 @@ class SchedulesApiTests(unittest.TestCase):
                 "timezone": "UTC",
                 "anchor_start_at": future_anchor.isoformat(),
                 "period": "daily",
+                "repeat": "daily",
                 "stop_rule": "duration",
                 "duration_seconds": 18000,
                 "runs_per_period": 5,
                 "run_window_start": "08:00",
                 "run_window_end": "18:00",
+                "run_slots": [{"time": "09:00"}, {"time": "10:00"}, {"time": "11:00"}, {"time": "12:00"}, {"time": "13:00"}],
+                "campaign_steps": [{"profile_id": profile_id, "repeat_count": 1, "spacing_seconds": 0, "timeout_seconds": 900, "failure_policy": "continue", "execution_mode": "saved_profile"}],
             },
         )
         self.assertEqual(response.status_code, 200)
@@ -858,9 +867,11 @@ class SchedulesApiTests(unittest.TestCase):
                 "timezone": "UTC",
                 "anchor_start_at": anchor.isoformat(),
                 "period": "daily",
+                "repeat": "daily",
                 "stop_rule": "end_at",
                 "end_at": (anchor + timedelta(minutes=2)).isoformat(),
                 "runs_per_period": 1,
+                "all_day": True,
             },
         )
         self.assertEqual(create_response.status_code, 200)
@@ -1149,3 +1160,101 @@ class SimulationPlansApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 403)
         finally:
             viewer_client.close()
+
+
+class IntegrationsApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_auth = _FakeCookieAuthManager()
+        self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
+        self.auth_enabled_patch.start()
+        self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
+        self.auth_manager_patch.start()
+        self.client = TestClient(web_api.app)
+        login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
+        assert login.status_code == 200
+        self._old_allowlist = web_api.GITHUB_WEBHOOK_REPO_ALLOWLIST
+        self._old_secrets = web_api.GITHUB_WEBHOOK_PROJECT_SECRETS
+
+    def tearDown(self) -> None:
+        web_api.GITHUB_WEBHOOK_REPO_ALLOWLIST = self._old_allowlist
+        web_api.GITHUB_WEBHOOK_PROJECT_SECRETS = self._old_secrets
+        self.client.close()
+        self.auth_manager_patch.stop()
+        self.auth_enabled_patch.stop()
+
+    @staticmethod
+    def _signature(secret: str, body: bytes) -> str:
+        digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        return f"sha256={digest}"
+
+    def test_deployment_webhook_rejects_non_allowlisted_repository(self) -> None:
+        web_api.GITHUB_WEBHOOK_REPO_ALLOWLIST = {"backend": ["org/backend"]}
+        web_api.GITHUB_WEBHOOK_PROJECT_SECRETS = {"backend": "backend-secret"}
+        payload = {
+            "repository": {"full_name": "org/unknown"},
+            "deployment": {"id": 10, "environment": "production", "sha": "abc123"},
+            "deployment_status": {"id": 11, "state": "success"},
+        }
+        body = json.dumps(payload).encode("utf-8")
+        response = self.client.post(
+            "/api/v1/integrations/github/deployment-complete",
+            data=body,
+            headers={
+                "X-GitHub-Event": "deployment_status",
+                "X-Hub-Signature-256": self._signature("backend-secret", body),
+                "Content-Type": "application/json",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "rejected")
+        self.assertEqual(response.json()["reason"], "repository_not_allowlisted")
+
+    def test_deployment_webhook_queues_when_mapping_exists(self) -> None:
+        web_api.GITHUB_WEBHOOK_REPO_ALLOWLIST = {"backend": ["org/backend"]}
+        web_api.GITHUB_WEBHOOK_PROJECT_SECRETS = {"backend": "backend-secret"}
+
+        create_profile = self.client.post(
+            "/api/v1/run-profiles",
+            json={
+                "name": "Backend Prod",
+                "flow": "doctor",
+                "plan": "sim_actors.json",
+                "timing": "fast",
+            },
+        )
+        self.assertEqual(create_profile.status_code, 200)
+        profile_id = create_profile.json()["profile"]["id"]
+
+        mapping_response = self.client.post(
+            "/api/v1/integrations/github/mappings",
+            json={
+                "project": "backend",
+                "environment": "production",
+                "profile_id": profile_id,
+                "enabled": True,
+            },
+        )
+        self.assertEqual(mapping_response.status_code, 200)
+
+        payload = {
+            "repository": {"full_name": "org/backend"},
+            "deployment": {"id": 55, "environment": "production", "sha": "deadbeef"},
+            "deployment_status": {"id": 78, "state": "success"},
+        }
+        body = json.dumps(payload).encode("utf-8")
+        with mock.patch.object(web_api, "_enqueue_integration_profile_launch") as launch_mock:
+            response = self.client.post(
+                "/api/v1/integrations/github/deployment-complete",
+                data=body,
+                headers={
+                    "X-GitHub-Event": "deployment_status",
+                    "X-Hub-Signature-256": self._signature("backend-secret", body),
+                    "Content-Type": "application/json",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "queued")
+        self.assertTrue(payload["accepted"])
+        self.assertIsNotNone(payload["trigger_id"])
+        launch_mock.assert_called_once()

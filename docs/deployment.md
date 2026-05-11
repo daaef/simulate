@@ -2,7 +2,7 @@
 
 This deployment flow is for the Simulator service in this repository only (`nginx`, `web`, `api`, `postgres`).
 
-Post-deployment simulation automation is intentionally excluded from this CI/CD setup for now. This workflow does not launch run profiles and does not manage run-trigger scripts.
+Deployment workflow handles only this simulator stack. Cross-project simulation automation is provided by GitHub webhooks delivered to this simulator API after upstream deployments complete.
 
 ## 1) First-Time Host Setup
 
@@ -65,6 +65,24 @@ Set repository secrets:
    - `SIMULATOR_HOST_BIND=127.0.0.1`
    - `SIMULATOR_HOST_PORT=8090`
 4. Do not commit `.env.prod`.
+
+5. Configure GitHub webhook integration env values:
+   - `SIMULATOR_EXTERNAL_BASE_URL` (public HTTPS base URL, for example `https://simulator.example.com`)
+   - `GITHUB_WEBHOOK_PROJECT_SECRETS` JSON map:
+     ```json
+     {"backend":"<secret>","mobile":"<secret>","store":"<secret>","robot":"<secret>"}
+     ```
+   - `GITHUB_WEBHOOK_REPO_ALLOWLIST` JSON map:
+     ```json
+     {
+       "backend":["org/backend-repo"],
+       "mobile":["org/mobile-repo"],
+       "store":["org/store-repo"],
+       "robot":["org/robot-repo"]
+     }
+     ```
+   - `GITHUB_STATUS_TOKEN` (GitHub token with deployment status write permissions)
+   - Optional: `GITHUB_STATUS_API_BASE`, `GITHUB_STATUS_CONTEXT`
 
 ## 5) Production Compose Behavior
 
@@ -206,3 +224,43 @@ When migrating infra:
 4. Update DNS/reverse-proxy routing.
 5. Update GitHub secrets (`SIMULATOR_DEPLOY_HOST`, optional port/path).
 6. Trigger manual workflow dispatch for cutover.
+
+## 13) Cross-Project Deployment Webhook Setup
+
+Endpoint on simulator:
+
+- `POST https://<simulator-host>/api/v1/integrations/github/deployment-complete`
+
+Payload/event expectations:
+
+- GitHub webhook event must be `deployment_status`.
+- Simulator accepts only `deployment_status.state=success`.
+- Signature header must be present: `X-Hub-Signature-256`.
+
+Per upstream repository setup:
+
+1. In repo settings, add a webhook pointing to the endpoint above.
+2. Select `deployment_status` event.
+3. Set secret to the value configured for that project key in `GITHUB_WEBHOOK_PROJECT_SECRETS`.
+4. Ensure repository full name is present in `GITHUB_WEBHOOK_REPO_ALLOWLIST` under the right project.
+5. Ensure deployment workflow emits GitHub deployment + deployment status events.
+
+Simulator profile routing setup:
+
+1. Create saved run profiles in simulator (`Runs` page or `/api/v1/run-profiles`).
+2. Upsert mapping rows via:
+   - `POST /api/v1/integrations/github/mappings`
+   - body: `{"project":"backend","environment":"production","profile_id":12,"enabled":true}`
+3. Verify with `GET /api/v1/integrations/github/mappings`.
+
+Verification and troubleshooting:
+
+- Inspect trigger audit feed: `GET /api/v1/integrations/github/triggers`.
+- Common rejection reasons:
+  - `repository_not_allowlisted`
+  - `invalid_signature`
+  - `non_success_state`
+  - `mapping_not_found`
+  - `mapping_disabled`
+- End-to-end success path:
+  - upstream deployment completes -> webhook accepted and queued -> simulator run launched -> simulator posts final `simulator/verification` deployment status back to GitHub.

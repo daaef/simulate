@@ -6,7 +6,7 @@ Plan and sequence the redesign of the simulator web GUI into a production-grade 
 
 ## Current Status
 
-Completed (local `.env` cleaned; simulator behavior now comes from `sim_actors.json` / GUI plans)
+In progress (GitHub deployment webhook integration implemented; verification and follow-up hardening pending)
 
 ## Scope
 
@@ -87,4 +87,4 @@ Completed (local `.env` cleaned; simulator behavior now comes from `sim_actors.j
 
 ## Last Updated
 
-2026-05-06 21:19
+2026-05-08 22:19

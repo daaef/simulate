@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   ApiRequestError,
   createSchedule,
@@ -14,6 +15,7 @@ import {
   type RunProfile,
   type Schedule,
   type SchedulePeriod,
+  type ScheduleRepeatRule,
   type ScheduleStopRule,
   type ScheduleSummary,
   type ScheduleType,
@@ -21,7 +23,9 @@ import {
 } from "../../../lib/api";
 import { formatDateTime, formatTimeUntil, parseTimestamp } from "../../../lib/time-format";
 
-const periodOptions: SchedulePeriod[] = ["hourly", "daily", "weekly", "monthly"];
+const periodOptions: SchedulePeriod[] = ["daily", "weekly", "monthly"];
+const repeatOptions: ScheduleRepeatRule[] = ["none", "daily", "weekly", "monthly", "weekdays", "custom"];
+const weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
 function defaultScheduleTimezone(): string {
   try {
@@ -93,7 +97,7 @@ export default function SchedulesPage() {
   const [timezonePolicy, setTimezonePolicy] = useState<SystemTimezonesPolicy | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [scheduleType, setScheduleType] = useState<ScheduleType>("simple");
+  const [scheduleType] = useState<ScheduleType>("campaign");
   const [profileId, setProfileId] = useState("");
   const [period, setPeriod] = useState<SchedulePeriod>("daily");
   const [anchorStartAt, setAnchorStartAt] = useState("");
@@ -101,9 +105,15 @@ export default function SchedulesPage() {
   const [endAt, setEndAt] = useState("");
   const [durationHours, setDurationHours] = useState(5);
   const [runsPerPeriod, setRunsPerPeriod] = useState(1);
+  const [repeat, setRepeat] = useState<ScheduleRepeatRule>("daily");
+  const [allDay, setAllDay] = useState(false);
+  const [customWeekdays, setCustomWeekdays] = useState<string[]>(["monday", "wednesday", "friday"]);
   const [timezone, setTimezone] = useState(defaultScheduleTimezone);
-  const [runWindowStart, setRunWindowStart] = useState("");
-  const [runWindowEnd, setRunWindowEnd] = useState("");
+  const [dailyTimes, setDailyTimes] = useState<string[]>(["09:00"]);
+  const [weeklySlots, setWeeklySlots] = useState<Array<{ weekday: string; time: string }>>([{ weekday: "monday", time: "09:00" }]);
+  const [monthlyMode, setMonthlyMode] = useState<"day_of_month" | "weekday_ordinal">("day_of_month");
+  const [monthlyDaySlots, setMonthlyDaySlots] = useState<Array<{ day: number; time: string }>>([{ day: 1, time: "09:00" }]);
+  const [monthlyOrdinalSlots, setMonthlyOrdinalSlots] = useState<Array<{ ordinal: number; weekday: string; time: string }>>([{ ordinal: 1, weekday: "monday", time: "09:00" }]);
   const [blackoutDates, setBlackoutDates] = useState<string[]>([]);
   const [blackoutDateInput, setBlackoutDateInput] = useState("");
   const [campaignSteps, setCampaignSteps] = useState<CampaignStep[]>([]);
@@ -146,9 +156,7 @@ export default function SchedulesPage() {
       return { mode: "manual_only", nextRunAt: null as string | null, reason: "Set a valid Start At date and time." };
     }
     while (next.getTime() <= now.getTime()) {
-      if (period === "hourly") {
-        next = new Date(next.getTime() + 60 * 60 * 1000);
-      } else if (period === "daily") {
+      if (period === "daily") {
         next = new Date(next.getTime() + 24 * 60 * 60 * 1000);
       } else if (period === "weekly") {
         next = new Date(next.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -280,32 +288,56 @@ export default function SchedulesPage() {
       }
 
       const parsedProfileId = Number(profileId);
+      const derivedPeriod: SchedulePeriod = repeat === "weekly" ? "weekly" : repeat === "monthly" ? "monthly" : "daily";
+      setPeriod(derivedPeriod);
+      let parsedSlots: Record<string, unknown>[] = [];
+      if (!allDay) {
+        if (derivedPeriod === "daily") {
+          parsedSlots = dailyTimes.slice(0, Math.max(1, runsPerPeriod)).map((time) => ({ time }));
+        } else if (derivedPeriod === "weekly") {
+          parsedSlots = weeklySlots.slice(0, Math.max(1, runsPerPeriod)).map((slot) => ({ weekday: slot.weekday, time: slot.time }));
+        } else if (monthlyMode === "day_of_month") {
+          parsedSlots = monthlyDaySlots.slice(0, Math.max(1, runsPerPeriod)).map((slot) => ({ kind: "day_of_month", day: slot.day, time: slot.time }));
+        } else {
+          parsedSlots = monthlyOrdinalSlots.slice(0, Math.max(1, runsPerPeriod)).map((slot) => ({ kind: "weekday_ordinal", ordinal: slot.ordinal, weekday: slot.weekday, time: slot.time }));
+        }
+      }
+      const recurrenceConfig = repeat === "custom" ? { weekdays: customWeekdays } : {};
+      if (!campaignSteps.length) {
+        setError("Add at least one campaign step before creating the schedule.");
+        return;
+      }
       await createSchedule({
         name,
         description,
         schedule_type: scheduleType,
-        profile_id: scheduleType === "simple" && parsedProfileId ? parsedProfileId : undefined,
+        profile_id: parsedProfileId || undefined,
         anchor_start_at: toScheduleDateTime(anchorStartAt),
-        period,
+        period: derivedPeriod,
         stop_rule: stopRule,
         end_at: stopRule === "end_at" ? toScheduleDateTime(endAt) : undefined,
         duration_seconds: stopRule === "duration" ? Math.max(1, Math.round(durationHours * 3600)) : undefined,
         runs_per_period: Math.max(1, runsPerPeriod),
+        repeat,
+        all_day: allDay,
+        run_slots: parsedSlots,
+        recurrence_config: recurrenceConfig,
         cadence: period,
         timezone,
         active_from: undefined,
         active_until: undefined,
-        run_window_start: runWindowStart || undefined,
-        run_window_end: runWindowEnd || undefined,
+        run_window_start: undefined,
+        run_window_end: undefined,
         blackout_dates: blackoutDates,
         failure_policy: "continue",
-        campaign_steps: scheduleType === "campaign" ? campaignSteps : [],
+        campaign_steps: campaignSteps,
       });
       setName("");
       setDescription("");
       setAnchorStartAt("");
       setEndAt("");
       setRunsPerPeriod(1);
+      setDailyTimes(["09:00"]);
       setBlackoutDates([]);
       setBlackoutDateInput("");
       setCampaignSteps([]);
@@ -351,7 +383,7 @@ export default function SchedulesPage() {
           <span className="muted">
             {nextAutomaticSchedule
               ? `${nextAutomaticSchedule.name} - ${formatTimeUntil(nextAutomaticSchedule.next_run_at)}`
-              : "Create or resume an hourly, daily, weekday, weekly, or monthly schedule to see it here."}
+              : "Create or resume a daily, weekly, or monthly schedule to see it here."}
           </span>
         </div>
         {nextAutomaticSchedule ? (
@@ -376,22 +408,114 @@ export default function SchedulesPage() {
           <div className="grid three">
             <label className="grid">
               <span className="muted">Type</span>
-              <select value={scheduleType} onChange={(event) => setScheduleType(event.target.value as ScheduleType)}>
-                <option value="simple">Simple</option>
-                <option value="campaign">Campaign</option>
+              <input value="campaign" disabled />
+            </label>
+            <label className="grid">
+              <span className="muted">Repeat</span>
+              <select value={repeat} onChange={(event) => setRepeat(event.target.value as ScheduleRepeatRule)}>
+                {repeatOptions.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
             </label>
             <label className="grid">
-              <span className="muted">Period</span>
-              <select value={period} onChange={(event) => setPeriod(event.target.value as SchedulePeriod)}>
-                {periodOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-            </label>
-            <label className="grid">
-              <span className="muted">Runs Per Period</span>
+              <span className="muted">Runs</span>
               <input type="number" min={1} value={runsPerPeriod} onChange={(event) => setRunsPerPeriod(Math.max(1, Number(event.target.value) || 1))} />
             </label>
           </div>
+          <div className="grid">
+            <label className="grid">
+              <span className="muted">All Day</span>
+              <input type="checkbox" checked={allDay} onChange={(event) => setAllDay(event.target.checked)} />
+            </label>
+          </div>
+          {repeat === "custom" ? (
+            <div className="grid">
+              <span className="muted">Custom Weekdays</span>
+              <div className="grid three">
+                {weekdays.map((day) => (
+                  <label key={day}>
+                    <input
+                      type="checkbox"
+                      checked={customWeekdays.includes(day)}
+                      onChange={(event) => {
+                        setCustomWeekdays((current) =>
+                          event.target.checked ? Array.from(new Set([...current, day])) : current.filter((item) => item !== day),
+                        );
+                      }}
+                    />
+                    {day}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {!allDay ? (
+            <div className="grid">
+              <span className="muted">Run Time Slots</span>
+              {(repeat === "weekly" ? Array.from({ length: runsPerPeriod }).map((_, index) => (
+                <div className="grid two" key={`weekly-${index}`}>
+                  <select value={weeklySlots[index]?.weekday ?? "monday"} onChange={(event) => setWeeklySlots((current) => {
+                    const next = [...current];
+                    next[index] = { weekday: event.target.value, time: next[index]?.time ?? "09:00" };
+                    return next;
+                  })}>
+                    {weekdays.map((day) => <option key={day} value={day}>{day}</option>)}
+                  </select>
+                  <input type="time" value={weeklySlots[index]?.time ?? "09:00"} onChange={(event) => setWeeklySlots((current) => {
+                    const next = [...current];
+                    next[index] = { weekday: next[index]?.weekday ?? "monday", time: event.target.value };
+                    return next;
+                  })} />
+                </div>
+              )) : repeat === "monthly" ? (
+                <div className="grid">
+                  <select value={monthlyMode} onChange={(event) => setMonthlyMode(event.target.value as "day_of_month" | "weekday_ordinal")}>
+                    <option value="day_of_month">Day of month</option>
+                    <option value="weekday_ordinal">Weekday ordinal</option>
+                  </select>
+                  {monthlyMode === "day_of_month"
+                    ? Array.from({ length: runsPerPeriod }).map((_, index) => (
+                        <div className="grid two" key={`monthly-dom-${index}`}>
+                          <input type="number" min={1} max={31} value={monthlyDaySlots[index]?.day ?? 1} onChange={(event) => setMonthlyDaySlots((current) => {
+                            const next = [...current];
+                            next[index] = { day: Math.max(1, Math.min(31, Number(event.target.value) || 1)), time: next[index]?.time ?? "09:00" };
+                            return next;
+                          })} />
+                          <input type="time" value={monthlyDaySlots[index]?.time ?? "09:00"} onChange={(event) => setMonthlyDaySlots((current) => {
+                            const next = [...current];
+                            next[index] = { day: next[index]?.day ?? 1, time: event.target.value };
+                            return next;
+                          })} />
+                        </div>
+                      ))
+                    : Array.from({ length: runsPerPeriod }).map((_, index) => (
+                        <div className="grid three" key={`monthly-ord-${index}`}>
+                          <select value={String(monthlyOrdinalSlots[index]?.ordinal ?? 1)} onChange={(event) => setMonthlyOrdinalSlots((current) => {
+                            const next = [...current];
+                            next[index] = { ordinal: Number(event.target.value), weekday: next[index]?.weekday ?? "monday", time: next[index]?.time ?? "09:00" };
+                            return next;
+                          })}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}</select>
+                          <select value={monthlyOrdinalSlots[index]?.weekday ?? "monday"} onChange={(event) => setMonthlyOrdinalSlots((current) => {
+                            const next = [...current];
+                            next[index] = { ordinal: next[index]?.ordinal ?? 1, weekday: event.target.value, time: next[index]?.time ?? "09:00" };
+                            return next;
+                          })}>{weekdays.map((day) => <option key={day} value={day}>{day}</option>)}</select>
+                          <input type="time" value={monthlyOrdinalSlots[index]?.time ?? "09:00"} onChange={(event) => setMonthlyOrdinalSlots((current) => {
+                            const next = [...current];
+                            next[index] = { ordinal: next[index]?.ordinal ?? 1, weekday: next[index]?.weekday ?? "monday", time: event.target.value };
+                            return next;
+                          })} />
+                        </div>
+                      ))}
+                </div>
+              ) : Array.from({ length: runsPerPeriod }).map((_, index) => (
+                <input key={`daily-${index}`} type="time" value={dailyTimes[index] ?? "09:00"} onChange={(event) => setDailyTimes((current) => {
+                  const next = [...current];
+                  next[index] = event.target.value;
+                  return next;
+                })} />
+              )))}
+            </div>
+          ) : null}
           <div className="grid two">
             <label className="grid">
               <span className="muted">Start At</span>
@@ -429,16 +553,6 @@ export default function SchedulesPage() {
               ) : null}
             </div>
           </fieldset>
-          <div className="grid two">
-            <label className="grid">
-              <span className="muted">Window Start</span>
-              <input type="time" value={runWindowStart} onChange={(event) => setRunWindowStart(event.target.value)} />
-            </label>
-            <label className="grid">
-              <span className="muted">Window End</span>
-              <input type="time" value={runWindowEnd} onChange={(event) => setRunWindowEnd(event.target.value)} />
-            </label>
-          </div>
           <section className="panel" style={{ padding: "12px 14px" }}>
             <div className="grid">
               <span className="muted">Before Submit Preview</span>
@@ -449,7 +563,7 @@ export default function SchedulesPage() {
               <span className="muted">{schedulePreview.reason}</span>
             </div>
           </section>
-          <p className="form-help">Scheduling precedence is Start/Period, Stop Rule, Run Window, then Blackout Dates.</p>
+          <p className="form-help">Scheduling precedence is Start, Repeat, Stop Rule, then Blackout Dates.</p>
           <fieldset className="field-group">
             <legend>Blackout Dates</legend>
             <div className="grid two">
@@ -476,58 +590,55 @@ export default function SchedulesPage() {
             ) : null}
           </fieldset>
 
-          {scheduleType === "simple" ? (
+          <div className="grid">
             <label className="grid">
-              <span className="muted">Run Profile</span>
+              <span className="muted">Default Profile (for Add Step)</span>
               <select value={profileId} onChange={(event) => setProfileId(event.target.value)} required>
                 {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
               </select>
             </label>
-          ) : (
-            <div className="grid">
-              <div className="grid three">
-                <label className="grid">
-                  <span className="muted">Step Profile</span>
-                  <select value={stepProfileId} onChange={(event) => setStepProfileId(event.target.value)}>
-                    {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-                  </select>
-                </label>
-                <label className="grid">
-                  <span className="muted">Repeat</span>
-                  <input type="number" min={1} max={100} value={stepRepeatCount} onChange={(event) => setStepRepeatCount(Number(event.target.value))} />
-                </label>
-                <label className="grid">
-                  <span className="muted">Spacing Seconds</span>
-                  <input type="number" min={0} value={stepSpacingSeconds} onChange={(event) => setStepSpacingSeconds(Number(event.target.value))} />
-                </label>
-              </div>
-              <button className="secondary" type="button" onClick={addCampaignStep}>Add Campaign Step</button>
-              {campaignSteps.length ? (
-                <div className="responsive-table">
-                  <table>
-                    <thead>
-                      <tr><th>Step</th><th>Profile</th><th>Repeat</th><th>Spacing</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                      {campaignSteps.map((step, index) => (
-                        <tr key={`${step.profile_id}-${index}`}>
-                          <td>{index + 1}</td>
-                          <td>{profileById.get(step.profile_id)?.name ?? step.profile_id}</td>
-                          <td>{step.repeat_count}</td>
-                          <td>{step.spacing_seconds}s</td>
-                          <td>
-                            <button className="secondary small" type="button" onClick={() => setCampaignSteps((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
-                              Remove
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
+            <div className="grid three">
+              <label className="grid">
+                <span className="muted">Step Profile</span>
+                <select value={stepProfileId} onChange={(event) => setStepProfileId(event.target.value)}>
+                  {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                </select>
+              </label>
+              <label className="grid">
+                <span className="muted">Repeat</span>
+                <input type="number" min={1} max={100} value={stepRepeatCount} onChange={(event) => setStepRepeatCount(Number(event.target.value))} />
+              </label>
+              <label className="grid">
+                <span className="muted">Spacing Seconds</span>
+                <input type="number" min={0} value={stepSpacingSeconds} onChange={(event) => setStepSpacingSeconds(Number(event.target.value))} />
+              </label>
             </div>
-          )}
+            <button className="secondary" type="button" onClick={addCampaignStep}>Add Campaign Step</button>
+            {campaignSteps.length ? (
+              <div className="responsive-table">
+                <table>
+                  <thead>
+                    <tr><th>Step</th><th>Profile</th><th>Repeat</th><th>Spacing</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {campaignSteps.map((step, index) => (
+                      <tr key={`${step.profile_id}-${index}`}>
+                        <td>{index + 1}</td>
+                        <td>{profileById.get(step.profile_id)?.name ?? step.profile_id}</td>
+                        <td>{step.repeat_count}</td>
+                        <td>{step.spacing_seconds}s</td>
+                        <td>
+                          <button className="secondary small" type="button" onClick={() => setCampaignSteps((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
 
           <button disabled={busy || !profiles.length}>{busy ? "Working..." : "Create Schedule"}</button>
         </form>
@@ -544,14 +655,17 @@ export default function SchedulesPage() {
           {summary?.recent_executions.length ? (
             <div className="responsive-table">
               <table>
-                <thead><tr><th>Schedule</th><th>Status</th><th>Run</th><th>Started</th></tr></thead>
+                <thead><tr><th>Schedule</th><th>Status</th><th>Run</th><th>Started</th><th>Finished</th></tr></thead>
                 <tbody>
                   {summary.recent_executions.map((execution) => (
                     <tr key={execution.id}>
                       <td>{execution.schedule_id}</td>
                       <td><span className={`status-pill ${statusClass(execution.status)}`}>{execution.status}</span></td>
-                      <td>{execution.run_id ?? "--"}</td>
+                      <td>
+                        {execution.run_id ? <Link href={`/runs/${execution.run_id}`}>{execution.run_id}</Link> : "--"}
+                      </td>
                       <td>{formatDateTime(execution.started_at)}</td>
+                      <td>{execution.finished_at ? formatDateTime(execution.finished_at) : "--"}</td>
                     </tr>
                   ))}
                 </tbody>

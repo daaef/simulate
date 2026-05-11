@@ -551,7 +551,7 @@ The authenticated app shell highlights the active route, including nested run de
 | `/overview` | Run status, flow distribution, success/failure split, failure trend, archive/purge backlog, schedule health, alerts, and platform status. |
 | `/runs` | Launch, cancel, replay, delete completed runs, inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles. |
 | `/config` | Edit GUI-owned run plans under `runs/gui-plans/`. |
-| `/schedules` | Create profile-backed simple schedules and campaign schedules; configure active date/time ranges, run windows, blackout skip dates, and next automatic trigger visibility; active schedules run through the in-process scheduler and can also be manually triggered, paused, resumed, disabled, soft-deleted, and restored. |
+| `/schedules` | Create campaign-first schedules (simple requests are normalized to campaign steps); configure recurrence, period-specific run slots, all-day mode, run windows, blackout skip dates, and next automatic trigger visibility; active schedules run through the in-process scheduler and can also be manually triggered, paused, resumed, disabled, soft-deleted, and restored. |
 | `/archives` | Search archive candidates, raw-purge candidates, and retained run summaries. |
 | `/retention` | Inspect active/archive policy windows, archive/purge queues, retained summary fields, and purge-safety state. |
 | `/admin/users` | Create, edit, reset, deactivate, or delete users. |
@@ -564,12 +564,17 @@ Schedules use saved run profiles as their execution source. V1 keeps execution i
 Preferred contract for new/edited schedules:
 
 - `anchor_start_at`: first automated start timestamp.
-- `period`: `hourly` | `daily` | `weekly` | `monthly`.
+- `period`: `daily` | `weekly` | `monthly`.
+- `repeat`: `none` | `daily` | `weekly` | `monthly` | `annually` | `weekdays` | `custom`.
 - `stop_rule`: `never` | `end_at` | `duration`.
-- `runs_per_period`: desired run count per period window.
-- optional `run_window_start` / `run_window_end` and `blackout_dates`.
+- `all_day`: full-day mode without slot-time inputs.
+- `run_slots`: period-specific slots:
+  - daily: `[{ "time": "HH:MM" }]`
+  - weekly: `[{ "weekday": "monday", "time": "HH:MM" }]`
+  - monthly: mixed `day_of_month` and `weekday_ordinal` slot records.
+- optional `blackout_dates`.
 
-Legacy cadence/custom fields remain accepted for compatibility with existing schedules.
+Legacy cadence/custom fields remain accepted for compatibility with existing schedules that have not been edited.
 
 The scheduler computes `next_run_at` with this exact precedence:
 
@@ -583,14 +588,13 @@ The schedules page auto-refreshes schedule and execution state every 15 seconds 
 
 Scheduling procedure:
 
-1. Create or choose a saved run profile from `/runs`; schedules launch profiles, not ad hoc form state.
-2. Open `/schedules`, choose `simple` for one profile or `campaign` for ordered campaign steps, then set cadence and timezone.
-3. For `custom` cadence, set `custom_anchor_at` and `custom_every_n_days`; non-custom cadences must not send custom fields.
+1. Create or choose a saved run profile from `/runs`; schedules launch profiles through campaign steps.
+2. Open `/schedules`, configure period, repeat rule, timezone, and add at least one campaign step.
+3. For `custom` repeat, set `recurrence_config.weekdays` and `stop_rule=end_at`.
 4. Use `Active From` and `Active Until` to define optional automatic scheduling date-time bounds. Leave either side blank for no start or end boundary.
-5. Use `Window Start` and `Window End` to restrict allowed local time-of-day execution (leave blank for no window; the UI defaults to blank). If a candidate is outside window, it shifts to the next window start.
-6. Add blackout dates for full local calendar days when automatic triggers must not run. Manual `Trigger` still launches immediately.
-7. Save the schedule, then confirm the `Next Automatic Trigger` panel and table metadata.
-8. Use `Pause`, `Resume`, `Disable`, `Delete`, and `Restore` for lifecycle control. `pause`, `disable`, and `delete` clear `next_run_at`; `resume` and `restore` recalculate it.
+5. Add blackout dates for full local calendar days when automatic triggers must not run. Manual `Trigger` still launches immediately.
+6. Save the schedule, then confirm the `Next Automatic Trigger` panel and table metadata.
+7. Use `Pause`, `Resume`, `Disable`, `Delete`, and `Restore` for lifecycle control. `pause`, `disable`, and `delete` clear `next_run_at`; `resume` and `restore` recalculate it.
 
 Key endpoints:
 
@@ -607,33 +611,23 @@ POST /api/v1/schedules/<SCHEDULE_ID>/delete
 POST /api/v1/schedules/<SCHEDULE_ID>/restore
 ```
 
-Simple schedule payload:
+Campaign-first schedule payload:
 
 ```json
 {
   "name": "daily doctor",
   "schedule_type": "simple",
   "profile_id": 1,
-  "cadence": "daily",
+  "anchor_start_at": "2026-05-07T08:00:00+01:00",
+  "period": "daily",
+  "repeat": "daily",
+  "stop_rule": "never",
+  "all_day": false,
+  "run_slots": [{"time": "08:00"}, {"time": "12:00"}],
   "timezone": "UTC",
-  "active_from": "2026-05-07T08:00:00+01:00",
-  "active_until": "2026-05-31T18:00:00+01:00",
   "run_window_start": "08:00",
   "run_window_end": "18:00",
-  "blackout_dates": ["2026-12-25"]
-}
-```
-
-Campaign schedule payload:
-
-```json
-{
-  "name": "doctor campaign",
-  "schedule_type": "campaign",
-  "cadence": "custom",
-  "timezone": "UTC",
-  "custom_anchor_at": "2026-05-10T14:20:00+00:00",
-  "custom_every_n_days": 3,
+  "blackout_dates": ["2026-12-25"],
   "campaign_steps": [
     {
       "profile_id": 1,
@@ -652,41 +646,39 @@ Manual trigger launches runs immediately through the saved profile path and reco
 #### Field Reference and Validation
 
 - `name`: required, non-empty.
-- `schedule_type`: `simple` (single profile) or `campaign` (ordered steps).
-- `profile_id`: required for `simple`; forbidden/ignored for `campaign`.
-- `cadence`: `hourly`, `daily`, `weekdays`, `weekly`, `monthly`, `custom`.
+- `schedule_type`: `simple` and `campaign` inputs are both accepted; new/edited schedules persist as campaign execution.
+- `profile_id`: accepted for compatibility; when `schedule_type=simple`, it is converted to the first campaign step.
+- `period`: `daily`, `weekly`, `monthly`.
+- `repeat`: `none`, `daily`, `weekly`, `monthly`, `annually`, `weekdays`, `custom`.
+- `all_day`: boolean.
+- `run_slots`: required when `all_day=false`; slot shape must match period.
 - `timezone`: required IANA timezone; constrained by optional system allowlist.
 - `active_from` / `active_until`: optional ISO date-times; `active_until` must be later than `active_from`.
-- `run_window_start` / `run_window_end`: optional `HH:MM` 24-hour times; window can cross midnight.
 - `blackout_dates`: optional list of `YYYY-MM-DD` local dates to skip.
-- `custom_anchor_at`: required only when `cadence=custom`; forbidden otherwise.
-- `custom_every_n_days`: required only when `cadence=custom`; integer `>= 1`; forbidden otherwise.
+- `recurrence_config.weekdays`: required when `repeat=custom`; valid weekday names; `stop_rule` must be `end_at`.
 
 #### Cadence Behaviors and Required Data
 
-| Cadence | Required Additional Data | Effective Behavior |
+| Repeat Rule | Required Additional Data | Effective Behavior |
 | --- | --- | --- |
-| `hourly` | none | next hour at anchor minute, then window/blackout/range rules |
-| `daily` | none | once daily at anchor time |
-| `weekdays` | none | once Mon-Fri at anchor time |
-| `weekly` | none | once weekly on anchor weekday/time |
-| `monthly` | none | once monthly on anchor day/time (short month clamps to last day) |
-| `custom` | `custom_anchor_at`, `custom_every_n_days` | every N days from anchor datetime |
+| `none` | none | one-off schedule date at anchor window |
+| `daily` | daily slot times | slot times every day |
+| `weekdays` | daily slot times | slot times Mon-Fri |
+| `weekly` | weekly slots (`weekday` + `time`) | selected weekday/time runs each week |
+| `monthly` | monthly slots (`day_of_month` / `weekday_ordinal`) | selected monthly patterns with times |
+| `annually` | slots + anchor month/day | same month/day each year |
+| `custom` | `recurrence_config.weekdays`, `stop_rule=end_at` | selected weekdays with end date |
 
 #### Worked Examples
 
-1. Hourly
-`window=08:00-18:00`, `active_from=2026-05-07T00:00:00+01:00`, `active_until=2026-05-31T23:59:00+01:00` -> one run per hour during local window only.
-2. Daily
-Anchor time `10:30`, same window/range -> one run each day at local `10:30` while in range.
-3. Weekdays
-Anchor `10:30` -> Mon-Fri only.
-4. Weekly
-Anchor `2026-05-07T10:30:00+01:00` -> every 7 days at same local time.
-5. Monthly
-Anchor day 31 -> in shorter months runs on last day.
-6. Custom
-`custom_anchor_at=2026-05-10T14:20:00+01:00`, `custom_every_n_days=3` -> 10th, 13th, 16th... at local `14:20`, with window/range/blackout enforcement.
+1. Daily with two runs
+`period=daily`, `repeat=daily`, `run_slots=[{"time":"08:00"},{"time":"14:00"}]` -> two local-time runs each day.
+2. Weekly mixed days
+`period=weekly`, `repeat=weekly`, `run_slots=[{"weekday":"monday","time":"09:00"},{"weekday":"thursday","time":"16:00"}]` -> runs every Monday and Thursday at configured times.
+3. Monthly mixed patterns
+`period=monthly`, `repeat=monthly`, `run_slots=[{"kind":"day_of_month","day":5,"time":"08:00"},{"kind":"weekday_ordinal","ordinal":2,"weekday":"tuesday","time":"11:00"}]` -> 5th day and 2nd Tuesday monthly.
+4. Custom weekdays
+`repeat=custom`, `recurrence_config.weekdays=["monday","wednesday","friday"]`, `stop_rule=end_at` -> selected weekdays only until end date.
 
 #### Explainability Fields (`GET/POST/PUT /api/v1/schedules*`)
 
@@ -702,8 +694,6 @@ Anchor day 31 -> in shorter months runs on last day.
 
 #### Edge Cases
 
-- Overnight window (`22:00` to `04:00`) is treated as crossing midnight; in-window checks include late night and early morning.
-- If candidate time falls outside window, scheduler shifts to next window start.
 - If candidate date is a blackout date, scheduler advances to next eligible date.
 - If active range end is reached, `next_run_at` becomes null with `outside_active_range`.
 - DST shifts are handled through schedule timezone conversion and UTC persistence.
@@ -711,10 +701,19 @@ Anchor day 31 -> in shorter months runs on last day.
 #### Troubleshooting by `next_run_reason`
 
 - `computed`: schedule is healthy; verify business expectations only.
-- `shifted_to_window_start`: widen or move window, or change cadence anchor/custom anchor.
 - `blackout_skipped`: remove/adjust blackout dates if run should happen sooner.
 - `outside_active_range`: extend `active_until` or clear end bound.
 - `no_future_run`: fix cadence inputs (especially custom fields), then save schedule again.
+
+#### Recent Executions Statuses
+
+Recent Executions in `/schedules` surfaces lifecycle status per trigger:
+- `queued`: accepted by scheduler and queued.
+- `started`: trigger execution began.
+- `launched`: run creation submitted with `run_id`.
+- `failed`: launch failed before completion.
+
+`run_id` is clickable and opens the corresponding run detail page.
 
 ### System Settings: Allowed Timezones
 
@@ -966,7 +965,7 @@ Then sign in as `admin` with the temporary password and immediately reset it thr
 
 ## Production Deployment Operations
 
-Production deployment for this repository is intentionally limited to deploying the Simulator service stack itself (`nginx`, `web`, `api`, `postgres`) and excludes post-deployment simulation automation.
+Production deployment for this repository deploys the Simulator service stack (`nginx`, `web`, `api`, `postgres`) and supports GitHub deployment webhook-triggered simulation runs across other repositories.
 
 - Workflow: `.github/workflows/deploy.yml`
 - Compose file: `docker-compose.prod.yml`
@@ -974,5 +973,25 @@ Production deployment for this repository is intentionally limited to deploying 
 - Trigger: push to `main` or manual workflow dispatch
 
 Deployment is idempotent (`git fetch` + `git checkout main` + `git reset --hard origin/main`), does not delete volumes, and fails if health check (`/healthz`) fails.
+
+GitHub deployment webhook automation:
+
+- Inbound endpoint: `POST /api/v1/integrations/github/deployment-complete`.
+- Required event: `deployment_status` with `state=success`; other states/events are rejected.
+- Security: HMAC verification via `X-Hub-Signature-256` using project-specific secrets from `GITHUB_WEBHOOK_PROJECT_SECRETS`.
+- Repository guardrail: repository must match `GITHUB_WEBHOOK_REPO_ALLOWLIST` for one configured project.
+- Profile routing: simulator maps `(project, environment)` to a saved run profile through `integration_profile_mappings`.
+- Idempotency key: `project + environment + deployment_id + sha`; duplicate webhook deliveries do not launch duplicate runs.
+- Lifecycle states recorded per trigger: `validated`, `queued`, `launched`, `completed`/`failed`, `rejected`, `duplicate`.
+- Callback: when run reaches terminal state, simulator posts deployment status back to GitHub with context `simulator/verification` using `GITHUB_STATUS_TOKEN`.
+
+Operational APIs:
+
+- `GET /api/v1/integrations/github/mappings` (view mapping rows)
+- `POST /api/v1/integrations/github/mappings` (upsert `{project, environment, profile_id, enabled}`)
+- `DELETE /api/v1/integrations/github/mappings/{mapping_id}`
+- `GET /api/v1/integrations/github/triggers` (audit and debugging feed)
+
+To identify webhook-triggered runs in the GUI, open `Runs` and correlate run creation time with integration trigger timestamps from `GET /api/v1/integrations/github/triggers`.
 
 Use `docs/deployment.md` as the full production runbook for first-time host setup, GitHub secrets, backup/restore, rollback, logs, troubleshooting, and security hardening.

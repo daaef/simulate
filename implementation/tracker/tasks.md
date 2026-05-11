@@ -258,6 +258,37 @@ Run `python3 -m simulate full --plan sim_actors.json --timing fast` to confirm t
 - [x] Fix missing report/story/events data for completed runs
   - Dependency: Phase 15 monitoring UI.
   - Notes: Artifact parser now handles wrapped multiline `main: events/report/story` output and backfills empty artifact fields from stored run logs.
+
+### Phase 16: GitHub Deployment Webhook Integration
+
+- [x] Add inbound GitHub deployment webhook endpoint and validation
+  - Dependency: Existing API runtime wiring.
+  - Notes: Added `POST /api/v1/integrations/github/deployment-complete`, `deployment_status` success gating, repository allowlist checks, and HMAC signature validation.
+  - Completion evidence: `api/app/integrations/routes.py`, `api/app/main.py` integration webhook processing path.
+
+- [x] Add integration mapping + trigger persistence with idempotency
+  - Dependency: Endpoint validation path.
+  - Notes: Added `integration_profile_mappings` and `integration_triggers` tables for SQLite/PostgreSQL with dedupe key `project:environment:deployment_id:sha`.
+  - Completion evidence: `api/app/main.py` schema init/migration + trigger create/update/list logic.
+
+- [x] Add async profile launch and terminal-status GitHub callback
+  - Dependency: Trigger persistence.
+  - Notes: Queued launches resolve profile from `(project, environment)` mapping; terminal run state updates integration trigger and posts GitHub deployment status (`simulator/verification`).
+  - Completion evidence: `api/app/main.py` integration launch worker + `_handle_integration_run_terminal_status`.
+
+- [x] Add integration admin APIs
+  - Dependency: Mapping persistence.
+  - Notes: Added list/upsert/delete mapping endpoints and trigger listing endpoints secured via `system` permissions.
+  - Completion evidence: `api/app/integrations/service.py`, `api/app/integrations/routes.py`, runtime registration in `api/app/main.py`.
+
+- [x] Update deployment and operator docs for webhook flow
+  - Dependency: Implemented behavior.
+  - Notes: Replaced post-deploy script references with webhook setup and env model.
+  - Completion evidence: `README.md`, `SIMULATOR_GUIDE.md`, `docs/deployment.md`, `.env.prod.example`.
+
+## Next Immediate Task
+
+Run API tests and a webhook dry-run payload against `POST /api/v1/integrations/github/deployment-complete`, then verify trigger lifecycle transitions and GitHub callback behavior with a valid token.
   - Completion evidence: `api/app/main.py` (`_capture_artifacts_from_lines`, `_hydrate_run_artifacts`), and container verification shows runs #1/#2 now have populated artifact paths.
 
 - [x] Render report/story as markdown and present events as API-doc style
