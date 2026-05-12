@@ -39,7 +39,7 @@ def _json_env(name: str, default: Any) -> Any:
 
 
 def _github_project_secrets() -> dict[str, str]:
-    payload = _json_env("GITHUB_WEBHOOK_PROJECT_SECRETS", {})
+    payload = _json_env("SIMULATOR_WEBHOOK_PROJECT_SECRETS", {})
     if not isinstance(payload, dict):
         return {}
 
@@ -51,7 +51,7 @@ def _github_project_secrets() -> dict[str, str]:
 
 
 def _github_repo_allowlist() -> dict[str, list[str]]:
-    payload = _json_env("GITHUB_WEBHOOK_REPO_ALLOWLIST", {})
+    payload = _json_env("SIMULATOR_WEBHOOK_REPO_ALLOWLIST", {})
     if isinstance(payload, list):
         return {"default": [str(item) for item in payload]}
 
