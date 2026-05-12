@@ -169,6 +169,13 @@ h1, h2 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.actor-card-meta, .latest-run-meta-grid, .protocol-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    grid-gap: 10px;
+    gap: 10px;
+}
+
 @media (max-width: 1024px) {
   .grid.four {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1147,7 +1154,7 @@ pre.log {
 .protocol-metrics,
 .actor-card-meta {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   gap: 10px;
 }
 

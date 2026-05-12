@@ -114,3 +114,40 @@ def catalogue_payload() -> dict[str, Any]:
             ),
         },
     }
+
+def store_is_open(store: dict[str, Any]) -> bool:
+    return store.get("status") == 1 or store.get("status") == "open"
+
+
+def menu_has_usable_price(menu: dict[str, Any]) -> bool:
+    price = menu.get("discount_price") or menu.get("price")
+    try:
+        return float(price) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def menu_is_user_addable(menu: dict[str, Any], *, store: dict[str, Any]) -> bool:
+    return (
+        isinstance(menu, dict)
+        and bool(menu.get("id"))
+        and menu.get("status") == MENU_AVAILABLE
+        and menu_has_usable_price(menu)
+        and store_is_open(store)
+    )
+
+
+def menu_action_block_reason(menu: dict[str, Any], *, store: dict[str, Any]) -> str | None:
+    if menu_is_user_addable(menu, store=store):
+        return None
+    if not store_is_open(store):
+        return "store_closed"
+    if menu.get("status") in {MENU_UNAVAILABLE, MENU_SOLD_OUT}:
+        return "item_sold_out_or_unavailable"
+    if menu.get("status") in LEGACY_AVAILABLE_STATUSES:
+        return "legacy_status_not_user_addable"
+    if not menu.get("id"):
+        return "missing_menu_id"
+    if not menu_has_usable_price(menu):
+        return "missing_or_invalid_price"
+    return "unknown_menu_status"

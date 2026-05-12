@@ -25,7 +25,12 @@ import websockets
 from rich.console import Console
 
 import config
-from interaction_catalog import LEGACY_AVAILABLE_STATUSES, MENU_AVAILABLE
+from interaction_catalog import (
+    LEGACY_AVAILABLE_STATUSES,
+    MENU_AVAILABLE,
+    menu_action_block_reason,
+    menu_is_user_addable,
+)
 import stripe_sim
 from reporting import RunRecorder
 from transport import RequestError, api_data, build_auth_proof, request_json
@@ -506,12 +511,81 @@ def _line_price(menu: dict[str, Any]) -> float:
         return price
     raise RuntimeError(f"Menu item has no usable price: {menu}")
 
+def _user_addable_menu_items(
+    menu_items: list[dict[str, Any]],
+    *,
+    store: dict[str, Any],
+    recorder: RunRecorder | None = None,
+    scenario: str | None = None,
+    step: str = "vet_menu_items",
+) -> list[dict[str, Any]]:
+    usable: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
 
-def _real_cart_selection(menu_items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], float]:
-    count = random.randint(1, min(4, len(menu_items)))
-    chosen = random.sample(menu_items, count)
+    for item in menu_items:
+        if not isinstance(item, dict):
+            continue
+
+        reason = menu_action_block_reason(item, store=store)
+        if reason is None:
+            usable.append(item)
+        else:
+            blocked.append(
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "status": item.get("status"),
+                    "price": item.get("price"),
+                    "discount_price": item.get("discount_price"),
+                    "reason": reason,
+                }
+            )
+
+    if recorder is not None:
+        recorder.record_event(
+            actor="user",
+            action="vet_menu_items_before_cart",
+            category="ui_gate",
+            scenario=scenario,
+            step=step,
+            details={
+                "store_id": store.get("id"),
+                "store_status": store.get("status"),
+                "usable_count": len(usable),
+                "blocked_count": len(blocked),
+                "blocked_preview": blocked[:20],
+            },
+            track_order=False,
+        )
+
+    return usable
+
+def _real_cart_selection(
+    menu_items: list[dict[str, Any]],
+    *,
+    store: dict[str, Any],
+    recorder: RunRecorder | None = None,
+    scenario: str | None = None,
+) -> tuple[list[dict[str, Any]], float]:
+    vetted = _user_addable_menu_items(
+        menu_items,
+        store=store,
+        recorder=recorder,
+        scenario=scenario,
+        step="select_cart_items",
+    )
+
+    if not vetted:
+        raise RuntimeError(
+            "No user-addable menu items available. The user app cannot add sold_out, "
+            "unavailable, legacy-status, closed-store, missing-id, or invalid-price items to cart."
+        )
+
+    count = random.randint(1, min(4, len(vetted)))
+    chosen = random.sample(vetted, count)
     items = []
     total = 0.0
+
     for menu in chosen:
         qty = random.randint(1, 3)
         price = _line_price(menu)
@@ -527,8 +601,62 @@ def _real_cart_selection(menu_items: list[dict[str, Any]]) -> tuple[list[dict[st
                 "sides": [],
             }
         )
+
     return items, round(total, 2)
 
+def _require_non_empty(value: Any, *, name: str) -> None:
+    if value is None:
+        raise RuntimeError(f"{name} is required before making this request.")
+    if isinstance(value, str) and not value.strip():
+        raise RuntimeError(f"{name} is required before making this request.")
+    if isinstance(value, (list, dict)) and not value:
+        raise RuntimeError(f"{name} is required before making this request.")
+
+
+def _validate_order_request_context(
+    *,
+    user_token: str,
+    token_source: str,
+    fixtures: UserFixtures,
+    payload: dict[str, Any],
+) -> None:
+    _require_non_empty(user_token, name="user_token")
+    _require_non_empty(token_source, name="token_source")
+    _require_non_empty(fixtures.user_id, name="fixtures.user_id")
+    _require_non_empty(fixtures.store, name="fixtures.store")
+    _require_non_empty(fixtures.location, name="fixtures.location")
+    _require_non_empty(payload.get("order_id"), name="payload.order_id")
+    _require_non_empty(payload.get("restaurant"), name="payload.restaurant")
+    _require_non_empty(payload.get("location"), name="payload.location")
+    _require_non_empty(payload.get("menu"), name="payload.menu")
+
+    store_id = fixtures.store.get("id")
+    location_id = fixtures.location.get("id")
+    _require_non_empty(store_id, name="fixtures.store.id")
+    _require_non_empty(location_id, name="fixtures.location.id")
+
+    total_price = payload.get("total_price")
+    try:
+        if float(total_price) <= 0:
+            raise RuntimeError("payload.total_price must be greater than 0 before placing an order.")
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("payload.total_price must be numeric before placing an order.") from exc
+
+    for index, item in enumerate(payload["menu"]):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"payload.menu[{index}] must be an object.")
+        _require_non_empty(item.get("menuId"), name=f"payload.menu[{index}].menuId")
+        _require_non_empty(item.get("quantity"), name=f"payload.menu[{index}].quantity")
+        _require_non_empty(item.get("price"), name=f"payload.menu[{index}].price")
+
+        menu = item.get("menu")
+        if not isinstance(menu, dict):
+            raise RuntimeError(f"payload.menu[{index}].menu must be an object.")
+
+        if menu.get("status") != MENU_AVAILABLE:
+            raise RuntimeError(
+                f"payload.menu[{index}] cannot be ordered because status={menu.get('status')!r}."
+            )
 
 def _random_order_id() -> str:
     digits = "".join(random.choices(string.digits, k=6))
@@ -633,6 +761,8 @@ async def bootstrap_fixtures(
             "delivery location from /v1/entities/locations/<lng>/<lat>/."
         )
 
+    store = _normalise_store(subentity or {"id": effective_subentity_id})
+
     menu_data = await _seed_get_json(
         client,
         f"{config.FAINZY_BASE_URL}/v1/core/subentities/{effective_subentity_id}/menu",
@@ -646,14 +776,12 @@ async def bootstrap_fixtures(
     if not isinstance(menu_data, list):
         raise RuntimeError(f"Menu response had an invalid shape: {menu_data}")
 
-    usable_menu = [
-        item
-        for item in menu_data
-        if isinstance(item, dict)
-        and item.get("id")
-        and item.get("status") == MENU_AVAILABLE
-        and _as_float(item.get("price")) is not None
-    ]
+    usable_menu = _user_addable_menu_items(
+        [item for item in menu_data if isinstance(item, dict)],
+        store=store,
+        recorder=recorder,
+        step="load_store_menu",
+    )
     legacy_available = [
         item.get("id")
         for item in menu_data
@@ -761,7 +889,6 @@ async def bootstrap_fixtures(
             track_order=False,
         )
 
-    store = _normalise_store(subentity or {"id": effective_subentity_id})
     currency = str(store.get("currency") or config.STORE_CURRENCY).lower()
     config.STORE_CURRENCY = currency
 
@@ -904,6 +1031,7 @@ async def _discover_and_build_fixtures(
 
         chosen_store = random.choice(reachable)
         chosen_id = chosen_store.get("id")
+        normalized_store = _normalise_store(chosen_store)
 
         console.print(
             f"[green]user[{worker_id}]:[/] Discovered {len(open_stores)} open store(s) "
@@ -928,14 +1056,12 @@ async def _discover_and_build_fixtures(
             )
             continue
 
-        usable_menu = [
-            item
-            for item in menu_data
-            if isinstance(item, dict)
-            and item.get("id")
-            and item.get("status") == MENU_AVAILABLE
-            and _as_float(item.get("price")) is not None
-        ]
+        usable_menu = _user_addable_menu_items(
+            [item for item in menu_data if isinstance(item, dict)],
+            store=normalized_store,
+            recorder=recorder,
+            step="load_store_menu",
+        )
         legacy_available = [
             item.get("id")
             for item in menu_data
@@ -978,8 +1104,18 @@ async def _discover_and_build_fixtures(
     return None
 
 
-def generate_order_payload(fixtures: UserFixtures) -> dict[str, Any]:
-    menu_items, total_price = _real_cart_selection(fixtures.menu_items)
+def generate_order_payload(
+    fixtures: UserFixtures,
+    *,
+    recorder: RunRecorder | None = None,
+    scenario: str | None = None,
+) -> dict[str, Any]:
+    menu_items, total_price = _real_cart_selection(
+        fixtures.menu_items,
+        store=fixtures.store,
+        recorder=recorder,
+        scenario=scenario,
+    )
 
     return {
         "order_id": _random_order_id(),
@@ -1136,7 +1272,17 @@ async def place_order(
     scenario: str = "load",
     step: str = "place_order",
 ) -> dict[str, Any] | None:
-    payload = generate_order_payload(fixtures)
+    payload = generate_order_payload(
+        fixtures,
+        recorder=recorder,
+        scenario=scenario,
+    )   
+    _validate_order_request_context(
+        user_token=user_token,
+        token_source=token_source,
+        fixtures=fixtures,
+        payload=payload,
+    )
     order_ref = payload["order_id"]
     order_total = payload["total_price"]
 
