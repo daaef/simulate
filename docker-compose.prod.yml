@@ -55,6 +55,7 @@ services:
       SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT: ${SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT:-production}
       SIMULATOR_GITHUB_STATUS_CONTEXT: ${SIMULATOR_GITHUB_STATUS_CONTEXT:-simulator/verification}
       SIMULATOR_GITHUB_STATUS_TOKEN: ${SIMULATOR_GITHUB_STATUS_TOKEN:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
     volumes:
       - simulator_runs_data:/workspace/simulate/runs
       - simulator_gui_plans_data:/workspace/simulate/runs/gui-plans
