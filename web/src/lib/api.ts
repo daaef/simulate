@@ -283,6 +283,78 @@ export type RunMetrics = {
   top_actions: Record<string, number>;
 };
 
+export type ActorSummary = {
+  key: "user" | "store" | "robot" | string;
+  label: string;
+  identity: Record<string, unknown>;
+  events: number;
+  failed_events: number;
+  latest_action?: string | null;
+  latest_status?: string | null;
+  latest_at?: string | null;
+};
+
+export type HttpProtocolSummary = {
+  total: number;
+  failed: number;
+  success: number;
+  avg_latency_ms?: number | null;
+  status_groups: Record<string, number>;
+  slowest?: {
+    endpoint: string;
+    method?: string | null;
+    status?: string | number | null;
+    latency_ms?: number | null;
+  } | null;
+  top_endpoints: Array<{ endpoint: string; count: number }>;
+  top_failed_endpoints: Array<{ endpoint: string; count: number }>;
+};
+
+export type WebSocketProtocolSummary = {
+  total: number;
+  expected: number;
+  matched: number;
+  missed: number;
+  sources: Array<{ source: string; count: number }>;
+  latest?: {
+    at?: string | null;
+    action?: string | null;
+    status?: string | null;
+    message?: string | null;
+  } | null;
+};
+
+export type LifecycleStep = {
+  at?: string | null;
+  actor: string;
+  label: string;
+  status?: string | number | null;
+  ok: boolean;
+  endpoint?: string | null;
+  latency_ms?: number | null;
+};
+
+export type LatestRunIssue = {
+  severity: string;
+  code: string;
+  message: string;
+  actor?: string | null;
+  at?: string | null;
+};
+
+export type LatestRunOverview = {
+  run: (RunRow & { duration_seconds?: number | null }) | null;
+  metrics: RunMetrics | null;
+  actors: Record<string, ActorSummary>;
+  protocols: {
+    http: Partial<HttpProtocolSummary>;
+    websocket: Partial<WebSocketProtocolSummary>;
+  };
+  lifecycle: LifecycleStep[];
+  issues: LatestRunIssue[];
+  run_meta?: Record<string, unknown>;
+};
+
 export type RunArtifactResponse<T> = {
   run_id: number;
   kind: "report" | "story" | "events";
@@ -483,6 +555,13 @@ export async function fetchRunsCount(): Promise<number> {
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   return unwrap<DashboardSummary>(await fetch("/api/v1/dashboard/summary", withSession()), "dashboard-summary");
+}
+
+export async function fetchLatestRunOverview(): Promise<LatestRunOverview> {
+  return unwrap<LatestRunOverview>(
+    await fetch("/api/v1/overview/latest-run", withSession()),
+    "latest-run-overview"
+  );
 }
 
 export async function fetchArchiveSummary(): Promise<ArchiveSummary> {

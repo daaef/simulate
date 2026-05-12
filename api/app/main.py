@@ -63,6 +63,7 @@ from .runs.routes import (
     cancel_run,
     delete_run,
 )
+from .overview.routes import router as overview_router
 from .runs.service import configure_runtime as configure_runs_runtime
 
 # Database configuration
@@ -4134,3 +4135,4 @@ app.include_router(alerts_router)
 app.include_router(simulation_plans_router)
 app.include_router(system_router)
 app.include_router(integrations_router)
+app.include_router(overview_router)

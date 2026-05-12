@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { DistributionDonut } from "../../../components/charts/DistributionDonut";
 import { HorizontalBarChart } from "../../../components/charts/HorizontalBarChart";
 import { Sparkline } from "../../../components/charts/Sparkline";
+import LatestRunCommandCenter from "../../../components/overview/LatestRunCommandCenter";
+
 import {
   ApiRequestError,
   fetchAlerts,
@@ -14,6 +16,8 @@ import {
   fetchRetentionSummary,
   fetchRuns,
   fetchScheduleSummary,
+  fetchLatestRunOverview,
+  type LatestRunOverview,
   type AlertItem,
   type ArchiveSummary,
   type DashboardSummary,
@@ -65,21 +69,31 @@ export default function OverviewPage() {
   const [recentRuns, setRecentRuns] = useState<RunRow[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [latestRunOverview, setLatestRunOverview] = useState<LatestRunOverview | null>(null);
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       try {
-        const [summaryPayload, healthPayload, archivePayload, retentionPayload, schedulePayload, alertsPayload, runsPayload] =
-          await Promise.all([
-            fetchDashboardSummary(),
-            fetchHealth(),
-            fetchArchiveSummary(),
-            fetchRetentionSummary(),
-            fetchScheduleSummary(),
-            fetchAlerts(),
-            fetchRuns(50, 0),
-          ]);
+        const [
+          summaryPayload,
+          healthPayload,
+          archivePayload,
+          retentionPayload,
+          schedulePayload,
+          alertsPayload,
+          runsPayload,
+          latestRunPayload,
+        ] = await Promise.all([
+          fetchDashboardSummary(),
+          fetchHealth(),
+          fetchArchiveSummary(),
+          fetchRetentionSummary(),
+          fetchScheduleSummary(),
+          fetchAlerts(),
+          fetchRuns(50, 0),
+          fetchLatestRunOverview(),
+        ]);
         if (!active) return;
         setSummary(summaryPayload);
         setHealth(healthPayload);
@@ -88,6 +102,7 @@ export default function OverviewPage() {
         setScheduleSummary(schedulePayload);
         setAlerts(alertsPayload);
         setRecentRuns(runsPayload.runs);
+        setLatestRunOverview(latestRunPayload);
         setError(null);
       } catch (caughtError) {
         if (!active) return;
@@ -167,6 +182,7 @@ export default function OverviewPage() {
       </section>
 
       {error ? <div className="error-banner" style={{ padding: "12px 16px" }}>{error}</div> : null}
+      <LatestRunCommandCenter overview={latestRunOverview} />
 
       <section className="grid four">
         {cards.map((card) => (
