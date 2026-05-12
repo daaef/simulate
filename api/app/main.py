@@ -142,8 +142,9 @@ class EventCacheEntry:
 EVENT_CACHE: "OrderedDict[str, EventCacheEntry]" = OrderedDict()
 ACTIVE_RETENTION_DAYS = 30
 ARCHIVE_RETENTION_DAYS = 180
-GITHUB_WEBHOOK_PROJECT_SECRETS = _json_env("GITHUB_WEBHOOK_PROJECT_SECRETS", {})
-GITHUB_WEBHOOK_REPO_ALLOWLIST = _json_env("GITHUB_WEBHOOK_REPO_ALLOWLIST", {})
+SIMULATOR_WEBHOOK_PROJECT_SECRETS = _json_env("SIMULATOR_WEBHOOK_PROJECT_SECRETS", {})
+SIMULATOR_WEBHOOK_REPO_ALLOWLIST = _json_env("SIMULATOR_WEBHOOK_REPO_ALLOWLIST", {})
+SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT = os.getenv("SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT", "production")
 GITHUB_STATUS_TOKEN = os.getenv("GITHUB_STATUS_TOKEN", "").strip()
 GITHUB_STATUS_API_BASE = os.getenv("GITHUB_STATUS_API_BASE", "https://api.github.com").rstrip("/")
 GITHUB_STATUS_CONTEXT = os.getenv("GITHUB_STATUS_CONTEXT", "simulator/verification")
@@ -1691,7 +1692,7 @@ def _list_integration_triggers(limit: int, offset: int) -> dict[str, Any]:
 
 def _match_project_for_repository(repository: str) -> str | None:
     repo = repository.strip().lower()
-    allowlist = GITHUB_WEBHOOK_REPO_ALLOWLIST if isinstance(GITHUB_WEBHOOK_REPO_ALLOWLIST, dict) else {}
+    allowlist = SIMULATOR_WEBHOOK_REPO_ALLOWLIST if isinstance(SIMULATOR_WEBHOOK_REPO_ALLOWLIST, dict) else {}
     for project, repos in allowlist.items():
         if not isinstance(repos, list):
             continue
@@ -1704,7 +1705,7 @@ def _match_project_for_repository(repository: str) -> str | None:
 def _verify_github_signature(project: str, body: bytes, signature_header: str | None) -> bool:
     if not signature_header or not signature_header.startswith("sha256="):
         return False
-    secret_map = GITHUB_WEBHOOK_PROJECT_SECRETS if isinstance(GITHUB_WEBHOOK_PROJECT_SECRETS, dict) else {}
+    secret_map = SIMULATOR_WEBHOOK_PROJECT_SECRETS if isinstance(SIMULATOR_WEBHOOK_PROJECT_SECRETS, dict) else {}
     secret = str(secret_map.get(project, "")).strip()
     if not secret:
         return False

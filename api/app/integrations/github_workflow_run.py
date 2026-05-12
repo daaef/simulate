@@ -17,7 +17,7 @@ USE_POSTGRES = bool(DATABASE_URL)
 
 DB_PATH = os.getenv("RUN_DB_PATH", "/workspace/simulate/runs/web-gui.sqlite")
 DEFAULT_WORKFLOW_ENVIRONMENT = (
-    os.getenv("GITHUB_WORKFLOW_RUN_DEFAULT_ENVIRONMENT")
+    os.getenv("SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT")
     or os.getenv("SIM_ENV")
     or "production"
 ).strip()
