@@ -4,6 +4,132 @@ This simulator is a daily doctor for the ordering platform. It simulates user ap
 
 Docker note: this stack runs the Next.js web app with `next start` from the built image. If `./web` is bind-mounted over `/app`, the built `.next` directory can be masked and `web` will crash with `Could not find a production build in the '.next' directory`.
 
+## Operator observability (read first)
+
+### Health contract: Up, Degraded, Down
+
+- **Up:** Control plane is healthy (`GET /healthz` ok), you can authenticate, and—when judging product health—a **recent successful doctor or trace run** finished within your policy window.
+- **Degraded:** Partial risk: open alerts, archive/purge backlog, schedule campaign warnings, or websocket **warnings** while a run still completed. Investigate before declaring all-clear.
+- **Down:** Blocking failure: **failed run**, cannot sign in, cannot launch runs, or required ordering steps never complete (for example enforced websocket gates time out).
+
+**`/healthz` is not last-mile green:** The JSON from `GET /healthz` reports the FastAPI process (`status`, `project_dir`, `simulator_workdir`, `db_path`). It does **not** exercise last-mile HTTP, menus, payment, or `wss://` gateways. Use **doctor** or **trace** for end-to-end proof.
+
+### Which simulation flow should I use?
+
+1. **End-to-end platform health** → `doctor` + agreed plan (`sim_actors.json` or `runs/gui-plans/daily-doctor.json` or another standard GUI plan).
+2. **Targeted regression** → `trace` + narrow suite (`core`, `doctor`, or specific scenarios listed under Trace Mode in `ARCHITECTURE.md`).
+3. **Load / churn** → `load` mode (engineering; not the default “is the platform up?” check).
+
+### Trace scenarios and flags (process truth)
+
+| Scenario | Role in “does ordering work?” |
+|----------|-------------------------------|
+| `completed` | Full happy path through robot completion |
+| `rejected` | Store rejects before payment |
+| `cancelled` | Customer cancels while pending |
+| `auto_cancel` | Backend timeout cancellation without store action |
+| `app_bootstrap` | Config, product auth, pricing, cards, coupons, active orders |
+| `store_dashboard` | Store orders, statistics, top customers |
+| `receipt_review_reorder` | Receipt PDF, review, reorder fetch after completion |
+
+**Websocket gates:** `SIM_ENFORCE_WEBSOCKET_GATES` (default **off** in env; off in Runs checkbox) records gate issues as warnings and continues. **On** = fail fast when required socket events are missing—stricter **Down** signal, more noise. **`SIM_STRICT_PLAN` / `rules.strict_plan`:** rejects invalid plans after any fallback—can flip a run from “best effort” to **Down** if the plan is wrong.
+
+**Daily plan:** Prefer one owner-approved JSON path and document expected duration; failures surface in run log, `report.md`, Overview alerts, and optional email (`run_failed` / `critical_alert`).
+
+### Dependency checking (no separate last-mile probe)
+
+There is **no** dedicated lightweight “ping last-mile” API in this repo that replaces a real run. Rationale: a tiny GET could be green while websockets, Stripe, or menus are broken. **Use doctor/trace** (or a schedule that launches your doctor profile) as the proof signal. Combine with `scripts/check_lastmile_ws.sh` when failures cluster on `wss://` and `HTTP 502`.
+
+## Operator GUI (web)
+
+This section documents the **authenticated** Next.js operator UI (`web/src/app`). Public login lives at `/auth/login`. After sign-in, routes live under the `(app)` layout with a sticky header, **Theme toggle**, **User profile** menu, and **AppNav** links.
+
+### Global shell and navigation
+
+| Element | Meaning |
+|---------|---------|
+| **App header** | Sticky bar with product title area, `ThemeToggle`, `UserProfile`, and primary nav. |
+| **AppNav** | `Overview`, `Runs`, `Config`, `Schedules`, `Archives`, `Retention`, `Admin` (users). Active route is highlighted. |
+| **Theme toggle** | Switches light/dark; persists in `localStorage` / `ThemeContext`. |
+| **User profile** | Sign out and account shortcuts. |
+
+### Visual vocabulary (shared)
+
+| Pattern | Meaning |
+|---------|---------|
+| **`.panel` / `.stat`** | Card containers; stats show label + big number. |
+| **`.error-banner` / `.panel.error-banner`** | Hard failure message (often API unreachable or form error). |
+| **`status-pill` + `status-success` / `status-danger` / `status-warning` / `status-info`** | Run or entity state colors (success, failed/deleted, paused/cancelled, default). |
+| **`alert-pill` + `severity-critical|warning|info`** | Alert queue severity. |
+| **`muted` / `.muted`** | Secondary explanatory text. |
+| **`chart-empty`** | Legitimate empty dataset (not an error). |
+
+**API vs run failure:** On **Runs**, “API health” reflects **`/healthz`** only (control plane). A run can still **fail** while API health is “reachable”—that is a **process Down** signal for that simulation, not “API Down.”
+
+### Route: `/` (root)
+
+Redirects to `/overview` when a session cookie exists, otherwise `/auth/login`.
+
+### Route: `/overview`
+
+**Purpose:** Single-page operations posture—latest run intelligence, backlog, schedules, alerts.
+
+**Blocks:**
+
+- **Latest Run Command Center** — Hero for most recent run: status, duration, context chips (`profile:`, `schedule:`, `route:`), actor strip, HTTP/WebSocket protocol boards, lifecycle timeline, **Critical Findings** (server/API/websocket **availability** only—see README Overview notes), top traffic.
+- **Which simulation should I run?** — Anchor `id="which-simulation-flow"`. Short ladder: doctor vs trace vs load; points to this guide for depth.
+- **Recent run outcomes** — **Last succeeded** and **Last failed** from dashboard API (quick links to run detail).
+- **Stat cards** — Total runs, success rate, active runs, failed (24h), schedules count, alert count.
+- **Charts** — Status donut, success split, flow distribution, 7-day failure sparkline, archive/purge backlog bars, schedule health donut.
+- **Attention queue** — Active or failed runs (links to `/runs/{id}`).
+- **Alerts** — Top operational alerts with links.
+- **Platform / Archive / Retention** panels — Policies and queue depths; **Platform** clarifies **`/healthz`** scope.
+
+**Refresh:** Data loads once on mount (no auto-poll on Overview).
+
+### Route: `/runs`
+
+**Purpose:** Launch simulations, watch live log, manage **Saved profiles**, browse recent runs.
+
+**Key blocks:**
+
+- **Header strip** — Title, theme, profile, **API health** note (healthz scope), link to Overview flow ladder.
+- **Run statistics** — Status + flow distribution bars; optional **Last succeeded / Last failed** panels when API returns highlights.
+- **Start Run** (`CollapsibleSection`) — `RunLaunchPanel` + `RunLiveConsole`. Plan dropdown (`sim_actors.json` + `runs/gui-plans/*`), flow/mode/suite/scenario controls gated by `/api/v1/flows`, command preview, websocket gate checkbox, advanced overrides.
+- **Saved profiles** — CRUD and launch saved configurations (behavior preserved; labels improved only under observability work).
+- **Recent runs table** — Select run, open detail, actions.
+- **Admin dashboard embed** — Role-gated operator tools when permitted.
+
+**Refresh:** Health poll ~10s; runs + summary poll ~5s while page is open.
+
+### Route: `/runs/{id}`
+
+Run detail: summary, log download, artifacts (`report.md`, `story.md`, `events.json`), metrics—deep dive after a failure.
+
+### Route: `/config`
+
+Edit GUI-owned plans, integration mappings, **Email notifications** panel (non-secret SMTP settings + triggers), and related operator configuration.
+
+### Route: `/schedules`
+
+Campaign-first schedules, previews, manual trigger, pause/resume, disable/enable, soft delete/restore. Auto-refresh ~15s and on window focus. **Semantics are protected**—observability work only clarifies labels/errors.
+
+### Route: `/archives` and `/retention`
+
+Browse archived runs and inspect retention/purge posture; observation-first tooling.
+
+### Route: `/admin/users` and `/admin/system`
+
+User CRUD/roles live under **`/admin/users`** (primary **Admin** nav entry). **`/admin/system`** (system policies such as allowed schedule timezones) opens from the **Admin sub-navigation** when you are already in the admin area (`AdminSubNav`: Users vs System Settings).
+
+### Route: `/auth/login`
+
+Sign-in for the web UI; redirects to `/overview` when already authenticated.
+
+### Email notifications (operators)
+
+Failure emails (`run_failed`, `schedule_launch_failed`) append a short **“How to read this”** footer: failed run = process check failed; `/healthz` = control plane only; pointer to this guide. Configure triggers on **Config → Email Notifications**.
+
 ## 1) Inputs and Outputs
 
 Required operator inputs:

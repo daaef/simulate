@@ -26,6 +26,35 @@ User roles: `admin`, `operator`, `runner`, `viewer`, `auditor`. See `SIMULATOR_G
 
 Admins can delete completed runs from the web UI. Deleting a run removes only that run's database row, GUI log file, and owned artifact folder; shared GUI log storage and other runs are preserved. The delete API reports both `deleted_files` and `missing_files`.
 
+## Health contract (Up / Degraded / Down)
+
+Use the **same words** in the web UI, email footers, and this README so owners and engineers do not talk past each other:
+
+- **Up:** The simulator **control plane** is usable: you can sign in, `GET /healthz` returns ok, and (when you care about product health) a recent **doctor** or **trace** run completed successfully within your policy window.
+- **Degraded:** Partial risk—examples: retention/archive backlog, schedule campaign warnings, alerts open, or websocket gate warnings while the run still completed. Investigate, but you may not be fully **Down**.
+- **Down:** A blocking failure—failed run, cannot authenticate, cannot launch runs, or the ordering check never completes (for example websocket gates enforced and required events never arrived—see `SIMULATOR_GUIDE.md` and `ARCHITECTURE.md`).
+
+**Important:** `GET /healthz` (shown as API health on **Runs** and **Overview**) checks **only** the FastAPI process and basic metadata (`project_dir`, `db_path`). It does **not** validate last-mile HTTP, WebSocket gateways, Stripe, or store menus. For that, run **doctor** or **trace** against real endpoints (see next section).
+
+### Symptom → likely layer (quick)
+
+| What you see | Likely layer |
+|--------------|----------------|
+| `/healthz` or Runs “API health” fails | Simulator stack (nginx, `api` container, DB), or browser cannot reach the host |
+| `/healthz` ok but doctor/trace fails on `wss://lastmile...` with 502 | Upstream last-mile **proxy** (see README `scripts/check_lastmile_ws.sh`) |
+| HTTP 5xx on core/order APIs in run log | Last-mile **application** or dependency |
+| Run failed with business validation / missing coupon | Often **data or plan** configuration—not “API down” |
+
+## Which simulation flow should I use?
+
+1. **Is the platform healthy end-to-end?** → **`doctor`** with your agreed daily plan (`sim_actors.json` or `runs/gui-plans/daily-doctor.json` or another GUI plan your team standardized on).
+2. **Did we break a specific path?** → **`trace`** with a narrow suite (`core`, `doctor`, or individual scenarios—see `ARCHITECTURE.md` Trace Mode).
+3. **Stress / churn / many orders?** → **`load`** mode (engineering-led; not a substitute for a daily health doctor).
+
+**Plans:** Keep one blessed repo plan for production-like checks; use `runs/gui-plans/*.json` for owner-editable variants. **Flags:** Prefer defaults; put `SIM_ENFORCE_WEBSOCKET_GATES`, `SIM_STRICT_PLAN`, and scenario overrides in the Runs **Advanced** area or `.env` only when you understand they change pass/fail behavior—see `SIMULATOR_GUIDE.md` (Operator observability).
+
+**No separate “last-mile ping” endpoint:** Proof of last-mile health is intentionally a **real** doctor/trace run (or a scheduled profile that runs one). That avoids a false green from a tiny probe that does not exercise auth, menus, payment, or websockets.
+
 ## Web UI Operations
 
 The authenticated app shell includes active route highlighting for `Overview`, `Runs`, `Config`, `Schedules`, `Archives`, `Retention`, and `Admin`.
@@ -156,7 +185,7 @@ Run/schedule failure emails now start with launch context in fixed order: `Profi
 
 ## Docs
 
-- `SIMULATOR_GUIDE.md`: Operator guide (CLI + web UI + auth/roles).
+- `SIMULATOR_GUIDE.md`: Operator guide (CLI + web UI + auth/roles). Start with **Operator observability** and **Operator GUI (web)** for health vocabulary, flow ladder, and screen-by-screen UI semantics.
 - `ARCHITECTURE.md`: System architecture and component responsibilities.
 - `docs/deployment.md`: Production deployment runbook (SSH + GitHub Actions + Docker Compose).
 

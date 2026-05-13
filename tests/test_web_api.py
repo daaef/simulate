@@ -1322,6 +1322,8 @@ class SystemEmailApiTests(unittest.TestCase):
             self.assertEqual(lines[1], "Trigger: manual")
             self.assertEqual(lines[2], "Project: N/A")
             self.assertEqual(lines[3], "Repository: N/A")
+            self.assertIn("How to read this", body)
+            self.assertIn("/healthz", body)
 
     def test_webhook_run_failure_email_includes_project_and_repository(self) -> None:
         self.client.put(
@@ -1365,6 +1367,8 @@ class SystemEmailApiTests(unittest.TestCase):
             self.assertIn("Trigger: github webhook", body)
             self.assertIn("Project: fainzy-dashboard", body)
             self.assertIn("Repository: daaef/fainzy-dashboard", body)
+            self.assertIn("How to read this", body)
+            self.assertIn("/healthz", body)
 
     def test_schedule_launch_failure_email_includes_profile_first_context(self) -> None:
         self.client.put(
@@ -1423,6 +1427,8 @@ class SystemEmailApiTests(unittest.TestCase):
             self.assertEqual(lines[1], "Trigger: schedule")
             self.assertEqual(lines[2], "Project: N/A")
             self.assertEqual(lines[3], "Repository: N/A")
+            self.assertIn("How to read this", body)
+            self.assertIn("/healthz", body)
 
 
 class AlertsAndRetentionApiTests(unittest.TestCase):

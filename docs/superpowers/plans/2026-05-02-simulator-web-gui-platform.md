@@ -1,5 +1,7 @@
 # Simulator Web GUI Platform Implementation Plan
 
+> **Mission alignment:** Operator-facing work should prioritize **observability**—clear signals for control plane vs failed runs, documented in `README.md` and `SIMULATOR_GUIDE.md` (*Operator observability*, *Operator GUI (web)*). Treat scheduling, GitHub webhooks, run launcher contracts, and run profiles as **stabilized** unless stakeholders explicitly approve behavioral changes.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver a Dockerized web platform that runs and monitors the simulator end-to-end on Contabo VPS with Nginx.

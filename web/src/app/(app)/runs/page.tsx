@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CollapsibleSection } from "../../../components/CollapsibleSection";
 import { ThemeToggle } from "../../../components/ThemeToggle";
@@ -840,6 +841,17 @@ export default function App() {
               : backendHealthy
                 ? "reachable"
                 : "unavailable"}
+            <span className="muted" style={{ display: "block", marginTop: 6 }}>
+              <strong>Note:</strong> this only reflects <code>/healthz</code> (simulator API process). It does not prove last-mile
+              services. For end-to-end proof, run <strong>doctor</strong> or <strong>trace</strong> below.
+            </span>
+            <span className="muted" style={{ display: "block", marginTop: 6 }}>
+              Not sure which flow? See{" "}
+              <Link href="/overview#which-simulation-flow" style={{ color: "inherit", textDecoration: "underline" }}>
+                Operations Overview — Which simulation should I run?
+              </Link>
+              .
+            </span>
           </div>
         </div>
 
@@ -873,6 +885,55 @@ export default function App() {
             </div>
           </div>
           <RunStatistics summary={summary} />
+          {(summary.last_successful_run || summary.last_failed_run) ? (
+            <div className="grid two" style={{ gap: 12 }}>
+              <div className="panel" style={{ fontSize: "14px", color: "var(--text-secondary)" }}>
+                <strong style={{ color: "var(--text-primary)" }}>Last succeeded</strong>
+                {summary.last_successful_run ? (
+                  <div style={{ marginTop: 6 }}>
+                    Run{" "}
+                    <Link href={`/runs/${summary.last_successful_run.id}`} style={{ color: "inherit" }}>
+                      #{summary.last_successful_run.id}
+                    </Link>{" "}
+                    ({summary.last_successful_run.flow ?? "—"}){" "}
+                    {summary.last_successful_run.finished_at
+                      ? new Date(summary.last_successful_run.finished_at).toLocaleString()
+                      : ""}
+                  </div>
+                ) : (
+                  <div className="muted" style={{ marginTop: 6 }}>
+                    None yet.
+                  </div>
+                )}
+              </div>
+              <div className="panel" style={{ fontSize: "14px", color: "var(--text-secondary)" }}>
+                <strong style={{ color: "var(--text-primary)" }}>Last failed</strong>
+                {summary.last_failed_run ? (
+                  <div style={{ marginTop: 6 }}>
+                    Run{" "}
+                    <Link href={`/runs/${summary.last_failed_run.id}`} style={{ color: "inherit" }}>
+                      #{summary.last_failed_run.id}
+                    </Link>{" "}
+                    ({summary.last_failed_run.flow ?? "—"}){" "}
+                    {summary.last_failed_run.finished_at
+                      ? new Date(summary.last_failed_run.finished_at).toLocaleString()
+                      : ""}
+                    {summary.last_failed_run.error_preview ? (
+                      <div style={{ marginTop: 6, fontSize: "13px" }} title={summary.last_failed_run.error_preview}>
+                        {summary.last_failed_run.error_preview.length > 140
+                          ? `${summary.last_failed_run.error_preview.slice(0, 140)}…`
+                          : summary.last_failed_run.error_preview}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="muted" style={{ marginTop: 6 }}>
+                    None yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
         </section>
 
         {canCreateRuns ? (

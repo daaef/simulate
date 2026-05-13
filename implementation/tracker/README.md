@@ -1,5 +1,9 @@
 # Implementation Tracker README
 
+## Mission alignment (observability)
+
+The shipped product’s **primary mission** is operator observability: owners and developers should quickly know whether the **control plane** is up (`/healthz`), whether **recent simulations** succeeded or failed, and which **doctor/trace/load** flow to run for proof. Canonical vocabulary (**Up / Degraded / Down**), `/healthz` limitations, flow ladder, GUI semantics, and email footers live in **`README.md`** and **`SIMULATOR_GUIDE.md`** (sections *Operator observability* and *Operator GUI (web)*). Tracker work should not regress **scheduling, GitHub webhooks, run launch semantics, or profiles** without explicit owner sign-off—prefer clearer labels, docs, and read-only summaries.
+
 ## Goal
 
 Plan and sequence the redesign of the simulator web GUI into a production-grade operations platform with strong auth/session ownership, route-first app structure, monitoring-first UX, structured scheduling, campaign orchestration, and archive/retention lifecycle controls.

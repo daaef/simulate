@@ -1000,6 +1000,17 @@ def _schedule_launch_context_lines(schedule: dict[str, Any], profile_name: str |
     ]
 
 
+def _email_observability_footer_lines() -> list[str]:
+    return [
+        "",
+        "---",
+        "How to read this (observability):",
+        "- A failed run means the **simulation process** did not complete successfully (Down for that check). Open the run URL in the web UI for logs and artifacts.",
+        "- **GET /healthz** only confirms the simulator **API process** is up (control plane). It does **not** prove last-mile HTTP/WebSocket services are healthy—use doctor/trace runs for end-to-end proof.",
+        "See SIMULATOR_GUIDE.md sections \"Health contract\" and \"Which simulation flow should I use?\".",
+    ]
+
+
 def _send_email_notification(
     event_type: str,
     title: str,
@@ -1431,6 +1442,7 @@ def _update_run(run_id: int, **fields: Any) -> None:
                     f"Finished At: {run.get('finished_at') or _utc_now()}",
                     f"Error: {run.get('error') or 'Simulation failed.'}",
                     f"Run URL: /runs/{run_id}",
+                    *_email_observability_footer_lines(),
                 ],
                 dedupe_key=f"run-failed:{run_id}",
             )
@@ -3778,6 +3790,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
                     f"Timestamp: {_utc_now()}",
                     f"Error: {exc}",
                     "Schedules URL: /schedules",
+                    *_email_observability_footer_lines(),
                 ],
                 dedupe_key=f"schedule-launch-failed:{schedule_id}:{started_at}",
             )
@@ -4459,6 +4472,34 @@ def _dashboard_summary_payload() -> dict[str, Any]:
             if created_at and (now - created_at).total_seconds() <= 86400:
                 recent_failures += 1
             degraded_runs += 1
+
+    last_successful_run: dict[str, Any] | None = None
+    last_failed_run: dict[str, Any] | None = None
+    for run in runs:
+        status = str(run.get("status") or "").lower()
+        rid = run.get("id")
+        if rid is None:
+            continue
+        if status == "succeeded" and last_successful_run is None:
+            last_successful_run = {
+                "id": int(rid),
+                "flow": run.get("flow"),
+                "finished_at": run.get("finished_at") or run.get("created_at"),
+                "plan": run.get("plan"),
+            }
+        if status == "failed" and last_failed_run is None:
+            err = run.get("error")
+            preview = (str(err) if err else "Simulation failed.")[:240]
+            last_failed_run = {
+                "id": int(rid),
+                "flow": run.get("flow"),
+                "finished_at": run.get("finished_at") or run.get("created_at"),
+                "error_preview": preview,
+                "plan": run.get("plan"),
+            }
+        if last_successful_run is not None and last_failed_run is not None:
+            break
+
     return {
         "total_runs": total,
         "status_breakdown": statuses,
@@ -4469,6 +4510,8 @@ def _dashboard_summary_payload() -> dict[str, Any]:
         "degraded_runs": degraded_runs,
         "archive_backlog": len(buckets["archive"]),
         "purge_backlog": len(buckets["purge"]),
+        "last_successful_run": last_successful_run,
+        "last_failed_run": last_failed_run,
     }
 
 

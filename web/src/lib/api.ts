@@ -130,6 +130,14 @@ export type FlowsResponse = {
   capabilities: Record<string, FlowCapability>;
 };
 
+export type DashboardRunHighlight = {
+  id: number;
+  flow?: string | null;
+  finished_at?: string | null;
+  plan?: string | null;
+  error_preview?: string | null;
+};
+
 export type DashboardSummary = {
   total_runs: number;
   status_breakdown: Record<string, number>;
@@ -140,6 +148,10 @@ export type DashboardSummary = {
   degraded_runs?: number;
   archive_backlog?: number;
   purge_backlog?: number;
+  /** Most recent succeeded run (newest first in DB). */
+  last_successful_run?: DashboardRunHighlight | null;
+  /** Most recent failed run (newest first in DB). */
+  last_failed_run?: DashboardRunHighlight | null;
 };
 
 export type ArchiveSummary = {

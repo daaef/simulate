@@ -178,11 +178,93 @@ export default function OverviewPage() {
     <div className="page-shell">
       <section className="page-header">
         <h1 className="page-title">Operations Overview</h1>
-        <p className="page-subtitle">Live simulator posture, backlog, schedule health, and recent failure pressure.</p>
+        <p className="page-subtitle">
+          Live simulator posture, backlog, schedule health, and recent failure pressure. Use the same vocabulary everywhere:{" "}
+          <strong>Up</strong> (healthy enough to operate), <strong>Degraded</strong> (partial risk—alerts, backlog, or flaky
+          signals), <strong>Down</strong> (blocking failure—failed run, auth, or cannot complete the ordering check).
+        </p>
       </section>
 
       {error ? <div className="error-banner" style={{ padding: "12px 16px" }}>{error}</div> : null}
       <LatestRunCommandCenter overview={latestRunOverview} />
+
+      <section id="which-simulation-flow" className="panel" aria-labelledby="which-flow-title">
+        <h2 id="which-flow-title" className="section-title">
+          Which simulation should I run?
+        </h2>
+        <ol style={{ margin: "0 0 12px 1.1rem", lineHeight: 1.55, color: "var(--text-secondary)" }}>
+          <li>
+            <strong style={{ color: "var(--text-primary)" }}>Is the platform healthy end-to-end?</strong> Run{" "}
+            <strong>doctor</strong> with your agreed daily plan (commonly <code>sim_actors.json</code> or{" "}
+            <code>runs/gui-plans/daily-doctor.json</code>).
+          </li>
+          <li>
+            <strong style={{ color: "var(--text-primary)" }}>Did we break a specific path?</strong> Run <strong>trace</strong> with a
+            narrow suite (for example <code>core</code> or <code>doctor</code> scenarios)—see <code>ARCHITECTURE.md</code> Trace Mode.
+          </li>
+          <li>
+            <strong style={{ color: "var(--text-primary)" }}>Stress or churn?</strong> Use <strong>load</strong> mode—engineering-led;
+            not the default substitute for a health check.
+          </li>
+        </ol>
+        <p className="muted" style={{ fontSize: "14px", margin: 0 }}>
+          Plans, flags, and advanced launcher fields are documented in <strong>SIMULATOR_GUIDE.md</strong> (sections{" "}
+          <em>Operator observability</em> and <em>Operator GUI (web)</em>) and in the README <em>Configuration Model</em> / CLI sections.
+        </p>
+      </section>
+
+      {summary ? (
+        <section className="panel" aria-label="Recent run outcomes">
+          <h2 className="section-title">Recent run outcomes</h2>
+          <div className="grid two" style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
+            <div>
+              <strong style={{ color: "var(--text-primary)" }}>Last succeeded</strong>
+              {summary.last_successful_run ? (
+                <>
+                  : run{" "}
+                  <Link href={`/runs/${summary.last_successful_run.id}`} style={{ color: "inherit" }}>
+                    #{summary.last_successful_run.id}
+                  </Link>{" "}
+                  ({summary.last_successful_run.flow ?? "—"}){" "}
+                  <span className="muted">
+                    {summary.last_successful_run.finished_at
+                      ? new Date(summary.last_successful_run.finished_at).toLocaleString()
+                      : ""}
+                  </span>
+                </>
+              ) : (
+                <span className="muted"> — none recorded yet.</span>
+              )}
+            </div>
+            <div>
+              <strong style={{ color: "var(--text-primary)" }}>Last failed</strong>
+              {summary.last_failed_run ? (
+                <>
+                  : run{" "}
+                  <Link href={`/runs/${summary.last_failed_run.id}`} style={{ color: "inherit" }}>
+                    #{summary.last_failed_run.id}
+                  </Link>{" "}
+                  ({summary.last_failed_run.flow ?? "—"}){" "}
+                  <span className="muted">
+                    {summary.last_failed_run.finished_at
+                      ? new Date(summary.last_failed_run.finished_at).toLocaleString()
+                      : ""}
+                  </span>
+                  {summary.last_failed_run.error_preview ? (
+                    <div style={{ marginTop: "6px", fontSize: "13px" }} title={summary.last_failed_run.error_preview}>
+                      {summary.last_failed_run.error_preview.length > 160
+                        ? `${summary.last_failed_run.error_preview.slice(0, 160)}…`
+                        : summary.last_failed_run.error_preview}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <span className="muted"> — none recorded yet.</span>
+              )}
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section className="grid four">
         {cards.map((card) => (
@@ -264,7 +346,10 @@ export default function OverviewPage() {
         <article className="panel">
           <h2 className="section-title">Platform Status</h2>
           <div className="grid" style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
-            <div><strong style={{ color: "var(--text-primary)" }}>API</strong>: {health?.status ?? "loading"}</div>
+            <div>
+              <strong style={{ color: "var(--text-primary)" }}>API (`/healthz`)</strong>: {health?.status ?? "loading"} —{" "}
+              <span className="muted">control plane liveness only; not proof that last-mile HTTP/WebSockets work.</span>
+            </div>
             <div><strong style={{ color: "var(--text-primary)" }}>Project</strong>: {health?.project_dir ?? "--"}</div>
             <div><strong style={{ color: "var(--text-primary)" }}>Run DB</strong>: {health?.db_path ?? "--"}</div>
           </div>
