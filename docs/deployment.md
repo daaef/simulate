@@ -49,6 +49,13 @@ Set repository secrets:
 - `SIMULATOR_DEPLOY_SSH_KEY` (required, private key for Actions to SSH into VPS)
 - `SIMULATOR_DEPLOY_PORT` (optional, defaults to `22`)
 - `SIMULATOR_DEPLOY_PATH` (optional, defaults to `/root/simulate`)
+- `SMTP_PASSWORD` (required when email notifications are enabled)
+
+Set repository variables:
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USERNAME`
+- `SMTP_TLS_MODE` (`starttls` or `ssl`)
 
 ## 4) .env.prod Setup (On Host)
 
@@ -162,6 +169,13 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 200 a
 docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 200 web
 docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 200 nginx
 ```
+
+SMTP note:
+1. Deploy workflow writes SMTP values from GitHub variables/secrets into host `.env`.
+2. Recreate `api` after SMTP env changes:
+   ```bash
+   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --force-recreate api
+   ```
 
 If health fails:
 

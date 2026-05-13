@@ -931,6 +931,11 @@ SMTP config must be provided through env secrets (not system settings):
 - `SMTP_PASSWORD`
 - `SMTP_TLS_MODE` (`starttls` or `ssl`)
 
+Docker wiring:
+- Local compose reads from repo `.env` and injects `SMTP_*` into `api`.
+- Production compose reads from `.env.prod` (`--env-file .env.prod`) and injects `SMTP_*` into `api`.
+- Changing SMTP env values requires `api` container recreate/restart.
+
 Behavior notes:
 - `critical_alert` maps to run-failure events in v1 (deduped).
 - Test-email endpoint has a cooldown and may return HTTP 429 if called repeatedly.

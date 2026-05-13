@@ -172,6 +172,11 @@ SMTP secrets remain env-only and are required for sends:
 - `SMTP_PASSWORD`
 - `SMTP_TLS_MODE` (`starttls` or `ssl`)
 
+Compose wiring:
+- Local stack (`docker compose up`) passes these from repo `.env` into `api`.
+- Production stack (`docker compose -f docker-compose.prod.yml --env-file .env.prod ...`) passes these from `.env.prod` into `api`.
+- After changing SMTP vars, recreate `api` so new env values are loaded.
+
 `critical_alert` is mapped to run-failure notifications in v1 to avoid duplicate/noisy alert sources. Test-email endpoint enforces a short cooldown.
 Run/schedule failure emails now start with launch context in fixed order: `Profile`, `Trigger`, `Project`, `Repository` (and `Schedule` when applicable).
 
