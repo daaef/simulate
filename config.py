@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,7 @@ STRIPE_TEST_PAYMENT_METHOD: str = _str("STRIPE_TEST_PAYMENT_METHOD", "pm_card_vi
 SIM_RUN_APP_PROBES: bool = _bool("SIM_RUN_APP_PROBES", True)
 SIM_RUN_STORE_DASHBOARD_PROBES: bool = _bool("SIM_RUN_STORE_DASHBOARD_PROBES", True)
 SIM_RUN_POST_ORDER_ACTIONS: bool = _bool("SIM_RUN_POST_ORDER_ACTIONS", False)
+SIM_ENFORCE_WEBSOCKET_GATES: bool = _bool("SIM_ENFORCE_WEBSOCKET_GATES", False)
 SIM_STRICT_PLAN: bool = _bool("SIM_STRICT_PLAN", False)
 SIM_REVIEW_RATING: int = _int("SIM_REVIEW_RATING", 4)
 SIM_REVIEW_COMMENT: str = _str("SIM_REVIEW_COMMENT", "Simulator review")
@@ -149,6 +151,8 @@ SIM_ACTORS: dict[str, Any] = {"defaults": {}, "users": [], "stores": []}
 # ---------------------------------------------------------------------------
 
 SIM_ACTORS_PATH: Path = Path(__file__).parent / "sim_actors.json"
+DEFAULT_SIM_ACTORS_PATH: Path = Path(__file__).parent / "sim_actors.json"
+LOGGER = logging.getLogger("simulate.config")
 
 
 def actor_gps(actor: dict[str, Any] | None) -> tuple[float | None, float | None]:
@@ -205,6 +209,27 @@ def apply_actor_selection(
     defaults: dict[str, Any] = actors.get("defaults", {})
     users: list[dict[str, Any]] = actors.get("users", [])
     stores: list[dict[str, Any]] = actors.get("stores", [])
+    allowed_phones = {
+        str(user.get("phone"))
+        for user in users
+        if isinstance(user, dict) and user.get("phone")
+    }
+    allowed_store_ids = {
+        str(store.get("store_id"))
+        for store in stores
+        if isinstance(store, dict) and store.get("store_id")
+    }
+
+    explicit_user_phone = str(USER_PHONE_NUMBER or "").strip()
+    explicit_store_id = str(store_id or STORE_ID or "").strip()
+    if explicit_user_phone and allowed_phones and explicit_user_phone not in allowed_phones:
+        raise RuntimeError(
+            f"Configured phone {explicit_user_phone!r} is not present in selected plan users[]."
+        )
+    if explicit_store_id and allowed_store_ids and explicit_store_id not in allowed_store_ids:
+        raise RuntimeError(
+            f"Configured store {explicit_store_id!r} is not present in selected plan stores[]."
+        )
 
     requested_user_phone = USER_PHONE_NUMBER or defaults.get("user_phone")
     selected_user = _find_actor_user(
@@ -333,6 +358,7 @@ def apply_plan_defaults(plan: Any, *, preserve: set[str] | None = None) -> None:
             "run_app_probes": ("SIM_RUN_APP_PROBES", _plan_bool),
             "run_store_dashboard_probes": ("SIM_RUN_STORE_DASHBOARD_PROBES", _plan_bool),
             "run_post_order_actions": ("SIM_RUN_POST_ORDER_ACTIONS", _plan_bool),
+            "run_enforce_websocket_gates": ("SIM_ENFORCE_WEBSOCKET_GATES", _plan_bool),
             "app_autopilot": ("SIM_APP_AUTOPILOT", _plan_bool),
             "auto_select_store": ("SIM_AUTO_SELECT_STORE", _plan_bool),
             "auto_select_coupon": ("SIM_AUTO_SELECT_COUPON", _plan_bool),
@@ -344,6 +370,12 @@ def apply_plan_defaults(plan: Any, *, preserve: set[str] | None = None) -> None:
             "store_closed_status": ("SIM_STORE_CLOSED_STATUS", int),
         },
         preserve=preserved,
+    )
+    _apply_plan_value(
+        "SIM_ENFORCE_WEBSOCKET_GATES",
+        rules.get("enforce_websocket_gates"),
+        preserve=preserved,
+        transform=_plan_bool,
     )
     _apply_plan_section(
         payment,
@@ -436,23 +468,45 @@ def load_sim_actors(
     """Load actors from sim_actors.json and apply defaults to config globals.
 
     Returns ``{"users": [...], "stores": [...]}``.
-    If the file does not exist, returns empty lists and leaves globals untouched.
+    If the selected plan is invalid/unreadable, falls back to the repo default
+    ``sim_actors.json``. If both fail, raises RuntimeError.
     """
-    actor_path = _resolve_sim_path(path) if path is not None else SIM_ACTORS_PATH
+    selected_path = _resolve_sim_path(path) if path is not None else SIM_ACTORS_PATH
+    fallback_path = DEFAULT_SIM_ACTORS_PATH
     global SIM_ACTORS
-    if not actor_path.exists():
-        SIM_ACTORS = {"defaults": {}, "users": [], "stores": []}
-        return {"users": [], "stores": []}
 
     from run_plan import PlanValidationError, load_run_plan
 
+    preserved = set(preserve or set())
+
+    def _load_validated_plan(plan_path: Path):
+        plan = load_run_plan(plan_path, strict=False)
+        plan.validate(strict=_planned_strict_value(plan, preserve=preserved))
+        return plan
+
     try:
-        plan = load_run_plan(actor_path, strict=False)
-        plan.validate(strict=_planned_strict_value(plan, preserve=set(preserve or set())))
-        apply_plan_defaults(plan, preserve=preserve)
-        actors = plan.to_actors()
+        plan = _load_validated_plan(selected_path)
     except PlanValidationError as exc:
-        raise RuntimeError(f"Invalid simulator plan {actor_path}: {exc}") from exc
+        if selected_path.resolve() == fallback_path.resolve():
+            raise RuntimeError(f"Invalid simulator plan {selected_path}: {exc}") from exc
+        LOGGER.warning(
+            "Selected simulator plan failed validation/loading; falling back to default plan. "
+            "selected=%s fallback=%s error=%s",
+            selected_path,
+            fallback_path,
+            exc,
+        )
+        try:
+            plan = _load_validated_plan(fallback_path)
+        except PlanValidationError as fallback_exc:
+            raise RuntimeError(
+                "Selected simulator plan failed and fallback plan also failed. "
+                f"selected={selected_path} selected_error={exc}; "
+                f"fallback={fallback_path} fallback_error={fallback_exc}"
+            ) from fallback_exc
+
+    apply_plan_defaults(plan, preserve=preserve)
+    actors = plan.to_actors()
     SIM_ACTORS = actors
     apply_actor_selection(actors)
     return actors

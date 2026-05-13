@@ -203,6 +203,7 @@ class RunPlanTests(unittest.TestCase):
             "SIM_RUN_APP_PROBES",
             "SIM_RUN_STORE_DASHBOARD_PROBES",
             "SIM_RUN_POST_ORDER_ACTIONS",
+            "SIM_ENFORCE_WEBSOCKET_GATES",
             "SIM_AUTO_SELECT_STORE",
             "SIM_AUTO_SELECT_COUPON",
             "SIM_AUTO_PROVISION_FIXTURES",
@@ -247,6 +248,7 @@ class RunPlanTests(unittest.TestCase):
                     "run_app_probes": false,
                     "run_store_dashboard_probes": false,
                     "run_post_order_actions": true,
+                    "run_enforce_websocket_gates": true,
                     "auto_select_store": false,
                     "auto_select_coupon": false,
                     "auto_provision_fixtures": false
@@ -289,6 +291,7 @@ class RunPlanTests(unittest.TestCase):
                 self.assertFalse(config.SIM_RUN_APP_PROBES)
                 self.assertFalse(config.SIM_RUN_STORE_DASHBOARD_PROBES)
                 self.assertTrue(config.SIM_RUN_POST_ORDER_ACTIONS)
+                self.assertTrue(config.SIM_ENFORCE_WEBSOCKET_GATES)
                 self.assertFalse(config.SIM_AUTO_SELECT_STORE)
                 self.assertFalse(config.SIM_AUTO_SELECT_COUPON)
                 self.assertFalse(config.SIM_AUTO_PROVISION_FIXTURES)
@@ -1416,6 +1419,67 @@ class AppProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertEqual(recorder.issues[0]["code"], "probe_failed")
         self.assertIn("failing_probe", recorder.issues[0]["message"])
+
+
+class WebsocketGateEnforcementTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gate_failure_is_bypassed_when_enforcement_is_off(self) -> None:
+        import config
+        import trace_runner
+
+        class _FailingObserver:
+            async def wait_for_order_status(self, **kwargs):
+                raise RuntimeError("websocket_gate_timeout: status=pending")
+
+        recorder = RunRecorder.bootstrap()
+        previous = config.SIM_ENFORCE_WEBSOCKET_GATES
+        try:
+            config.SIM_ENFORCE_WEBSOCKET_GATES = False
+            ok = await trace_runner._wait_for_ws_gate(
+                _FailingObserver(),
+                recorder=recorder,
+                scenario="completed",
+                step="wait_pending_before_store_decision",
+                order_db_id=1,
+                order_ref="#1",
+                expected_status="pending",
+                sources={"store_orders"},
+                phase="precondition",
+            )
+        finally:
+            config.SIM_ENFORCE_WEBSOCKET_GATES = previous
+
+        self.assertTrue(ok)
+        self.assertTrue(any(issue["severity"] == "warning" for issue in recorder.issues))
+        self.assertTrue(any(event.get("action") == "websocket_gate_bypassed" for event in recorder.events))
+
+    async def test_gate_failure_fails_when_enforcement_is_on(self) -> None:
+        import config
+        import trace_runner
+
+        class _FailingObserver:
+            async def wait_for_order_status(self, **kwargs):
+                raise RuntimeError("websocket_gate_timeout: status=pending")
+
+        recorder = RunRecorder.bootstrap()
+        previous = config.SIM_ENFORCE_WEBSOCKET_GATES
+        try:
+            config.SIM_ENFORCE_WEBSOCKET_GATES = True
+            ok = await trace_runner._wait_for_ws_gate(
+                _FailingObserver(),
+                recorder=recorder,
+                scenario="completed",
+                step="wait_pending_before_store_decision",
+                order_db_id=1,
+                order_ref="#1",
+                expected_status="pending",
+                sources={"store_orders"},
+                phase="precondition",
+            )
+        finally:
+            config.SIM_ENFORCE_WEBSOCKET_GATES = previous
+
+        self.assertFalse(ok)
+        self.assertTrue(any(issue["severity"] == "error" for issue in recorder.issues))
 
 
 class PostOrderActionTests(unittest.TestCase):

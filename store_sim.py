@@ -241,6 +241,16 @@ async def bootstrap_auth(
     effective_store_id = store_id or config.STORE_ID
     if not effective_store_id:
         raise RuntimeError("STORE_ID is required so fixtures can use a real store profile.")
+    actors = getattr(config, "SIM_ACTORS", {}) or {}
+    allowed_store_ids = {
+        str(store.get("store_id"))
+        for store in actors.get("stores", [])
+        if isinstance(store, dict) and store.get("store_id")
+    }
+    if allowed_store_ids and str(effective_store_id) not in allowed_store_ids:
+        raise RuntimeError(
+            f"Configured store {str(effective_store_id)!r} is not present in selected plan stores[]."
+        )
 
     last_mile_token, token_source = await fetch_store_token(
         client,

@@ -16,6 +16,7 @@ CREATE TEMPORARY TABLE sqlite_runs_import (
     phone VARCHAR(20),
     all_users BOOLEAN,
     no_auto_provision BOOLEAN,
+    enforce_websocket_gates BOOLEAN,
     post_order_actions BOOLEAN,
     extra_args JSONB,
     status VARCHAR(20),
@@ -42,6 +43,7 @@ CREATE OR REPLACE FUNCTION import_sqlite_run(
     p_phone VARCHAR(20),
     p_all_users BOOLEAN,
     p_no_auto_provision BOOLEAN,
+    p_enforce_websocket_gates BOOLEAN,
     p_post_order_actions BOOLEAN,
     p_extra_args JSONB,
     p_status VARCHAR(20),
@@ -58,12 +60,12 @@ CREATE OR REPLACE FUNCTION import_sqlite_run(
 ) RETURNS VOID AS $$
 BEGIN
     INSERT INTO runs (
-        id, flow, plan, timing, mode, store_id, phone, all_users, no_auto_provision,
+        id, flow, plan, timing, mode, store_id, phone, all_users, no_auto_provision, enforce_websocket_gates,
         post_order_actions, extra_args, status, command, created_at, started_at,
         finished_at, exit_code, log_path, report_path, story_path, events_path, error
     ) VALUES (
         p_id, p_flow, p_plan, p_timing, p_mode, p_store_id, p_phone, p_all_users,
-        p_no_auto_provision, p_post_order_actions, p_extra_args, p_status, p_command,
+        p_no_auto_provision, p_enforce_websocket_gates, p_post_order_actions, p_extra_args, p_status, p_command,
         p_created_at, p_started_at, p_finished_at, p_exit_code, p_log_path,
         p_report_path, p_story_path, p_events_path, p_error
     ) ON CONFLICT (id) DO NOTHING;

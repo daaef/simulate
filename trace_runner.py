@@ -81,8 +81,6 @@ def _trace_store_candidates() -> list[str | None]:
             )
         return [explicit_store]
 
-    if config.STORE_ID and config.STORE_ID in actor_store_ids:
-        return [config.STORE_ID]
     return actor_store_ids
 
 
@@ -114,11 +112,7 @@ async def _bootstrap_trace_store_context(
         store_sim.provisioning_preflight_enabled() and requires_fixtures
     )
     last_error: RuntimeError | None = None
-    candidates = (
-        _trace_store_candidates()
-        if config.SIM_AUTO_SELECT_STORE or config.SIM_STORE_EXPLICIT
-        else [config.STORE_ID or None]
-    )
+    candidates = _trace_store_candidates()
 
     for candidate in candidates:
         store_session: store_sim.StoreSession | None = None
@@ -533,6 +527,109 @@ def _print_checkout_decision(
     )
 
 
+def _gate_failure_code(exc: Exception) -> str:
+    message = str(exc)
+    if message.startswith("websocket_gate_source_unavailable:"):
+        return "websocket_gate_source_unavailable"
+    if message.startswith("websocket_gate_timeout:"):
+        return "websocket_gate_timeout"
+    return "websocket_gate_failed"
+
+
+async def _wait_for_ws_gate(
+    observer: WebsocketObserver,
+    *,
+    recorder: RunRecorder,
+    scenario: str,
+    step: str,
+    order_db_id: int,
+    order_ref: str,
+    expected_status: str,
+    sources: set[str],
+    phase: str,
+) -> bool:
+    try:
+        event = await observer.wait_for_order_status(
+            order_db_id=order_db_id,
+            order_ref=order_ref,
+            status=expected_status,
+            sources=sources,
+        )
+    except RuntimeError as exc:
+        if not config.SIM_ENFORCE_WEBSOCKET_GATES:
+            recorder.record_issue(
+                severity="warning",
+                code=_gate_failure_code(exc),
+                actor="websocket",
+                scenario=scenario,
+                step=step,
+                order_db_id=order_db_id,
+                order_ref=order_ref,
+                message=(
+                    f"Websocket gate bypassed for status={expected_status}: {exc}"
+                ),
+                details={"sources": sorted(sources), "enforced": False},
+            )
+            recorder.record_event(
+                actor="websocket",
+                action="websocket_gate_bypassed",
+                category="websocket_gate",
+                scenario=scenario,
+                step=step,
+                order_db_id=order_db_id,
+                order_ref=order_ref,
+                observed_status=expected_status,
+                details={
+                    "sources": sorted(sources),
+                    "reason": str(exc),
+                    "enforced": False,
+                },
+            )
+            return True
+        recorder.record_issue(
+            severity="error",
+            code=_gate_failure_code(exc),
+            actor="websocket",
+            scenario=scenario,
+            step=step,
+            order_db_id=order_db_id,
+            order_ref=order_ref,
+            message=(
+                f"Websocket gate failed for status={expected_status}: {exc}"
+            ),
+            details={"sources": sorted(sources), "enforced": True},
+        )
+        _finish_checked(
+            recorder,
+            scenario,
+            actual_final_status=_gate_failure_code(exc),
+            order_db_id=order_db_id,
+            order_ref=order_ref,
+            note=f"Websocket gate failed at step={step}",
+        )
+        return False
+
+    recorder.record_event(
+        actor="websocket",
+        action=(
+            "websocket_gate_precondition_ok"
+            if phase == "precondition"
+            else "websocket_gate_result_ok"
+        ),
+        category="websocket_gate",
+        scenario=scenario,
+        step=step,
+        order_db_id=order_db_id,
+        order_ref=order_ref,
+        observed_status=expected_status,
+        details={
+            "source": event.get("source"),
+            "sources": sorted(sources),
+        },
+    )
+    return True
+
+
 async def _run_completed(
     client: httpx.AsyncClient,
     *,
@@ -541,6 +638,7 @@ async def _run_completed(
     fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
+    observer: WebsocketObserver,
     scenario: str = "completed",
 ) -> None:
     recorder.start_scenario(scenario, expected_final_status="completed")
@@ -561,6 +659,19 @@ async def _run_completed(
             actual_final_status="placement_failed",
             note="Order could not be created.",
         )
+        return
+
+    if not await _wait_for_ws_gate(
+        observer,
+        recorder=recorder,
+        scenario=scenario,
+        step="wait_pending_before_store_decision",
+        order_db_id=order["order_db_id"],
+        order_ref=order["order_ref"],
+        expected_status="pending",
+        sources={"store_orders"},
+        phase="precondition",
+    ):
         return
 
     recorder.record_event(
@@ -606,35 +717,17 @@ async def _run_completed(
         )
         return
 
-    accepted_state = await _poll_for_status(
-        client,
-        token=user_session.token,
-        token_source=user_session.token_source,
-        auth_header="Authorization",
-        auth_scheme="Token",
+    if not await _wait_for_ws_gate(
+        observer,
+        recorder=recorder,
+        scenario=scenario,
+        step="wait_payment_processing_before_checkout",
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
-        recorder=recorder,
-        actor="user",
-        expected_statuses={"payment_processing"},
-        scenario=scenario,
-        step="verify_store_acceptance",
-        action="verify_store_acceptance",
-        poll_interval=_poll_interval(timing, 1.0),
-        max_attempts=_poll_attempts(timing, 30),
-        timeout_code="trace_acceptance_timeout",
-        timeout_message="Order never reached payment_processing in trace mode.",
-    )
-    if accepted_state is None or str(accepted_state.get("status") or "") != "payment_processing":
-        _finish_checked(
-            recorder,
-            scenario,
-            actual_final_status=str(accepted_state.get("status") or "acceptance_timeout")
-            if accepted_state
-            else "acceptance_timeout",
-            order_db_id=order["order_db_id"],
-            order_ref=order["order_ref"],
-        )
+        expected_status="payment_processing",
+        sources={"user_orders", "store_orders"},
+        phase="result",
+    ):
         return
 
     recorder.record_event(
@@ -708,35 +801,17 @@ async def _run_completed(
         )
         return
 
-    processing_state = await _poll_for_status(
-        client,
-        token=store_session.last_mile_token,
-        token_source=store_session.token_source,
-        auth_header="Fainzy-Token",
-        auth_scheme="",
+    if not await _wait_for_ws_gate(
+        observer,
+        recorder=recorder,
+        scenario=scenario,
+        step="wait_order_processing_before_ready",
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
-        recorder=recorder,
-        actor="store",
-        expected_statuses={"order_processing"},
-        scenario=scenario,
-        step="verify_order_processing",
-        action="verify_order_processing",
-        poll_interval=_poll_interval(timing, 1.0),
-        max_attempts=_poll_attempts(timing, 30),
-        timeout_code="trace_order_processing_timeout",
-        timeout_message="Order never reached order_processing in trace mode.",
-    )
-    if processing_state is None or str(processing_state.get("status") or "") != "order_processing":
-        _finish_checked(
-            recorder,
-            scenario,
-            actual_final_status=str(processing_state.get("status") or "order_processing_timeout")
-            if processing_state
-            else "order_processing_timeout",
-            order_db_id=order["order_db_id"],
-            order_ref=order["order_ref"],
-        )
+        expected_status="order_processing",
+        sources={"store_orders", "user_orders"},
+        phase="result",
+    ):
         return
 
     recorder.record_event(
@@ -781,8 +856,33 @@ async def _run_completed(
             order_ref=order["order_ref"],
         )
         return
+    if not await _wait_for_ws_gate(
+        observer,
+        recorder=recorder,
+        scenario=scenario,
+        step="wait_ready_before_robot_lifecycle",
+        order_db_id=order["order_db_id"],
+        order_ref=order["order_ref"],
+        expected_status="ready",
+        sources={"store_orders"},
+        phase="result",
+    ):
+        return
 
+    previous_status = "ready"
     for status, _ in robot_sim.ROBOT_LIFECYCLE:
+        if not await _wait_for_ws_gate(
+            observer,
+            recorder=recorder,
+            scenario=scenario,
+            step=f"wait_{previous_status}_before_{status}_api",
+            order_db_id=order["order_db_id"],
+            order_ref=order["order_ref"],
+            expected_status=previous_status,
+            sources={"store_orders"},
+            phase="precondition",
+        ):
+            return
         await traced_sleep(
             timing.robot_delay(status),
             recorder=recorder,
@@ -813,6 +913,19 @@ async def _run_completed(
                 order_ref=order["order_ref"],
             )
             return
+        if not await _wait_for_ws_gate(
+            observer,
+            recorder=recorder,
+            scenario=scenario,
+            step=f"wait_{status}_before_next_action",
+            order_db_id=order["order_db_id"],
+            order_ref=order["order_ref"],
+            expected_status=status,
+            sources={"store_orders"},
+            phase="result",
+        ):
+            return
+        previous_status = status
         if status == "robot_arrived_for_delivery":
             await _verify_receive_code(
                 client,
@@ -876,6 +989,7 @@ async def _run_rejected(
     fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
+    observer: WebsocketObserver,
     scenario: str = "rejected",
 ) -> None:
     recorder.start_scenario(scenario, expected_final_status="rejected")
@@ -895,6 +1009,19 @@ async def _run_rejected(
             scenario,
             actual_final_status="placement_failed",
         )
+        return
+
+    if not await _wait_for_ws_gate(
+        observer,
+        recorder=recorder,
+        scenario=scenario,
+        step="wait_pending_before_reject",
+        order_db_id=order["order_db_id"],
+        order_ref=order["order_ref"],
+        expected_status="pending",
+        sources={"store_orders"},
+        phase="precondition",
+    ):
         return
 
     recorder.record_event(
@@ -940,6 +1067,18 @@ async def _run_rejected(
         )
         return
 
+    if not await _wait_for_ws_gate(
+        observer,
+        recorder=recorder,
+        scenario=scenario,
+        step="wait_rejected_terminal",
+        order_db_id=order["order_db_id"],
+        order_ref=order["order_ref"],
+        expected_status="rejected",
+        sources={"user_orders", "store_orders"},
+        phase="result",
+    ):
+        return
     final_state = await _poll_for_status(
         client,
         token=user_session.token,
@@ -978,6 +1117,7 @@ async def _run_cancelled(
     fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
+    observer: WebsocketObserver,
 ) -> None:
     scenario = "cancelled"
     recorder.start_scenario(scenario, expected_final_status="cancelled")
@@ -999,6 +1139,19 @@ async def _run_cancelled(
         )
         return
 
+    if not await _wait_for_ws_gate(
+        observer,
+        recorder=recorder,
+        scenario=scenario,
+        step="wait_pending_before_cancel",
+        order_db_id=order["order_db_id"],
+        order_ref=order["order_ref"],
+        expected_status="pending",
+        sources={"user_orders"},
+        phase="precondition",
+    ):
+        return
+
     cancelled = await user_sim.cancel_order(
         client,
         user_token=user_session.token,
@@ -1017,6 +1170,19 @@ async def _run_cancelled(
             order_db_id=order["order_db_id"],
             order_ref=order["order_ref"],
         )
+        return
+
+    if not await _wait_for_ws_gate(
+        observer,
+        recorder=recorder,
+        scenario=scenario,
+        step="wait_cancelled_terminal",
+        order_db_id=order["order_db_id"],
+        order_ref=order["order_ref"],
+        expected_status="cancelled",
+        sources={"user_orders", "store_orders"},
+        phase="result",
+    ):
         return
 
     final_state = await _poll_for_status(
@@ -1077,6 +1243,7 @@ async def _run_auto_cancel(
     fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
+    observer: WebsocketObserver,
 ) -> None:
     scenario = "auto_cancel"
     recorder.start_scenario(
@@ -1115,64 +1282,25 @@ async def _run_auto_cancel(
         track_order=False,
     )
 
-    wait_seconds = timing.auto_cancel_wait_seconds
-    poll_interval = _poll_interval(timing, 5.0)
-    attempts = max(1, int(wait_seconds / poll_interval))
-    observed = None
-    for attempt in range(attempts):
-        observed = await user_sim.fetch_order(
-            client,
-            user_token=user_session.token,
-            token_source=user_session.token_source,
-            order_db_id=order["order_db_id"],
-            order_ref=order["order_ref"],
-            recorder=recorder,
-            action="observe_auto_cancel",
-            scenario=scenario,
-            step="observe_auto_cancel",
-            poll_attempt=attempt + 1,
-        )
-        if str(observed.get("status") or "") == "cancelled":
-            _finish_checked(
-                recorder,
-                scenario,
-                actual_final_status="cancelled",
-                order_db_id=order["order_db_id"],
-                order_ref=order["order_ref"],
-                note="Backend auto-cancelled the untouched order.",
-            )
-            return
-        await traced_sleep(
-            poll_interval,
-            recorder=recorder,
-            actor="user",
-            action="wait_for_auto_cancel",
-            scenario=scenario,
-            step="observe_auto_cancel_delay",
-            order_db_id=order["order_db_id"],
-            order_ref=order["order_ref"],
-        )
-
-    recorder.record_issue(
-        severity="warning",
-        code="auto_cancel_not_observed",
-        actor="backend",
+    if not await _wait_for_ws_gate(
+        observer,
+        recorder=recorder,
         scenario=scenario,
-        step="observe_auto_cancel",
+        step="wait_backend_auto_cancel",
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
-        message=(
-            "The backend did not auto-cancel the untouched pending order within the "
-            "diagnostic window."
-        ),
-    )
-    recorder.finish_scenario(
+        expected_status="cancelled",
+        sources={"user_orders", "store_orders"},
+        phase="result",
+    ):
+        return
+    _finish_checked(
+        recorder,
         scenario,
-        verdict="unsupported",
-        actual_final_status=str(observed.get("status") or "pending") if observed else "pending",
+        actual_final_status="cancelled",
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
-        note="Auto-cancel was not observed inside the configured diagnostic window.",
+        note="Backend auto-cancelled the untouched order.",
     )
 
 
@@ -1523,6 +1651,7 @@ async def _run_payment_scenario(
     fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
+    observer: WebsocketObserver,
 ) -> None:
     saved = _save_payment_config()
     try:
@@ -1591,6 +1720,7 @@ async def _run_payment_scenario(
             fixtures=fixtures,
             recorder=recorder,
             timing=timing,
+            observer=observer,
             scenario=scenario,
         )
     finally:
@@ -1702,6 +1832,7 @@ async def run(
                         fixtures=fixtures,
                         recorder=recorder,
                         timing=timing,
+                        observer=observer,
                     )
                 elif name == "rejected":
                     await _run_rejected(
@@ -1711,6 +1842,7 @@ async def run(
                         fixtures=fixtures,
                         recorder=recorder,
                         timing=timing,
+                        observer=observer,
                     )
                 elif name == "cancelled":
                     await _run_cancelled(
@@ -1720,6 +1852,7 @@ async def run(
                         fixtures=fixtures,
                         recorder=recorder,
                         timing=timing,
+                        observer=observer,
                     )
                 elif name == "auto_cancel":
                     await _run_auto_cancel(
@@ -1728,6 +1861,7 @@ async def run(
                         fixtures=fixtures,
                         recorder=recorder,
                         timing=timing,
+                        observer=observer,
                     )
                 elif name == "new_user_setup":
                     _run_new_user_setup(
@@ -1748,6 +1882,7 @@ async def run(
                         fixtures=fixtures,
                         recorder=recorder,
                         timing=timing,
+                        observer=observer,
                     )
                 elif name == "menu_available":
                     _run_menu_status_probe(
@@ -1798,6 +1933,7 @@ async def run(
                         fixtures=fixtures,
                         recorder=recorder,
                         timing=timing,
+                        observer=observer,
                         scenario="store_accept",
                     )
                 elif name == "store_reject":
@@ -1808,6 +1944,7 @@ async def run(
                         fixtures=fixtures,
                         recorder=recorder,
                         timing=timing,
+                        observer=observer,
                         scenario="store_reject",
                     )
                 elif name == "robot_complete":
@@ -1818,6 +1955,7 @@ async def run(
                         fixtures=fixtures,
                         recorder=recorder,
                         timing=timing,
+                        observer=observer,
                         scenario="robot_complete",
                     )
                 elif name == "receipt_review_reorder":
@@ -1831,6 +1969,7 @@ async def run(
                             fixtures=fixtures,
                             recorder=recorder,
                             timing=timing,
+                            observer=observer,
                             scenario="receipt_review_reorder",
                         )
                     finally:

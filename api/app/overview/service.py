@@ -8,6 +8,31 @@ from ..runs import service as runs_service
 
 
 ACTOR_KEYS = ("user", "store", "robot")
+NON_SERVER_FAILURE_CODE_PARTS = (
+    "missing_",
+    "coupon",
+    "saved_card",
+    "card",
+    "token",
+    "customer_id",
+    "user_id",
+    "subentity_id",
+    "validation",
+    "required",
+    "unauthorized",
+    "forbidden",
+    "not_found",
+)
+SERVER_FAILURE_CODE_PARTS = (
+    "http_error",
+    "connection_error",
+    "timeout",
+    "unavailable",
+    "websocket_connection_error",
+    "server_error",
+    "gateway",
+    "bad_gateway",
+)
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -43,6 +68,60 @@ def _is_failed_event(event: dict[str, Any]) -> bool:
     except (TypeError, ValueError):
         pass
 
+    return False
+
+
+def _is_server_api_failure_event(event: dict[str, Any]) -> bool:
+    try:
+        http_status = event.get("http_status") or event.get("status_code")
+        if http_status is not None and int(http_status) >= 500:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    code = _lower(event.get("code") or event.get("reason_code"))
+    action = _lower(event.get("action"))
+    message = _lower(_event_message(event))
+    category = _lower(event.get("category"))
+
+    if "websocket_connection_error" in code:
+        return True
+    if category == "websocket" and ("connection" in message or "connect" in action):
+        return True
+    if any(part in code for part in SERVER_FAILURE_CODE_PARTS):
+        return True
+    if "connection" in message or "timed out" in message or "timeout" in message:
+        return True
+    if "api unavailable" in message or "service unavailable" in message:
+        return True
+    return False
+
+
+def _is_server_api_failure_issue(issue: dict[str, Any]) -> bool:
+    try:
+        details = issue.get("details")
+        if isinstance(details, dict):
+            http_status = details.get("http_status") or details.get("status_code")
+            if http_status is not None and int(http_status) >= 500:
+                return True
+    except (TypeError, ValueError):
+        pass
+
+    code = _lower(issue.get("code"))
+    message = _lower(issue.get("message"))
+
+    if any(part in code for part in NON_SERVER_FAILURE_CODE_PARTS):
+        return False
+    if any(part in message for part in ("missing token", "saved card", "no coupon", "coupon", "customer id", "not available for this user")):
+        return False
+    if any(part in code for part in SERVER_FAILURE_CODE_PARTS):
+        return True
+    if "websocket_connection_error" in code:
+        return True
+    if "server error" in message or "api unavailable" in message or "service unavailable" in message:
+        return True
+    if "timeout" in message or "timed out" in message or "connection" in message:
+        return True
     return False
 
 
@@ -186,7 +265,7 @@ def _actor_summary(actor: str, run: dict[str, Any], events: list[dict[str, Any]]
         if _event_actor(event) == actor or _event_actor(event).startswith(f"{actor}:")
     ]
 
-    failed = [event for event in actor_events if _is_failed_event(event)]
+    failed = [event for event in actor_events if _is_server_api_failure_event(event)]
     latest = actor_events[-1] if actor_events else None
 
     return {
@@ -214,7 +293,7 @@ def _is_websocket_event(event: dict[str, Any]) -> bool:
 
 def _http_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     http_events = [event for event in events if _is_http_event(event)]
-    failed = [event for event in http_events if _is_failed_event(event)]
+    failed = [event for event in http_events if _is_server_api_failure_event(event)]
 
     status_groups = {
         "2xx": 0,
@@ -233,7 +312,7 @@ def _http_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         endpoint = _event_endpoint(event) or "unknown"
         endpoint_counter[endpoint] += 1
 
-        if _is_failed_event(event):
+        if _is_server_api_failure_event(event):
             failed_endpoint_counter[endpoint] += 1
 
         status_value = event.get("http_status") or event.get("status_code")
@@ -392,34 +471,63 @@ def _build_lifecycle(events: list[dict[str, Any]], run: dict[str, Any]) -> list[
 
 def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]], run: dict[str, Any]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
+    event_by_id: dict[int, dict[str, Any]] = {}
+
+    for event in events:
+        try:
+            event_id = int(event.get("id"))
+            event_by_id[event_id] = event
+        except (TypeError, ValueError):
+            continue
 
     for issue in artifact_issues[:8]:
-        items.append(
-            {
-                "severity": issue.get("severity") or "warning",
-                "code": issue.get("code") or "issue",
-                "message": issue.get("message") or "Recorded issue",
-                "actor": issue.get("actor"),
-                "at": issue.get("ts"),
-            }
-        )
+        try:
+            if not _is_server_api_failure_issue(issue):
+                continue
+            related_event = None
+            try:
+                related_event = event_by_id.get(int(issue.get("related_event_id")))
+            except (TypeError, ValueError):
+                related_event = None
+            details = issue.get("details") if isinstance(issue.get("details"), dict) else {}
+            route = (
+                _event_endpoint(related_event or {})
+                or _str(details.get("endpoint") or details.get("path") or details.get("url") or details.get("full_url"))
+                or None
+            )
+            items.append(
+                {
+                    "severity": issue.get("severity") or "warning",
+                    "code": issue.get("code") or "issue",
+                    "message": issue.get("message") or "Recorded issue",
+                    "actor": issue.get("actor"),
+                    "at": issue.get("ts"),
+                    "route": route,
+                }
+            )
+        except Exception:
+            continue
 
     for event in events:
         if len(items) >= 10:
             break
-        if not _is_failed_event(event):
+        try:
+            if not _is_server_api_failure_event(event):
+                continue
+            items.append(
+                {
+                    "severity": "error",
+                    "code": event.get("action") or event.get("category") or "failed_event",
+                    "message": _event_message(event) or _event_endpoint(event) or "Failed event",
+                    "actor": event.get("actor"),
+                    "at": _event_timestamp(event),
+                    "route": _event_endpoint(event) or None,
+                }
+            )
+        except Exception:
             continue
-        items.append(
-            {
-                "severity": "error",
-                "code": event.get("action") or event.get("category") or "failed_event",
-                "message": _event_message(event) or _event_endpoint(event) or "Failed event",
-                "actor": event.get("actor"),
-                "at": _event_timestamp(event),
-            }
-        )
 
-    if run.get("error"):
+    if run.get("error") and _is_server_api_failure_issue({"code": "run_error", "message": _str(run.get("error"))}):
         items.insert(
             0,
             {
@@ -428,6 +536,7 @@ def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]],
                 "message": run.get("error"),
                 "actor": "system",
                 "at": run.get("finished_at") or run.get("created_at"),
+                "route": None,
             },
         )
 
@@ -435,7 +544,7 @@ def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]],
 
 
 def _derived_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
-    failed = [event for event in events if _is_failed_event(event)]
+    failed = [event for event in events if _is_server_api_failure_event(event)]
     http_events = [event for event in events if _is_http_event(event)]
     websocket_events = [event for event in events if _is_websocket_event(event)]
 

@@ -364,6 +364,13 @@ export const GUIDE_FLAG_ROWS: GuideFlagRow[] = [
     constraints: "Requires completed orders in selected scenarios."
   },
   {
+    flag: "--enforce-websocket-gates / --no-enforce-websocket-gates",
+    type: "boolean switch",
+    default_value: "from .env SIM_ENFORCE_WEBSOCKET_GATES (false)",
+    effect: "Controls whether websocket gate failures fail fast or are recorded as warnings and bypassed.",
+    constraints: "Affects trace/doctor progression behavior when websocket source is unavailable or delayed."
+  },
+  {
     flag: "--no-auto-provision",
     type: "boolean switch",
     default_value: "false",

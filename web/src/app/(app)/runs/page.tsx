@@ -31,6 +31,8 @@ import {
   launchRunProfile,
   updateRunProfile,
   type DashboardSummary,
+  type FlowCapability,
+  type FlowsResponse,
   type RunCreateRequest,
   type RunProfile,
   type RunRow,
@@ -300,11 +302,23 @@ const DEFAULT_FORM: RunCreateRequest = {
   flow: "doctor",
   plan: "sim_actors.json",
   timing: "fast",
+  mode: undefined,
+  suite: undefined,
+  scenarios: [],
   store_id: "",
   phone: "",
   all_users: false,
+  strict_plan: false,
+  skip_app_probes: false,
+  skip_store_dashboard_probes: false,
   no_auto_provision: false,
+  enforce_websocket_gates: false,
   post_order_actions: false,
+  users: undefined,
+  orders: undefined,
+  interval: undefined,
+  reject: undefined,
+  continuous: false,
   extra_args: []
 };
 
@@ -370,6 +384,7 @@ function makeUiError(
 export default function App() {
   const { canCreateRuns, isAdmin } = useRole();
   const [flows, setFlows] = useState<string[]>([]);
+  const [flowCapabilities, setFlowCapabilities] = useState<Record<string, FlowCapability>>({});
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [runsTotal, setRunsTotal] = useState(0);
   const [runsOffset, setRunsOffset] = useState(0);
@@ -396,6 +411,10 @@ export default function App() {
   const profileNameInputRef = useRef<HTMLInputElement | null>(null);
   const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
   const backendHealthyRef = useRef<boolean | null>(null);
+  const allowedPlanPaths = useMemo(
+    () => new Set<string>(["sim_actors.json", ...simulationPlans.map((plan) => plan.path)]),
+    [simulationPlans]
+  );
 
   useEffect(() => {
     backendHealthyRef.current = backendHealthy;
@@ -411,12 +430,46 @@ export default function App() {
 
   useEffect(() => {
     fetchFlows()
-      .then((payload) => {
-        setFlows(payload);
+      .then((payload: FlowsResponse) => {
+        setFlows(payload.flows);
+        setFlowCapabilities(payload.capabilities || {});
         clearErrorForSource("flows");
       })
       .catch((err: unknown) => setErrorForSource("flows", err, "Failed to load simulator flows."));
   }, []);
+
+  const activeFlowCapability = useMemo(() => {
+    return flowCapabilities[form.flow] || null;
+  }, [flowCapabilities, form.flow]);
+
+  const resolvedMode = useMemo<"trace" | "load">(() => {
+    if (form.mode) return form.mode;
+    const fromCapability = activeFlowCapability?.resolved_mode;
+    return fromCapability === "load" ? "load" : "trace";
+  }, [form.mode, activeFlowCapability]);
+
+  const modeValidationError = useMemo(() => {
+    if (resolvedMode === "trace") {
+      if (form.continuous) return "Continuous is only valid in load mode.";
+      if (
+        form.users !== undefined ||
+        form.orders !== undefined ||
+        form.interval !== undefined ||
+        form.reject !== undefined
+      ) {
+        return "users/orders/interval/reject are only valid in load mode.";
+      }
+    }
+    if (resolvedMode === "load" && ((form.scenarios?.length || 0) > 0 || (form.suite && form.suite.trim()))) {
+      return "suite/scenarios are only valid in trace mode.";
+    }
+    if (form.reject !== undefined && (form.reject < 0 || form.reject > 1)) {
+      return "Reject rate must be between 0 and 1.";
+    }
+    if (form.users !== undefined && form.users < 1) return "Users must be >= 1.";
+    if (form.orders !== undefined && form.orders < 1) return "Orders must be >= 1.";
+    return null;
+  }, [resolvedMode, form]);
 
   useEffect(() => {
     fetchRunProfiles()
@@ -436,6 +489,11 @@ export default function App() {
       })
       .catch((err: unknown) => setErrorForSource("simulation-plans", err, "Failed to load simulation plans."));
   }, [canCreateRuns]);
+
+  useEffect(() => {
+    if (allowedPlanPaths.has(form.plan)) return;
+    setForm((prev) => ({ ...prev, plan: "sim_actors.json" }));
+  }, [allowedPlanPaths, form.plan]);
 
   useEffect(() => {
     const refreshHealth = () => {
@@ -513,6 +571,11 @@ export default function App() {
       "--timing",
       form.timing
     ];
+    if (form.mode) parts.push("--mode", form.mode);
+    if (form.suite && form.suite.trim()) parts.push("--suite", form.suite.trim());
+    for (const scenario of form.scenarios || []) {
+      if (scenario.trim()) parts.push("--scenario", scenario.trim());
+    }
     if (form.store_id && form.store_id.trim()) {
       parts.push("--store", form.store_id.trim());
     }
@@ -520,8 +583,17 @@ export default function App() {
       parts.push("--phone", form.phone.trim());
     }
     if (form.all_users) parts.push("--all-users");
+    if (form.strict_plan) parts.push("--strict-plan");
+    if (form.skip_app_probes) parts.push("--skip-app-probes");
+    if (form.skip_store_dashboard_probes) parts.push("--skip-store-dashboard-probes");
     if (form.no_auto_provision) parts.push("--no-auto-provision");
+    if (form.enforce_websocket_gates) parts.push("--enforce-websocket-gates");
     if (form.post_order_actions) parts.push("--post-order-actions");
+    if (form.users !== undefined) parts.push("--users", String(form.users));
+    if (form.orders !== undefined) parts.push("--orders", String(form.orders));
+    if (form.interval !== undefined) parts.push("--interval", String(form.interval));
+    if (form.reject !== undefined) parts.push("--reject", String(form.reject));
+    if (form.continuous) parts.push("--continuous");
     if (form.extra_args && form.extra_args.length) {
       parts.push(...form.extra_args);
     }
@@ -534,8 +606,10 @@ export default function App() {
     try {
       const created = await createRun({
         ...form,
+        suite: form.suite || undefined,
+        scenarios: (form.scenarios || []).length ? form.scenarios : undefined,
         store_id: form.store_id || undefined,
-        phone: form.phone || undefined
+        phone: form.phone || undefined,
       });
       setSelectedRunId(created.id);
       const [runsPayload, summaryPayload] = await Promise.all([
@@ -610,11 +684,22 @@ export default function App() {
         plan: form.plan,
         timing: form.timing,
         mode: form.mode,
+        suite: form.suite || undefined,
+        scenarios: form.scenarios || [],
         store_id: form.store_id || undefined,
         phone: form.phone || undefined,
         all_users: form.all_users,
+        strict_plan: form.strict_plan,
+        skip_app_probes: form.skip_app_probes,
+        skip_store_dashboard_probes: form.skip_store_dashboard_probes,
         no_auto_provision: form.no_auto_provision,
+        enforce_websocket_gates: form.enforce_websocket_gates,
         post_order_actions: form.post_order_actions,
+        users: form.users,
+        orders: form.orders,
+        interval: form.interval,
+        reject: form.reject,
+        continuous: form.continuous,
         extra_args: form.extra_args,
       });
       await refreshProfiles();
@@ -638,11 +723,22 @@ export default function App() {
         plan: form.plan,
         timing: form.timing,
         mode: form.mode,
+        suite: form.suite || undefined,
+        scenarios: form.scenarios || [],
         store_id: form.store_id || undefined,
         phone: form.phone || undefined,
         all_users: form.all_users,
+        strict_plan: form.strict_plan,
+        skip_app_probes: form.skip_app_probes,
+        skip_store_dashboard_probes: form.skip_store_dashboard_probes,
         no_auto_provision: form.no_auto_provision,
+        enforce_websocket_gates: form.enforce_websocket_gates,
         post_order_actions: form.post_order_actions,
+        users: form.users,
+        orders: form.orders,
+        interval: form.interval,
+        reject: form.reject,
+        continuous: form.continuous,
         extra_args: form.extra_args,
       });
       await refreshProfiles();
@@ -662,11 +758,22 @@ export default function App() {
       plan: profile.plan,
       timing: profile.timing,
       mode: profile.mode || undefined,
+      suite: profile.suite || undefined,
+      scenarios: profile.scenarios || [],
       store_id: profile.store_id || "",
       phone: profile.phone || "",
       all_users: profile.all_users,
+      strict_plan: profile.strict_plan,
+      skip_app_probes: profile.skip_app_probes,
+      skip_store_dashboard_probes: profile.skip_store_dashboard_probes,
       no_auto_provision: profile.no_auto_provision,
+      enforce_websocket_gates: profile.enforce_websocket_gates,
       post_order_actions: profile.post_order_actions || false,
+      users: profile.users ?? undefined,
+      orders: profile.orders ?? undefined,
+      interval: profile.interval ?? undefined,
+      reject: profile.reject ?? undefined,
+      continuous: profile.continuous,
       extra_args: profile.extra_args,
     });
   }
@@ -773,6 +880,9 @@ export default function App() {
               <div className="grid two" style={{ alignItems: "start" }}>
                 <RunLaunchPanel
                   flows={flows}
+                  flowCapabilities={flowCapabilities}
+                  resolvedMode={resolvedMode}
+                  modeValidationError={modeValidationError}
                   form={form}
                   isSubmitting={isSubmitting}
                   selectedRun={selectedRun}
@@ -783,6 +893,11 @@ export default function App() {
                   onCancelSelectedRun={() => selectedRun && onCancelRun(selectedRun.id)}
                   onSaveAsProfileShortcut={onSaveAsProfileShortcut}
                   commandPreview={commandPreview}
+                  hasAdvancedOverrides={
+                    Boolean(form.mode) ||
+                    Boolean(form.suite) ||
+                    Boolean(form.scenarios && form.scenarios.length > 0)
+                  }
                   canCancelSelectedRun={Boolean(selectedRun && isActiveStatus(selectedRun.status))}
                   planOptions={simulationPlans}
                 />

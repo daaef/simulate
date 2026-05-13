@@ -11,6 +11,7 @@ export type RunRow = {
   store_name: string | null;
   all_users: boolean;
   no_auto_provision: boolean;
+  enforce_websocket_gates: boolean;
   post_order_actions: boolean | null;
   extra_args: string[];
   status: string;
@@ -39,11 +40,22 @@ export type RunCreateRequest = {
   plan: string;
   timing: "fast" | "realistic";
   mode?: "trace" | "load";
+  suite?: string;
+  scenarios?: string[];
   store_id?: string;
   phone?: string;
   all_users?: boolean;
+  strict_plan?: boolean;
+  skip_app_probes?: boolean;
+  skip_store_dashboard_probes?: boolean;
   no_auto_provision?: boolean;
+  enforce_websocket_gates?: boolean;
   post_order_actions?: boolean;
+  users?: number;
+  orders?: number;
+  interval?: number;
+  reject?: number;
+  continuous?: boolean;
   extra_args?: string[];
 };
 
@@ -56,11 +68,22 @@ export type RunProfile = {
   plan: string;
   timing: "fast" | "realistic";
   mode: "trace" | "load" | null;
+  suite: string | null;
+  scenarios: string[];
   store_id: string | null;
   phone: string | null;
   all_users: boolean;
+  strict_plan: boolean;
+  skip_app_probes: boolean;
+  skip_store_dashboard_probes: boolean;
   no_auto_provision: boolean;
+  enforce_websocket_gates: boolean;
   post_order_actions: boolean | null;
+  users: number | null;
+  orders: number | null;
+  interval: number | null;
+  reject: number | null;
+  continuous: boolean;
   extra_args: string[];
   created_at: string;
   updated_at: string;
@@ -73,12 +96,38 @@ export type RunProfileUpsertRequest = {
   plan: string;
   timing: "fast" | "realistic";
   mode?: "trace" | "load";
+  suite?: string;
+  scenarios?: string[];
   store_id?: string;
   phone?: string;
   all_users?: boolean;
+  strict_plan?: boolean;
+  skip_app_probes?: boolean;
+  skip_store_dashboard_probes?: boolean;
   no_auto_provision?: boolean;
+  enforce_websocket_gates?: boolean;
   post_order_actions?: boolean;
+  users?: number;
+  orders?: number;
+  interval?: number;
+  reject?: number;
+  continuous?: boolean;
   extra_args?: string[];
+};
+
+export type FlowCapability = {
+  flow: string;
+  resolved_mode: "trace" | "load";
+  default_suite: string | null;
+  default_scenarios: string[];
+  allowed_optional_flags: string[];
+  available_suites: string[];
+  available_scenarios: string[];
+};
+
+export type FlowsResponse = {
+  flows: string[];
+  capabilities: Record<string, FlowCapability>;
 };
 
 export type DashboardSummary = {
@@ -251,6 +300,7 @@ export type ScheduleExecution = {
   id: number;
   schedule_id: number;
   run_id: number | null;
+  execution_chain_key?: string | null;
   status: string;
   detail: Record<string, unknown>;
   started_at: string;
@@ -268,6 +318,15 @@ export type ScheduleSummary = {
     degraded_campaigns: number;
   };
   recent_executions: ScheduleExecution[];
+  recent_schedule_states?: Array<{
+    schedule_id: number;
+    schedule_name?: string | null;
+    schedule_phase: string;
+    latest_run_id: number | null;
+    latest_run_status: string | null;
+    last_triggered_at: string | null;
+    latest_run_finished_at: string | null;
+  }>;
 };
 
 export type AlertItem = {
@@ -347,6 +406,7 @@ export type LatestRunIssue = {
   message: string;
   actor?: string | null;
   at?: string | null;
+  route?: string | null;
 };
 
 export type LatestRunOverview = {
@@ -538,9 +598,8 @@ async function unwrap<T>(response: Response, source: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function fetchFlows(): Promise<string[]> {
-  const payload = await unwrap<{ flows: string[] }>(await fetch("/api/v1/flows", withSession()), "flows");
-  return payload.flows;
+export async function fetchFlows(): Promise<FlowsResponse> {
+  return unwrap<FlowsResponse>(await fetch("/api/v1/flows", withSession()), "flows");
 }
 
 export async function fetchRuns(limit: number = 50, offset: number = 0): Promise<{ runs: RunRow[]; total: number; limit: number; offset: number }> {

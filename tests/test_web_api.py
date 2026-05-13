@@ -24,6 +24,7 @@ os.environ.setdefault("RUN_DB_PATH", str(RUNS_DIR / "web-gui-test.sqlite"))
 os.environ.setdefault("RUN_LOG_DIR", str(RUNS_DIR / "web-gui-test-logs"))
 
 from api.app import main as web_api
+from api.app.overview import service as overview_service
 
 
 def _build_events(count: int) -> list[dict[str, object]]:
@@ -349,10 +350,17 @@ class RunExecutionSnapshotTests(unittest.TestCase):
             flow="doctor",
             plan="sim_actors.json",
             timing="fast",
+            mode="trace",
+            suite="doctor",
+            scenarios=["app_bootstrap", "store_dashboard"],
             store_id="FZY_123",
             phone="+2348000000000",
             all_users=False,
+            strict_plan=True,
+            skip_app_probes=True,
+            skip_store_dashboard_probes=True,
             no_auto_provision=False,
+            enforce_websocket_gates=True,
             post_order_actions=True,
             extra_args=["--strict-plan"],
         )
@@ -364,10 +372,140 @@ class RunExecutionSnapshotTests(unittest.TestCase):
         self.assertIsInstance(snapshot, dict)
         self.assertEqual(snapshot["flow"], "doctor")
         self.assertEqual(snapshot["plan"], "sim_actors.json")
+        self.assertEqual(snapshot["suite"], "doctor")
+        self.assertEqual(snapshot["scenarios"], ["app_bootstrap", "store_dashboard"])
         self.assertEqual(snapshot["store_id"], "FZY_123")
         self.assertEqual(snapshot["phone"], "+2348000000000")
+        self.assertTrue(snapshot["strict_plan"])
+        self.assertTrue(snapshot["skip_app_probes"])
+        self.assertTrue(snapshot["skip_store_dashboard_probes"])
+        self.assertTrue(snapshot["enforce_websocket_gates"])
         self.assertEqual(snapshot["extra_args"], ["--strict-plan"])
         self.assertIn("python3 -u -m simulate doctor", snapshot["command"])
+        self.assertIn("--suite doctor", snapshot["command"])
+        self.assertIn("--scenario app_bootstrap", snapshot["command"])
+        self.assertIn("--enforce-websocket-gates", snapshot["command"])
+
+    def test_build_command_rejects_invalid_mode_combinations(self) -> None:
+        with self.assertRaises(web_api.HTTPException) as trace_continuous:
+            web_api._build_command(
+                web_api.RunCreateRequest(
+                    flow="doctor",
+                    plan="sim_actors.json",
+                    timing="fast",
+                    mode="trace",
+                    continuous=True,
+                )
+            )
+        self.assertIn("only supported in load mode", str(trace_continuous.exception.detail))
+
+        with self.assertRaises(web_api.HTTPException) as load_trace_controls:
+            web_api._build_command(
+                web_api.RunCreateRequest(
+                    flow="load",
+                    plan="sim_actors.json",
+                    timing="fast",
+                    mode="load",
+                    suite="doctor",
+                )
+            )
+        self.assertIn("only supported in trace mode", str(load_trace_controls.exception.detail))
+
+        with self.assertRaises(web_api.HTTPException) as bad_reject:
+            web_api._build_command(
+                web_api.RunCreateRequest(
+                    flow="load",
+                    plan="sim_actors.json",
+                    timing="fast",
+                    mode="load",
+                    reject=2.0,
+                )
+            )
+        self.assertIn("between 0.0 and 1.0", str(bad_reject.exception.detail))
+
+
+class FlowCapabilitiesTests(unittest.TestCase):
+    def test_flows_payload_includes_capabilities(self) -> None:
+        payload = web_api._flows_payload()
+        self.assertIn("flows", payload)
+        self.assertIn("capabilities", payload)
+        self.assertIn("doctor", payload["capabilities"])
+        doctor = payload["capabilities"]["doctor"]
+        self.assertEqual(doctor["resolved_mode"], "trace")
+        self.assertIn("suite", doctor["allowed_optional_flags"])
+        self.assertIn("load", payload["capabilities"])
+
+
+class OverviewLatestRunTests(unittest.TestCase):
+    def test_latest_run_overview_filters_non_server_failures_and_keeps_failed_route(self) -> None:
+        run = {
+            "id": 999,
+            "status": "failed",
+            "flow": "doctor",
+            "mode": "trace",
+            "timing": "fast",
+            "trigger_source": "github",
+            "trigger_label": "GitHub integration: fainzy-dashboard/production",
+            "trigger_context": {"project": "fainzy-dashboard", "environment": "production"},
+        }
+        events = [
+            {
+                "id": 1,
+                "actor": "user",
+                "action": "probe_saved_cards",
+                "endpoint": "/v1/core/cards/",
+                "http_status": 404,
+                "message": "no saved card",
+                "ok": False,
+            },
+            {
+                "id": 2,
+                "actor": "user",
+                "action": "place_order",
+                "endpoint": "/v1/core/orders/",
+                "http_status": 503,
+                "message": "service unavailable",
+                "ok": False,
+            },
+        ]
+        artifact_issues = [
+            {
+                "severity": "error",
+                "code": "missing_user_token",
+                "message": "Saved cards were skipped because user authentication is missing.",
+                "related_event_id": 1,
+            },
+            {
+                "severity": "error",
+                "code": "payment_intent_http_error",
+                "message": "HTTP error creating payment intent",
+                "related_event_id": 2,
+            },
+        ]
+
+        with mock.patch.object(overview_service, "_load_latest_run", return_value=run):
+            with mock.patch.object(overview_service, "_load_events", return_value=(events, artifact_issues, {})):
+                with mock.patch.object(overview_service, "_load_metrics", return_value=None):
+                    payload = overview_service.latest_run_overview()
+
+        issues = payload["issues"]
+        self.assertGreaterEqual(len(issues), 1)
+        self.assertTrue(any((issue.get("route") == "/v1/core/orders/") for issue in issues))
+        self.assertFalse(any(("missing_user_token" == issue.get("code")) for issue in issues))
+        self.assertEqual(payload["metrics"]["failed_events"], 1)
+
+    def test_latest_run_overview_tolerates_malformed_issue_payloads(self) -> None:
+        run = {"id": 1000, "status": "failed"}
+        events = [{"id": 5, "action": "probe", "endpoint": "/x", "http_status": 502, "ok": False}]
+        artifact_issues = [{"severity": "error", "code": object(), "message": object(), "related_event_id": "bad"}]
+
+        with mock.patch.object(overview_service, "_load_latest_run", return_value=run):
+            with mock.patch.object(overview_service, "_load_events", return_value=(events, artifact_issues, {})):
+                with mock.patch.object(overview_service, "_load_metrics", return_value=None):
+                    payload = overview_service.latest_run_overview()
+
+        self.assertIn("issues", payload)
+        self.assertIsInstance(payload["issues"], list)
 
 
 class RunDeletionSafetyTests(unittest.TestCase):
@@ -401,6 +539,7 @@ class RunDeletionSafetyTests(unittest.TestCase):
                 phone="+2348000000000",
                 all_users=False,
                 no_auto_provision=False,
+                enforce_websocket_gates=False,
                 post_order_actions=False,
                 extra_args=[],
             )
@@ -533,11 +672,19 @@ class RunProfilesApiTests(unittest.TestCase):
                 "flow": "doctor",
                 "plan": "sim_actors.json",
                 "timing": "fast",
+                "mode": "trace",
+                "suite": "doctor",
+                "scenarios": ["app_bootstrap", "store_dashboard"],
                 "store_id": "FZY_123",
                 "phone": "+2348000001111",
                 "all_users": False,
+                "strict_plan": True,
+                "skip_app_probes": True,
+                "skip_store_dashboard_probes": True,
                 "no_auto_provision": False,
+                "enforce_websocket_gates": True,
                 "post_order_actions": True,
+                "continuous": False,
                 "extra_args": ["--strict-plan"],
             },
         )
@@ -558,6 +705,10 @@ class RunProfilesApiTests(unittest.TestCase):
         self.assertEqual(snapshot_response.status_code, 200)
         self.assertTrue(snapshot_response.json()["available"])
         self.assertEqual(snapshot_response.json()["snapshot"]["store_id"], "FZY_123")
+        self.assertEqual(snapshot_response.json()["snapshot"]["suite"], "doctor")
+        self.assertEqual(snapshot_response.json()["snapshot"]["scenarios"], ["app_bootstrap", "store_dashboard"])
+        self.assertTrue(snapshot_response.json()["snapshot"]["strict_plan"])
+        self.assertTrue(snapshot_response.json()["snapshot"]["enforce_websocket_gates"])
 
         replay_response = self.client.post(f"/api/v1/runs/{launched_run_id}/replay")
         self.assertEqual(replay_response.status_code, 200)
@@ -642,6 +793,25 @@ class SchedulesApiTests(unittest.TestCase):
         self.assertEqual(trigger_response.status_code, 200)
         self.assertEqual(trigger_response.json()["execution"]["status"], "launched")
         self.assertEqual(trigger_response.json()["run"]["flow"], "doctor")
+        self.assertTrue(trigger_response.json()["execution"].get("execution_chain_key"))
+
+        summary_response = self.client.get("/api/v1/schedules/summary")
+        self.assertEqual(summary_response.status_code, 200)
+        self.assertIn("recent_schedule_states", summary_response.json())
+        lifecycle_rows = [
+            row
+            for row in summary_response.json()["recent_executions"]
+            if row["schedule_id"] == schedule_id and row.get("execution_chain_key") == trigger_response.json()["execution"]["execution_chain_key"]
+        ]
+        self.assertGreaterEqual(len(lifecycle_rows), 3)
+        self.assertTrue(all(row.get("execution_chain_key") for row in lifecycle_rows))
+        schedule_states = [
+            row for row in summary_response.json()["recent_schedule_states"] if int(row["schedule_id"]) == int(schedule_id)
+        ]
+        self.assertEqual(len(schedule_states), 1)
+        self.assertEqual(schedule_states[0]["schedule_phase"], "launched")
+        self.assertEqual(int(schedule_states[0]["latest_run_id"]), int(trigger_response.json()["run"]["id"]))
+        self.assertTrue(isinstance(schedule_states[0]["latest_run_status"], str))
 
         pause_response = self.client.post(f"/api/v1/schedules/{schedule_id}/pause")
         self.assertEqual(pause_response.status_code, 200)
@@ -710,6 +880,7 @@ class SchedulesApiTests(unittest.TestCase):
         self.assertEqual(trigger_response.status_code, 200)
         self.assertEqual(trigger_response.json()["execution"]["status"], "launched")
         self.assertEqual(len(trigger_response.json()["runs"]), 2)
+        self.assertTrue(trigger_response.json()["execution"].get("execution_chain_key"))
 
     def test_new_contract_schedule_shifts_into_run_window(self) -> None:
         profile_id = self._create_profile()

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from scenarios import TRACE_SCENARIOS, TRACE_SUITES
+
 
 FLOW_PRESETS: dict[str, dict[str, Any]] = {
     "load": {
@@ -109,6 +111,43 @@ FLOW_ALIASES = {
 }
 
 
+FLOW_OPTIONAL_FLAGS: dict[str, list[str]] = {
+    "trace": [
+        "timing",
+        "store_id",
+        "phone",
+        "suite",
+        "scenarios",
+        "strict_plan",
+        "skip_app_probes",
+        "skip_store_dashboard_probes",
+        "no_auto_provision",
+        "enforce_websocket_gates",
+        "post_order_actions",
+        "all_users",
+        "extra_args",
+    ],
+    "load": [
+        "timing",
+        "store_id",
+        "phone",
+        "all_users",
+        "users",
+        "orders",
+        "interval",
+        "reject",
+        "continuous",
+        "strict_plan",
+        "skip_app_probes",
+        "skip_store_dashboard_probes",
+        "no_auto_provision",
+        "enforce_websocket_gates",
+        "post_order_actions",
+        "extra_args",
+    ],
+}
+
+
 def normalise_flow(name: str | None) -> str:
     key = (name or "").strip().lower().replace("_", "-")
     return FLOW_ALIASES.get(key, key)
@@ -123,3 +162,21 @@ def resolve_flow(name: str | None) -> dict[str, Any] | None:
         expected = ", ".join(sorted(FLOW_PRESETS))
         raise RuntimeError(f"Unsupported flow {name!r}. Expected one of {expected}.")
     return {"name": key, **preset}
+
+
+def flow_capabilities() -> dict[str, dict[str, Any]]:
+    capabilities: dict[str, dict[str, Any]] = {}
+    for flow_name, preset in sorted(FLOW_PRESETS.items()):
+        resolved_mode = str(preset.get("mode", "trace"))
+        default_suite = str(preset.get("suite") or "") or None
+        default_scenarios = [str(item) for item in preset.get("scenarios", [])]
+        capabilities[flow_name] = {
+            "flow": flow_name,
+            "resolved_mode": resolved_mode,
+            "default_suite": default_suite,
+            "default_scenarios": default_scenarios,
+            "allowed_optional_flags": list(FLOW_OPTIONAL_FLAGS.get(resolved_mode, [])),
+            "available_suites": sorted(TRACE_SUITES.keys()) if resolved_mode == "trace" else [],
+            "available_scenarios": list(TRACE_SCENARIOS) if resolved_mode == "trace" else [],
+        }
+    return capabilities

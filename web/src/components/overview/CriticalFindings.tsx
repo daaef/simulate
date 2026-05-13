@@ -26,6 +26,7 @@ export default function CriticalFindings({ issues }: { issues: LatestRunIssue[] 
                 <span className={`alert-pill ${severityClass(issue.severity)}`}>{issue.severity}</span>
               </div>
               <p className="muted">{issue.message}</p>
+              {issue.route ? <p className="muted">route: {issue.route}</p> : null}
               {issue.actor ? <span className="chip">{issue.actor}</span> : null}
             </div>
           ))}

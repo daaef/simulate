@@ -25,7 +25,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from flow_presets import FLOW_PRESETS
+from flow_presets import FLOW_PRESETS, flow_capabilities
 from .admin.routes import router as admin_router
 from .alerts.routes import router as alerts_router
 from .alerts.service import configure_runtime as configure_alerts_runtime
@@ -197,6 +197,7 @@ def _init_db() -> None:
                 store_name TEXT,
                 all_users INTEGER NOT NULL DEFAULT 0,
                 no_auto_provision INTEGER NOT NULL DEFAULT 0,
+                enforce_websocket_gates INTEGER NOT NULL DEFAULT 0,
                 post_order_actions INTEGER,
                 extra_args TEXT NOT NULL DEFAULT '[]',
                 status TEXT NOT NULL,
@@ -232,11 +233,22 @@ def _init_db() -> None:
                 plan TEXT NOT NULL,
                 timing TEXT NOT NULL,
                 mode TEXT,
+                suite TEXT,
+                scenarios TEXT NOT NULL DEFAULT '[]',
                 store_id TEXT,
                 phone TEXT,
                 all_users INTEGER NOT NULL DEFAULT 0,
+                strict_plan INTEGER NOT NULL DEFAULT 0,
+                skip_app_probes INTEGER NOT NULL DEFAULT 0,
+                skip_store_dashboard_probes INTEGER NOT NULL DEFAULT 0,
                 no_auto_provision INTEGER NOT NULL DEFAULT 0,
+                enforce_websocket_gates INTEGER NOT NULL DEFAULT 0,
                 post_order_actions INTEGER,
+                users INTEGER,
+                orders INTEGER,
+                interval REAL,
+                reject REAL,
+                continuous INTEGER NOT NULL DEFAULT 0,
                 extra_args TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -288,6 +300,7 @@ def _init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 schedule_id INTEGER NOT NULL,
                 run_id INTEGER,
+                execution_chain_key TEXT,
                 status TEXT NOT NULL,
                 detail TEXT NOT NULL DEFAULT '{}',
                 started_at TEXT NOT NULL,
@@ -367,11 +380,38 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE runs ADD COLUMN schedule_id INTEGER")
     if "integration_trigger_id" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN integration_trigger_id INTEGER")
+    schedule_execution_columns = [row[1] for row in conn.execute("PRAGMA table_info(schedule_executions)").fetchall()]
+    if "execution_chain_key" not in schedule_execution_columns:
+        conn.execute("ALTER TABLE schedule_executions ADD COLUMN execution_chain_key TEXT")
     if "launched_by_user_id" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN launched_by_user_id INTEGER")
+    if "enforce_websocket_gates" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN enforce_websocket_gates INTEGER NOT NULL DEFAULT 0")
     profile_columns = [row[1] for row in conn.execute("PRAGMA table_info(run_profiles)").fetchall()]
     if profile_columns and "description" not in profile_columns:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN description TEXT")
+    if profile_columns and "suite" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN suite TEXT")
+    if profile_columns and "scenarios" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN scenarios TEXT NOT NULL DEFAULT '[]'")
+    if profile_columns and "strict_plan" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN strict_plan INTEGER NOT NULL DEFAULT 0")
+    if profile_columns and "skip_app_probes" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN skip_app_probes INTEGER NOT NULL DEFAULT 0")
+    if profile_columns and "skip_store_dashboard_probes" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN skip_store_dashboard_probes INTEGER NOT NULL DEFAULT 0")
+    if profile_columns and "enforce_websocket_gates" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN enforce_websocket_gates INTEGER NOT NULL DEFAULT 0")
+    if profile_columns and "users" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN users INTEGER")
+    if profile_columns and "orders" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN orders INTEGER")
+    if profile_columns and "interval" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN interval REAL")
+    if profile_columns and "reject" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN reject REAL")
+    if profile_columns and "continuous" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN continuous INTEGER NOT NULL DEFAULT 0")
     schedule_columns = [row[1] for row in conn.execute("PRAGMA table_info(schedules)").fetchall()]
     if schedule_columns and "custom_anchor_at" not in schedule_columns:
         conn.execute("ALTER TABLE schedules ADD COLUMN custom_anchor_at TEXT")
@@ -424,6 +464,7 @@ def _migrate_postgres_schema() -> None:
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS schedule_id INTEGER")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS integration_trigger_id INTEGER")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS launched_by_user_id INTEGER")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS enforce_websocket_gates BOOLEAN NOT NULL DEFAULT FALSE")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS run_profiles (
@@ -435,17 +476,39 @@ def _migrate_postgres_schema() -> None:
                     plan VARCHAR(255) NOT NULL,
                     timing VARCHAR(20) NOT NULL,
                     mode VARCHAR(20),
+                    suite VARCHAR(80),
+                    scenarios JSONB DEFAULT '[]',
                     store_id VARCHAR(50),
                     phone VARCHAR(20),
                     all_users BOOLEAN NOT NULL DEFAULT FALSE,
+                    strict_plan BOOLEAN NOT NULL DEFAULT FALSE,
+                    skip_app_probes BOOLEAN NOT NULL DEFAULT FALSE,
+                    skip_store_dashboard_probes BOOLEAN NOT NULL DEFAULT FALSE,
                     no_auto_provision BOOLEAN NOT NULL DEFAULT FALSE,
+                    enforce_websocket_gates BOOLEAN NOT NULL DEFAULT FALSE,
                     post_order_actions BOOLEAN,
+                    users INTEGER,
+                    orders INTEGER,
+                    interval DOUBLE PRECISION,
+                    reject DOUBLE PRECISION,
+                    continuous BOOLEAN NOT NULL DEFAULT FALSE,
                     extra_args JSONB DEFAULT '[]',
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                 )
                 """
             )
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS enforce_websocket_gates BOOLEAN NOT NULL DEFAULT FALSE")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS suite VARCHAR(80)")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS scenarios JSONB DEFAULT '[]'::jsonb")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS strict_plan BOOLEAN NOT NULL DEFAULT FALSE")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS skip_app_probes BOOLEAN NOT NULL DEFAULT FALSE")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS skip_store_dashboard_probes BOOLEAN NOT NULL DEFAULT FALSE")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS users INTEGER")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS orders INTEGER")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS interval DOUBLE PRECISION")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS reject DOUBLE PRECISION")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS continuous BOOLEAN NOT NULL DEFAULT FALSE")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schedules (
@@ -504,6 +567,7 @@ def _migrate_postgres_schema() -> None:
                     id SERIAL PRIMARY KEY,
                     schedule_id INTEGER REFERENCES schedules(id) ON DELETE CASCADE,
                     run_id INTEGER,
+                    execution_chain_key TEXT,
                     status VARCHAR(20) NOT NULL,
                     detail JSONB DEFAULT '{}',
                     started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -511,6 +575,7 @@ def _migrate_postgres_schema() -> None:
                 )
                 """
             )
+            cursor.execute("ALTER TABLE schedule_executions ADD COLUMN IF NOT EXISTS execution_chain_key TEXT")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS system_settings (
@@ -712,6 +777,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     payload = dict(row)
     payload["all_users"] = bool(payload["all_users"])
     payload["no_auto_provision"] = bool(payload["no_auto_provision"])
+    payload["enforce_websocket_gates"] = bool(payload.get("enforce_websocket_gates"))
     if payload["post_order_actions"] is not None:
         payload["post_order_actions"] = bool(payload["post_order_actions"])
     payload["extra_args"] = json.loads(payload["extra_args"] or "[]")
@@ -730,12 +796,14 @@ def _row_to_dict_any(row) -> dict[str, Any]:
         payload = dict(row)
         if payload.get("trigger_context") is None:
             payload["trigger_context"] = {}
+        payload["enforce_websocket_gates"] = bool(payload.get("enforce_websocket_gates"))
         return payload
     else:
         # SQLite returns Row objects
         payload = dict(row)
         payload["all_users"] = bool(payload["all_users"])
         payload["no_auto_provision"] = bool(payload["no_auto_provision"])
+        payload["enforce_websocket_gates"] = bool(payload.get("enforce_websocket_gates"))
         if payload["post_order_actions"] is not None:
             payload["post_order_actions"] = bool(payload["post_order_actions"])
         payload["extra_args"] = json.loads(payload["extra_args"] or "[]")
@@ -753,9 +821,23 @@ def _row_to_dict_any(row) -> dict[str, Any]:
 def _profile_row_to_dict_any(row) -> dict[str, Any]:
     payload = dict(row)
     payload["all_users"] = bool(payload["all_users"])
+    payload["strict_plan"] = bool(payload.get("strict_plan"))
+    payload["skip_app_probes"] = bool(payload.get("skip_app_probes"))
+    payload["skip_store_dashboard_probes"] = bool(payload.get("skip_store_dashboard_probes"))
     payload["no_auto_provision"] = bool(payload["no_auto_provision"])
+    payload["enforce_websocket_gates"] = bool(payload.get("enforce_websocket_gates"))
+    payload["continuous"] = bool(payload.get("continuous"))
     if payload["post_order_actions"] is not None:
         payload["post_order_actions"] = bool(payload["post_order_actions"])
+    scenarios = payload.get("scenarios")
+    if isinstance(scenarios, str):
+        payload["scenarios"] = json.loads(scenarios or "[]")
+    elif scenarios is None:
+        payload["scenarios"] = []
+    payload["users"] = int(payload["users"]) if payload.get("users") is not None else None
+    payload["orders"] = int(payload["orders"]) if payload.get("orders") is not None else None
+    payload["interval"] = float(payload["interval"]) if payload.get("interval") is not None else None
+    payload["reject"] = float(payload["reject"]) if payload.get("reject") is not None else None
     extra_args = payload.get("extra_args")
     if isinstance(extra_args, str):
         payload["extra_args"] = json.loads(extra_args or "[]")
@@ -1043,12 +1125,44 @@ class ScheduledRun:
     store_id: str | None = None
 
 
+def _flows_payload() -> dict[str, Any]:
+    capabilities = flow_capabilities()
+    return {
+        "flows": sorted(FLOW_PRESETS.keys()),
+        "capabilities": capabilities,
+    }
+
+
 def _build_command(request: RunCreateRequest) -> list[str]:
     if request.flow not in FLOW_PRESETS:
         expected = ", ".join(sorted(FLOW_PRESETS))
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported flow {request.flow!r}. Expected one of {expected}.",
+        )
+    preset = FLOW_PRESETS[request.flow]
+    resolved_mode = request.mode or str(preset.get("mode") or "trace")
+    if resolved_mode not in {"trace", "load"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported mode {resolved_mode!r}. Expected trace or load.")
+    if request.reject is not None and not 0.0 <= request.reject <= 1.0:
+        raise HTTPException(status_code=400, detail="reject must be between 0.0 and 1.0.")
+    if request.users is not None and request.users < 1:
+        raise HTTPException(status_code=400, detail="users must be >= 1.")
+    if request.orders is not None and request.orders < 1:
+        raise HTTPException(status_code=400, detail="orders must be >= 1.")
+    if resolved_mode == "trace" and request.continuous:
+        raise HTTPException(status_code=400, detail="continuous is only supported in load mode.")
+    if resolved_mode == "trace" and any(
+        value is not None for value in (request.users, request.orders, request.interval, request.reject)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="users/orders/interval/reject are only supported in load mode.",
+        )
+    if resolved_mode == "load" and (request.suite or request.scenarios):
+        raise HTTPException(
+            status_code=400,
+            detail="suite/scenarios are only supported in trace mode.",
         )
     command = [
         "python3",
@@ -1063,16 +1177,39 @@ def _build_command(request: RunCreateRequest) -> list[str]:
     ]
     if request.mode:
         command.extend(["--mode", request.mode])
+    if request.suite:
+        command.extend(["--suite", request.suite])
+    for scenario in request.scenarios or []:
+        if scenario:
+            command.extend(["--scenario", scenario])
     if request.store_id:
         command.extend(["--store", request.store_id])
     if request.phone:
         command.extend(["--phone", request.phone])
     if request.all_users:
         command.append("--all-users")
+    if request.strict_plan:
+        command.append("--strict-plan")
+    if request.skip_app_probes:
+        command.append("--skip-app-probes")
+    if request.skip_store_dashboard_probes:
+        command.append("--skip-store-dashboard-probes")
     if request.no_auto_provision:
         command.append("--no-auto-provision")
+    if request.enforce_websocket_gates:
+        command.append("--enforce-websocket-gates")
     if request.post_order_actions:
         command.append("--post-order-actions")
+    if request.users is not None:
+        command.extend(["--users", str(request.users)])
+    if request.orders is not None:
+        command.extend(["--orders", str(request.orders)])
+    if request.interval is not None:
+        command.extend(["--interval", str(request.interval)])
+    if request.reject is not None:
+        command.extend(["--reject", str(request.reject)])
+    if request.continuous:
+        command.append("--continuous")
     if request.extra_args:
         command.extend(request.extra_args)
     return command
@@ -1080,16 +1217,27 @@ def _build_command(request: RunCreateRequest) -> list[str]:
 
 def _build_execution_snapshot(request: RunCreateRequest, command: list[str], created_at: str) -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 2,
         "flow": request.flow,
         "plan": request.plan,
         "timing": request.timing,
         "mode": request.mode,
+        "suite": request.suite,
+        "scenarios": request.scenarios,
         "store_id": request.store_id,
         "phone": request.phone,
         "all_users": request.all_users,
+        "strict_plan": request.strict_plan,
+        "skip_app_probes": request.skip_app_probes,
+        "skip_store_dashboard_probes": request.skip_store_dashboard_probes,
         "no_auto_provision": request.no_auto_provision,
+        "enforce_websocket_gates": request.enforce_websocket_gates,
         "post_order_actions": request.post_order_actions,
+        "users": request.users,
+        "orders": request.orders,
+        "interval": request.interval,
+        "reject": request.reject,
+        "continuous": request.continuous,
         "extra_args": request.extra_args,
         "command": " ".join(command),
         "created_at": created_at,
@@ -1102,11 +1250,22 @@ def _profile_request_to_run_request(profile: dict[str, Any]) -> RunCreateRequest
         plan=profile["plan"],
         timing=profile["timing"],
         mode=profile.get("mode"),
+        suite=profile.get("suite"),
+        scenarios=list(profile.get("scenarios") or []),
         store_id=profile.get("store_id"),
         phone=profile.get("phone"),
         all_users=bool(profile.get("all_users")),
+        strict_plan=bool(profile.get("strict_plan")),
+        skip_app_probes=bool(profile.get("skip_app_probes")),
+        skip_store_dashboard_probes=bool(profile.get("skip_store_dashboard_probes")),
         no_auto_provision=bool(profile.get("no_auto_provision")),
+        enforce_websocket_gates=bool(profile.get("enforce_websocket_gates")),
         post_order_actions=profile.get("post_order_actions"),
+        users=profile.get("users"),
+        orders=profile.get("orders"),
+        interval=profile.get("interval"),
+        reject=profile.get("reject"),
+        continuous=bool(profile.get("continuous")),
         extra_args=list(profile.get("extra_args") or []),
         trigger_source="profile",
         trigger_label=f"Profile launch: {profile.get('name') or profile.get('id')}",
@@ -1413,10 +1572,10 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                     INSERT INTO runs (
                         user_id, flow, plan, timing, mode, store_id, phone, store_phone,
                         user_name, store_name, all_users, no_auto_provision,
-                        post_order_actions, extra_args, status, command, created_at, execution_snapshot,
+                        enforce_websocket_gates, post_order_actions, extra_args, status, command, created_at, execution_snapshot,
                         trigger_source, trigger_label, trigger_context, profile_id, schedule_id,
                         integration_trigger_id, launched_by_user_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -1432,6 +1591,7 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                         None, # store_name will be updated after run starts
                         request.all_users,
                         request.no_auto_provision,
+                        request.enforce_websocket_gates,
                         request.post_order_actions,
                         json.dumps(request.extra_args),
                         "queued",
@@ -1457,7 +1617,7 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                 """
                 INSERT INTO runs (
                     flow, plan, timing, mode, store_id, phone, store_phone, user_name, store_name,
-                    all_users, no_auto_provision, post_order_actions, extra_args, status, command, created_at, execution_snapshot,
+                    all_users, no_auto_provision, enforce_websocket_gates, post_order_actions, extra_args, status, command, created_at, execution_snapshot,
                     trigger_source, trigger_label, trigger_context, profile_id, schedule_id, integration_trigger_id, launched_by_user_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -1473,6 +1633,7 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                     None,
                     int(request.all_users),
                     int(request.no_auto_provision),
+                    int(request.enforce_websocket_gates),
                     int(request.post_order_actions) if request.post_order_actions is not None else None,
                     json.dumps(request.extra_args),
                     "queued",
@@ -1513,9 +1674,11 @@ def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any
                 cursor.execute(
                     """
                     INSERT INTO run_profiles (
-                        user_id, name, description, flow, plan, timing, mode, store_id, phone,
-                        all_users, no_auto_provision, post_order_actions, extra_args, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        user_id, name, description, flow, plan, timing, mode, suite, scenarios, store_id, phone,
+                        all_users, strict_plan, skip_app_probes, skip_store_dashboard_probes, no_auto_provision,
+                        enforce_websocket_gates, post_order_actions, users, orders, interval, reject, continuous,
+                        extra_args, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING *
                     """,
                     (
@@ -1526,11 +1689,22 @@ def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any
                         request.plan,
                         request.timing,
                         request.mode,
+                        request.suite,
+                        json.dumps(request.scenarios),
                         request.store_id,
                         request.phone,
                         request.all_users,
+                        request.strict_plan,
+                        request.skip_app_probes,
+                        request.skip_store_dashboard_probes,
                         request.no_auto_provision,
+                        request.enforce_websocket_gates,
                         request.post_order_actions,
+                        request.users,
+                        request.orders,
+                        request.interval,
+                        request.reject,
+                        request.continuous,
                         json.dumps(request.extra_args),
                         created_at,
                         created_at,
@@ -1545,9 +1719,11 @@ def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any
             cursor = conn.execute(
                 """
                 INSERT INTO run_profiles (
-                    user_id, name, description, flow, plan, timing, mode, store_id, phone,
-                    all_users, no_auto_provision, post_order_actions, extra_args, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    user_id, name, description, flow, plan, timing, mode, suite, scenarios, store_id, phone,
+                    all_users, strict_plan, skip_app_probes, skip_store_dashboard_probes, no_auto_provision,
+                    enforce_websocket_gates, post_order_actions, users, orders, interval, reject, continuous,
+                    extra_args, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     persisted_user_id,
@@ -1557,11 +1733,22 @@ def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any
                     request.plan,
                     request.timing,
                     request.mode,
+                    request.suite,
+                    json.dumps(request.scenarios),
                     request.store_id,
                     request.phone,
                     int(request.all_users),
+                    int(request.strict_plan),
+                    int(request.skip_app_probes),
+                    int(request.skip_store_dashboard_probes),
                     int(request.no_auto_provision),
+                    int(request.enforce_websocket_gates),
                     int(request.post_order_actions) if request.post_order_actions is not None else None,
+                    request.users,
+                    request.orders,
+                    request.interval,
+                    request.reject,
+                    int(request.continuous),
                     json.dumps(request.extra_args),
                     created_at,
                     created_at,
@@ -1581,11 +1768,22 @@ def _update_run_profile(profile_id: int, request, user_id: Optional[int] = None)
         "plan": request.plan,
         "timing": request.timing,
         "mode": request.mode,
+        "suite": request.suite,
+        "scenarios": json.dumps(request.scenarios),
         "store_id": request.store_id,
         "phone": request.phone,
         "all_users": request.all_users,
+        "strict_plan": request.strict_plan,
+        "skip_app_probes": request.skip_app_probes,
+        "skip_store_dashboard_probes": request.skip_store_dashboard_probes,
         "no_auto_provision": request.no_auto_provision,
+        "enforce_websocket_gates": request.enforce_websocket_gates,
         "post_order_actions": request.post_order_actions,
+        "users": request.users,
+        "orders": request.orders,
+        "interval": request.interval,
+        "reject": request.reject,
+        "continuous": request.continuous,
         "extra_args": json.dumps(request.extra_args),
         "updated_at": updated_at,
     }
@@ -3066,6 +3264,7 @@ def _set_schedule_status(schedule_id: int, status: str) -> dict[str, Any]:
 def _record_schedule_execution(
     schedule_id: int,
     run_id: Optional[int],
+    execution_chain_key: Optional[str],
     status: str,
     detail: dict[str, Any],
     started_at: str,
@@ -3078,11 +3277,11 @@ def _record_schedule_execution(
             with conn.cursor(cursor_factory=DictCursor) as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO schedule_executions (schedule_id, run_id, status, detail, started_at, finished_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO schedule_executions (schedule_id, run_id, execution_chain_key, status, detail, started_at, finished_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     RETURNING *
                     """,
-                    (schedule_id, run_id, status, detail_payload, started_at, finished_at),
+                    (schedule_id, run_id, execution_chain_key, status, detail_payload, started_at, finished_at),
                 )
                 row = cursor.fetchone()
                 conn.commit()
@@ -3092,10 +3291,10 @@ def _record_schedule_execution(
         with DB_LOCK, _db() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO schedule_executions (schedule_id, run_id, status, detail, started_at, finished_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO schedule_executions (schedule_id, run_id, execution_chain_key, status, detail, started_at, finished_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (schedule_id, run_id, status, detail_payload, started_at, finished_at),
+                (schedule_id, run_id, execution_chain_key, status, detail_payload, started_at, finished_at),
             )
             row = conn.execute("SELECT * FROM schedule_executions WHERE id = ?", (int(cursor.lastrowid),)).fetchone()
     return _schedule_execution_row_to_dict_any(row)
@@ -3122,15 +3321,50 @@ def _list_schedule_executions(limit: int = 10) -> list[dict[str, Any]]:
     return [_schedule_execution_row_to_dict_any(row) for row in rows]
 
 
+def _run_status_map(run_ids: list[int]) -> dict[int, dict[str, Any]]:
+    if not run_ids:
+        return {}
+    unique_ids = sorted({int(run_id) for run_id in run_ids})
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    "SELECT id, status, finished_at FROM runs WHERE id = ANY(%s)",
+                    (unique_ids,),
+                )
+                rows = cursor.fetchall()
+        finally:
+            conn.close()
+    else:
+        placeholders = ", ".join(["?"] * len(unique_ids))
+        with DB_LOCK, _db() as conn:
+            rows = conn.execute(
+                f"SELECT id, status, finished_at FROM runs WHERE id IN ({placeholders})",
+                tuple(unique_ids),
+            ).fetchall()
+    payload: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        item = dict(row)
+        run_id = int(item["id"])
+        payload[run_id] = {
+            "status": str(item.get("status") or "unknown"),
+            "finished_at": _jsonable_datetime(item.get("finished_at")),
+        }
+    return payload
+
+
 def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> dict[str, Any]:
     schedule = _get_schedule(schedule_id)
     if schedule["status"] in {"disabled", "deleted"}:
         raise HTTPException(status_code=409, detail=f"Schedule {schedule_id} is {schedule['status']}.")
     started_at = _utc_now()
+    execution_chain_key = f"schedule-{schedule_id}-{time.time_ns()}"
     runs: list[dict[str, Any]] = []
     _record_schedule_execution(
         schedule_id,
         None,
+        execution_chain_key,
         "queued",
         {"message": "Schedule accepted and queued for launch."},
         started_at,
@@ -3139,6 +3373,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
     _record_schedule_execution(
         schedule_id,
         None,
+        execution_chain_key,
         "started",
         {"message": "Schedule launch execution started."},
         started_at,
@@ -3192,6 +3427,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
         execution = _record_schedule_execution(
             schedule_id,
             runs[0]["id"] if runs else None,
+            execution_chain_key,
             "failed",
             {"error": str(exc), "run_ids": [run["id"] for run in runs]},
             started_at,
@@ -3203,6 +3439,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
     execution = _record_schedule_execution(
         schedule_id,
         runs[0]["id"] if runs else None,
+        execution_chain_key,
         "launched",
         {
             "schedule_type": schedule["schedule_type"],
@@ -3256,6 +3493,64 @@ def _schedule_summary_payload() -> dict[str, Any]:
         and schedule.get("status") != "deleted"
         and not schedule.get("campaign_steps")
     )
+    schedule_phase_rank = {"queued": 1, "started": 2, "launched": 3, "failed": 4}
+    execution_rows = _list_schedule_executions(limit=500)
+    latest_by_schedule: dict[int, dict[str, Any]] = {}
+    for execution in execution_rows:
+        schedule_id = int(execution.get("schedule_id") or 0)
+        if schedule_id <= 0:
+            continue
+        candidate_started = _parse_run_timestamp(execution.get("started_at"))
+        candidate_rank = schedule_phase_rank.get(str(execution.get("status") or ""), 0)
+        current = latest_by_schedule.get(schedule_id)
+        if current is None:
+            latest_by_schedule[schedule_id] = execution
+            continue
+        current_started = _parse_run_timestamp(current.get("started_at"))
+        if current_started is None and candidate_started is not None:
+            latest_by_schedule[schedule_id] = execution
+            continue
+        if current_started is not None and candidate_started is not None:
+            if candidate_started > current_started:
+                latest_by_schedule[schedule_id] = execution
+                continue
+            if candidate_started == current_started:
+                current_rank = schedule_phase_rank.get(str(current.get("status") or ""), 0)
+                if candidate_rank > current_rank:
+                    latest_by_schedule[schedule_id] = execution
+                    continue
+        if current_started is None and candidate_started is None:
+            current_rank = schedule_phase_rank.get(str(current.get("status") or ""), 0)
+            if candidate_rank > current_rank:
+                latest_by_schedule[schedule_id] = execution
+    run_ids = [
+        int(execution["run_id"])
+        for execution in latest_by_schedule.values()
+        if execution.get("run_id") is not None
+    ]
+    run_status_by_id = _run_status_map(run_ids)
+    visible_schedules = [schedule for schedule in schedules if schedule.get("status") != "deleted"]
+    recent_schedule_states: list[dict[str, Any]] = []
+    for schedule in visible_schedules:
+        schedule_id = int(schedule.get("id") or 0)
+        latest_execution = latest_by_schedule.get(schedule_id)
+        latest_run_id = int(latest_execution["run_id"]) if latest_execution and latest_execution.get("run_id") is not None else None
+        run_meta = run_status_by_id.get(latest_run_id) if latest_run_id is not None else None
+        recent_schedule_states.append(
+            {
+                "schedule_id": schedule_id,
+                "schedule_name": schedule.get("name"),
+                "schedule_phase": str((latest_execution or {}).get("status") or "queued"),
+                "latest_run_id": latest_run_id,
+                "latest_run_status": run_meta.get("status") if run_meta else None,
+                "last_triggered_at": schedule.get("last_triggered_at"),
+                "latest_run_finished_at": (run_meta or {}).get("finished_at"),
+            }
+        )
+    recent_schedule_states.sort(
+        key=lambda item: _parse_run_timestamp(item.get("last_triggered_at")) or datetime.fromtimestamp(0, tz=timezone.utc),
+        reverse=True,
+    )
     return {
         "total": visible_count,
         "status_breakdown": status_breakdown,
@@ -3267,6 +3562,7 @@ def _schedule_summary_payload() -> dict[str, Any]:
             "degraded_campaigns": degraded_campaigns,
         },
         "recent_executions": _list_schedule_executions(limit=10),
+        "recent_schedule_states": recent_schedule_states,
     }
 
 
@@ -3354,11 +3650,22 @@ def _replay_run_logic(run_id: int, user_id: Optional[int] = None) -> dict[str, A
         plan=snapshot["plan"],
         timing=snapshot["timing"],
         mode=snapshot.get("mode"),
+        suite=snapshot.get("suite"),
+        scenarios=list(snapshot.get("scenarios") or []),
         store_id=snapshot.get("store_id"),
         phone=snapshot.get("phone"),
         all_users=bool(snapshot.get("all_users")),
+        strict_plan=bool(snapshot.get("strict_plan")),
+        skip_app_probes=bool(snapshot.get("skip_app_probes")),
+        skip_store_dashboard_probes=bool(snapshot.get("skip_store_dashboard_probes")),
         no_auto_provision=bool(snapshot.get("no_auto_provision")),
+        enforce_websocket_gates=bool(snapshot.get("enforce_websocket_gates")),
         post_order_actions=snapshot.get("post_order_actions"),
+        users=snapshot.get("users"),
+        orders=snapshot.get("orders"),
+        interval=snapshot.get("interval"),
+        reject=snapshot.get("reject"),
+        continuous=bool(snapshot.get("continuous")),
         extra_args=list(snapshot.get("extra_args") or []),
         trigger_source="replay",
         trigger_label=f"Replay of run #{run_id}",
@@ -4172,7 +4479,7 @@ app.add_middleware(
 # Initialize authentication if enabled
 auth_service.init_auth_system(POSTGRES_URL, USE_POSTGRES)
 configure_runs_runtime(
-    list_flows=lambda: {"flows": sorted(FLOW_PRESETS.keys())},
+    list_flows=lambda: _flows_payload(),
     list_runs=lambda limit, offset: {"runs": _list_runs(limit=limit, offset=offset), "total": _count_runs(), "limit": limit, "offset": offset},
     count_runs=lambda: {"count": _count_runs()},
     dashboard_summary=lambda: _dashboard_summary_payload(),

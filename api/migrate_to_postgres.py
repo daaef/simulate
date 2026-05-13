@@ -56,7 +56,7 @@ def export_sqlite_data(db_path: str) -> List[Dict[str, Any]]:
                 run_data['extra_args'] = []
             
             # Convert boolean fields
-            for bool_field in ['all_users', 'no_auto_provision']:
+            for bool_field in ['all_users', 'no_auto_provision', 'enforce_websocket_gates']:
                 if bool_field in run_data:
                     run_data[bool_field] = bool(run_data[bool_field])
             
@@ -124,11 +124,11 @@ def import_to_postgres(data: List[Dict[str, Any]], conn: psycopg2.extensions.con
                     insert_query = """
                     INSERT INTO runs (
                         id, flow, plan, timing, mode, store_id, phone, all_users, 
-                        no_auto_provision, post_order_actions, extra_args, status, 
+                        no_auto_provision, enforce_websocket_gates, post_order_actions, extra_args, status, 
                         command, created_at, started_at, finished_at, exit_code, 
                         log_path, report_path, story_path, events_path, error
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """
                     
@@ -142,6 +142,7 @@ def import_to_postgres(data: List[Dict[str, Any]], conn: psycopg2.extensions.con
                         run_data.get('phone'),
                         run_data['all_users'],
                         run_data['no_auto_provision'],
+                        run_data.get('enforce_websocket_gates', False),
                         run_data.get('post_order_actions'),
                         json.dumps(run_data['extra_args']),
                         run_data['status'],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -55,14 +56,30 @@ def _extract_order_fields(payload: Any, nested: Any) -> tuple[int | None, str | 
     status: str | None = None
 
     for item in _walk_dicts(nested if nested is not None else payload):
-        if status is None and item.get("status") is not None:
-            status = str(item["status"])
+        if status is None:
+            raw_status = (
+                item.get("status")
+                or item.get("order_status")
+                or item.get("state")
+            )
+            if raw_status is not None:
+                status = str(raw_status)
 
-        raw_ref = item.get("order_id") or item.get("order_ref")
+        raw_ref = (
+            item.get("order_id")
+            or item.get("order_ref")
+            or item.get("orderId")
+            or item.get("reference")
+        )
         if order_ref is None and raw_ref is not None:
             order_ref = str(raw_ref)
 
-        raw_id = item.get("id") or item.get("order_db_id")
+        raw_id = (
+            item.get("id")
+            or item.get("order_db_id")
+            or item.get("order_id_int")
+            or item.get("orderIdInt")
+        )
         if order_db_id is None and raw_id is not None:
             try:
                 order_db_id = int(raw_id)
@@ -92,6 +109,9 @@ class WebsocketObserver:
         }
         self._tasks: list[asyncio.Task[None]] = []
         self._connection_errors: dict[str, int] = {}
+        self._event_lock = asyncio.Lock()
+        self._event_notifier = asyncio.Event()
+        self._order_events: list[dict[str, Any]] = []
         self.coverage = {
             "user_orders": {
                 "status": "not_started",
@@ -115,6 +135,69 @@ class WebsocketObserver:
             "matched_order_events": 0,
             "missed_order_events": 0,
         }
+
+    async def wait_for_order_status(
+        self,
+        *,
+        order_db_id: int | None,
+        order_ref: str | None,
+        status: str,
+        sources: set[str] | None = None,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        timeout = (
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else float(config.SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS)
+        )
+        expected_sources = set(sources or {"user_orders", "store_orders"})
+        deadline = time.monotonic() + max(timeout, 0.1)
+
+        if not order_db_id and not order_ref:
+            raise RuntimeError("websocket gate requires order_db_id or order_ref")
+
+        cursor = 0
+        while True:
+            async with self._event_lock:
+                batch = self._order_events[cursor:]
+                cursor = len(self._order_events)
+            for event in batch:
+                if expected_sources and event.get("source") not in expected_sources:
+                    continue
+                event_status = str(event.get("status") or "").strip().lower()
+                if event_status != status.strip().lower():
+                    continue
+                if order_db_id is not None and event.get("order_db_id") == int(order_db_id):
+                    return event
+                if order_ref is not None and str(event.get("order_ref") or "") == str(order_ref):
+                    return event
+
+            if expected_sources:
+                failed_sources = {
+                    source
+                    for source in expected_sources
+                    if self.coverage.get(source, {}).get("status") == "failed"
+                }
+                if failed_sources == expected_sources:
+                    raise RuntimeError(
+                        "websocket_gate_source_unavailable:"
+                        f" status={status} sources={sorted(expected_sources)}"
+                    )
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(
+                    "websocket_gate_timeout:"
+                    f" status={status} order_db_id={order_db_id} order_ref={order_ref}"
+                )
+            self._event_notifier.clear()
+            try:
+                await asyncio.wait_for(self._event_notifier.wait(), timeout=remaining)
+            except asyncio.TimeoutError as exc:
+                raise RuntimeError(
+                    "websocket_gate_timeout:"
+                    f" status={status} order_db_id={order_db_id} order_ref={order_ref}"
+                ) from exc
 
     async def start(self) -> None:
         for source, (url, subprotocols) in self.targets.items():
@@ -207,6 +290,17 @@ class WebsocketObserver:
             order_db_id, order_ref, status = None, None, None
         else:
             order_db_id, order_ref, status = _extract_order_fields(payload, nested)
+            if status and order_db_id is None and not order_ref:
+                self.recorder.record_issue(
+                    severity="warning",
+                    code="websocket_gate_unattributed_event",
+                    actor="websocket",
+                    message=(
+                        f"{source} websocket contained status={status} "
+                        "without order_db_id/order_ref."
+                    ),
+                    details={"source": source, "payload": payload, "nested": nested},
+                )
         self.recorder.record_websocket(
             source=source,
             raw=raw,
@@ -216,6 +310,16 @@ class WebsocketObserver:
             order_ref=order_ref,
             status=status,
         )
+        if source != "store_stats" and status and (order_db_id is not None or order_ref):
+            gate_event = {
+                "source": source,
+                "status": str(status),
+                "order_db_id": order_db_id,
+                "order_ref": order_ref,
+            }
+            async with self._event_lock:
+                self._order_events.append(gate_event)
+            self._event_notifier.set()
 
 
 def validate_websocket_events(recorder: RunRecorder) -> None:

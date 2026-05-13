@@ -315,6 +315,16 @@ async def bootstrap_auth(
     scenario: str | None = None,
 ) -> UserSession:
     effective_phone = phone or config.USER_PHONE_NUMBER
+    actors = getattr(config, "SIM_ACTORS", {}) or {}
+    allowed_phones = {
+        str(user.get("phone"))
+        for user in actors.get("users", [])
+        if isinstance(user, dict) and user.get("phone")
+    }
+    if effective_phone and allowed_phones and str(effective_phone) not in allowed_phones:
+        raise RuntimeError(
+            f"Configured phone {str(effective_phone)!r} is not present in selected plan users[]."
+        )
 
     if config.USER_LASTMILE_TOKEN and not phone and scenario != "new_user_setup":
         if config.USER_ID is None:

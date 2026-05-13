@@ -153,6 +153,20 @@ def _parse_args() -> argparse.Namespace:
         default=config.SIM_RUN_POST_ORDER_ACTIONS,
         help="Run receipt, review, and reorder checks after completed orders.",
     )
+    parser.set_defaults(enforce_websocket_gates=None)
+    websocket_group = parser.add_mutually_exclusive_group()
+    websocket_group.add_argument(
+        "--enforce-websocket-gates",
+        dest="enforce_websocket_gates",
+        action="store_true",
+        help="Fail fast when websocket gate preconditions/results are unavailable or timeout.",
+    )
+    websocket_group.add_argument(
+        "--no-enforce-websocket-gates",
+        dest="enforce_websocket_gates",
+        action="store_false",
+        help="Do not fail on websocket gate failures; continue scenarios and record websocket warnings.",
+    )
     parser.add_argument(
         "--no-auto-provision",
         action="store_true",
@@ -188,6 +202,8 @@ def _explicit_config_overrides(argv: list[str]) -> set[str]:
         "--skip-app-probes": "SIM_RUN_APP_PROBES",
         "--skip-store-dashboard-probes": "SIM_RUN_STORE_DASHBOARD_PROBES",
         "--post-order-actions": "SIM_RUN_POST_ORDER_ACTIONS",
+        "--enforce-websocket-gates": "SIM_ENFORCE_WEBSOCKET_GATES",
+        "--no-enforce-websocket-gates": "SIM_ENFORCE_WEBSOCKET_GATES",
         "--no-auto-provision": "SIM_AUTO_PROVISION_FIXTURES",
     }
     return {
@@ -240,6 +256,8 @@ def _apply_args(args: argparse.Namespace) -> None:
         config.SIM_RUN_STORE_DASHBOARD_PROBES = not args.skip_store_dashboard_probes
     if _has_cli_flag(argv, "--post-order-actions"):
         config.SIM_RUN_POST_ORDER_ACTIONS = args.post_order_actions
+    if _has_cli_flag(argv, "--enforce-websocket-gates", "--no-enforce-websocket-gates"):
+        config.SIM_ENFORCE_WEBSOCKET_GATES = bool(args.enforce_websocket_gates)
     if _has_cli_flag(argv, "--no-auto-provision") and args.no_auto_provision:
         config.SIM_AUTO_PROVISION_FIXTURES = False
 

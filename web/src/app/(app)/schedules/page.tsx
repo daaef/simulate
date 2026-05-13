@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ApiRequestError,
   createSchedule,
@@ -48,6 +48,43 @@ function statusClass(status: string): string {
   return "status-info";
 }
 
+function schedulePhaseLabel(phase: string): string {
+  if (phase === "queued") return "Queued";
+  if (phase === "started") return "Starting";
+  if (phase === "launched") return "Run launched";
+  if (phase === "failed") return "Launch failed";
+  return phase;
+}
+
+function schedulePhaseClass(phase: string): string {
+  if (phase === "queued") return "status-info";
+  if (phase === "started") return "status-warning";
+  if (phase === "launched") return "status-success";
+  if (phase === "failed") return "status-danger";
+  return "status-info";
+}
+
+function runStatusLabel(status?: string | null): string {
+  if (!status) return "No run";
+  const normalized = status.toLowerCase();
+  if (normalized === "queued") return "Queued";
+  if (normalized === "running") return "Running";
+  if (normalized === "succeeded") return "Succeeded";
+  if (normalized === "failed") return "Failed";
+  if (normalized === "cancelled") return "Cancelled";
+  if (normalized === "cancelling") return "Cancelling";
+  return status;
+}
+
+function runStatusClass(status?: string | null): string {
+  if (!status) return "status-info";
+  const normalized = status.toLowerCase();
+  if (normalized === "succeeded") return "status-success";
+  if (normalized === "failed" || normalized === "cancelled") return "status-danger";
+  if (normalized === "running" || normalized === "cancelling" || normalized === "queued") return "status-warning";
+  return "status-info";
+}
+
 function nextTriggerLabel(schedule: Schedule): string {
   if (schedule.next_run_at) return formatDateTime(schedule.next_run_at, { timeZone: schedule.timezone || "UTC" });
   if (schedule.status === "active" && schedule.execution_mode_label === "manual_only") return "Manual only";
@@ -90,6 +127,7 @@ function formatActiveRange(schedule: Schedule): string {
 }
 
 export default function SchedulesPage() {
+  const router = useRouter();
   const SCHEDULES_REFRESH_MS = 15000;
   const [profiles, setProfiles] = useState<RunProfile[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -125,6 +163,10 @@ export default function SchedulesPage() {
   const loadInFlightRef = useRef(false);
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
+  const recentScheduleStates = useMemo(
+    () => summary?.recent_schedule_states ?? [],
+    [summary?.recent_schedule_states],
+  );
   const nextAutomaticSchedule = useMemo(() => {
     return schedules
       .filter((schedule) => parseTimestamp(schedule.next_run_at) != null)
@@ -652,24 +694,46 @@ export default function SchedulesPage() {
             <div className="stat"><span className="stat-label">Disabled</span><strong className="stat-value">{summary?.health.disabled ?? 0}</strong></div>
           </div>
           <h2 className="section-title" style={{ marginTop: "20px" }}>Recent Executions</h2>
-          {summary?.recent_executions.length ? (
-            <div className="responsive-table">
-              <table>
-                <thead><tr><th>Schedule</th><th>Status</th><th>Run</th><th>Started</th><th>Finished</th></tr></thead>
-                <tbody>
-                  {summary.recent_executions.map((execution) => (
-                    <tr key={execution.id}>
-                      <td>{execution.schedule_id}</td>
-                      <td><span className={`status-pill ${statusClass(execution.status)}`}>{execution.status}</span></td>
-                      <td>
-                        {execution.run_id ? <Link href={`/runs/${execution.run_id}`}>{execution.run_id}</Link> : "--"}
-                      </td>
-                      <td>{formatDateTime(execution.started_at)}</td>
-                      <td>{execution.finished_at ? formatDateTime(execution.finished_at) : "--"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {recentScheduleStates.length ? (
+            <div className="schedule-execution-cards">
+              {recentScheduleStates.map((state) => {
+                const clickable = state.latest_run_id != null;
+                const title = clickable ? "View run" : "Run not created";
+                const handleNavigate = () => {
+                  if (!state.latest_run_id) return;
+                  router.push(`/runs/${state.latest_run_id}`);
+                };
+                return (
+                  <button
+                    key={`schedule-state-${state.schedule_id}`}
+                    type="button"
+                    className={`schedule-execution-card${clickable ? " clickable" : " disabled"}`}
+                    onClick={handleNavigate}
+                    disabled={!clickable}
+                    title={title}
+                    aria-label={title}
+                  >
+                    <div className="schedule-execution-card-main">
+                      <strong>{state.schedule_name || `Schedule #${state.schedule_id}`}</strong>
+                      <div className="schedule-execution-primary">
+                        {state.last_triggered_at ? formatDateTime(state.last_triggered_at) : "Not triggered yet"}
+                        {state.latest_run_finished_at ? ` - finished ${formatDateTime(state.latest_run_finished_at)}` : ""}
+                      </div>
+                      <div className="muted">
+                        {state.latest_run_id ? `Run #${state.latest_run_id}` : "No run created yet"}
+                      </div>
+                    </div>
+                    <div className="schedule-execution-card-statuses">
+                      <span className={`status-pill ${schedulePhaseClass(state.schedule_phase)}`}>
+                        {schedulePhaseLabel(state.schedule_phase)}
+                      </span>
+                      <span className={`status-pill ${runStatusClass(state.latest_run_status)}`}>
+                        {runStatusLabel(state.latest_run_status)}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <div className="chart-empty">No schedule executions yet.</div>
@@ -695,63 +759,80 @@ export default function SchedulesPage() {
             </thead>
             <tbody>
               {schedules.map((schedule) => (
-                <tr key={schedule.id}>
-                  <td>
-                    <strong>{schedule.name}</strong>
-                    {schedule.description ? <div className="muted">{schedule.description}</div> : null}
-                  </td>
-                  <td>{schedule.schedule_type}</td>
-                  <td><span className={`status-pill ${statusClass(schedule.status)}`}>{schedule.status}</span></td>
-                  <td>
-                    {schedule.schedule_type === "simple"
-                      ? profileById.get(schedule.profile_id ?? 0)?.name ?? schedule.profile_id ?? "--"
-                      : `${schedule.campaign_steps.length} steps`}
-                  </td>
-                  <td>
-                    <div>{(schedule.period ?? schedule.cadence)} / {schedule.timezone}</div>
-                    {schedule.anchor_start_at ? (
-                      <div className="muted">Start: {formatDateTime(schedule.anchor_start_at, { timeZone: schedule.timezone || "UTC" })}</div>
-                    ) : null}
-                    {schedule.stop_rule ? (
-                      <div className="muted">
-                        Stop: {schedule.stop_rule === "end_at" ? `End at ${schedule.end_at ? formatDateTime(schedule.end_at, { timeZone: schedule.timezone || "UTC" }) : "--"}` : schedule.stop_rule === "duration" ? `After ${(schedule.duration_seconds ?? 0) / 3600}h` : "Never"}
-                      </div>
-                    ) : (
-                      <div className="muted">{formatActiveRange(schedule)}</div>
-                    )}
-                    <div className="muted">Runs per period: {schedule.runs_per_period ?? 1}</div>
-                    {schedule.blackout_dates.length ? (
-                      <div className="muted">Blackouts: {schedule.blackout_dates.join(", ")}</div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <strong>{nextTriggerLabel(schedule)}</strong>
-                    <div className="muted">{nextTriggerMeta(schedule)}</div>
-                    {schedule.current_period_runs?.length ? (
-                      <div className="muted">Current period runs: {schedule.current_period_runs.length}</div>
-                    ) : null}
-                    <div className="muted">Mode: {schedule.execution_mode_label}</div>
-                  </td>
-                  <td>{schedule.last_triggered_at ? formatDateTime(schedule.last_triggered_at, { timeZone: schedule.timezone || "UTC" }) : "--"}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button className="small" disabled={busy || schedule.status === "disabled" || schedule.status === "deleted"} onClick={() => runAction("trigger schedule", () => triggerSchedule(schedule.id))}>
-                        Trigger
-                      </button>
-                      {schedule.status === "paused" ? (
-                        <button className="secondary small" disabled={busy} onClick={() => runAction("resume schedule", () => setScheduleStatus(schedule.id, "resume"))}>Resume</button>
-                      ) : (
-                        <button className="secondary small" disabled={busy || schedule.status === "deleted"} onClick={() => runAction("pause schedule", () => setScheduleStatus(schedule.id, "pause"))}>Pause</button>
-                      )}
-                      <button className="secondary small" disabled={busy || schedule.status === "deleted"} onClick={() => runAction("disable schedule", () => setScheduleStatus(schedule.id, "disable"))}>Disable</button>
-                      {schedule.status === "deleted" ? (
-                        <button className="secondary small" disabled={busy} onClick={() => runAction("restore schedule", () => setScheduleStatus(schedule.id, "restore"))}>Restore</button>
-                      ) : (
-                        <button className="secondary small" disabled={busy} onClick={() => runAction("delete schedule", () => setScheduleStatus(schedule.id, "delete"))}>Delete</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                (() => {
+                  const isDeleted = schedule.status === "deleted";
+                  const isDisabled = schedule.status === "disabled";
+                  const isPaused = schedule.status === "paused";
+                  const canPause = !isDeleted && !isDisabled && !isPaused;
+                  const canDisable = !isDeleted && !isDisabled;
+                  const canEnable = isDisabled;
+                  const canTrigger = !isDeleted && !isDisabled;
+                  return (
+                    <tr key={schedule.id}>
+                      <td>
+                        <strong>{schedule.name}</strong>
+                        {schedule.description ? <div className="muted">{schedule.description}</div> : null}
+                      </td>
+                      <td>{schedule.schedule_type}</td>
+                      <td><span className={`status-pill ${statusClass(schedule.status)}`}>{schedule.status}</span></td>
+                      <td>
+                        {schedule.schedule_type === "simple"
+                          ? profileById.get(schedule.profile_id ?? 0)?.name ?? schedule.profile_id ?? "--"
+                          : `${schedule.campaign_steps.length} steps`}
+                      </td>
+                      <td>
+                        <div>{(schedule.period ?? schedule.cadence)} / {schedule.timezone}</div>
+                        {schedule.anchor_start_at ? (
+                          <div className="muted">Start: {formatDateTime(schedule.anchor_start_at, { timeZone: schedule.timezone || "UTC" })}</div>
+                        ) : null}
+                        {schedule.stop_rule ? (
+                          <div className="muted">
+                            Stop: {schedule.stop_rule === "end_at" ? `End at ${schedule.end_at ? formatDateTime(schedule.end_at, { timeZone: schedule.timezone || "UTC" }) : "--"}` : schedule.stop_rule === "duration" ? `After ${(schedule.duration_seconds ?? 0) / 3600}h` : "Never"}
+                          </div>
+                        ) : (
+                          <div className="muted">{formatActiveRange(schedule)}</div>
+                        )}
+                        <div className="muted">Runs per period: {schedule.runs_per_period ?? 1}</div>
+                        {schedule.blackout_dates.length ? (
+                          <div className="muted">Blackouts: {schedule.blackout_dates.join(", ")}</div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <strong>{nextTriggerLabel(schedule)}</strong>
+                        <div className="muted">{nextTriggerMeta(schedule)}</div>
+                        {schedule.current_period_runs?.length ? (
+                          <div className="muted">Current period runs: {schedule.current_period_runs.length}</div>
+                        ) : null}
+                        <div className="muted">Mode: {schedule.execution_mode_label}</div>
+                      </td>
+                      <td>{schedule.last_triggered_at ? formatDateTime(schedule.last_triggered_at, { timeZone: schedule.timezone || "UTC" }) : "--"}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button className="small" disabled={busy || !canTrigger} onClick={() => runAction("trigger schedule", () => triggerSchedule(schedule.id))}>
+                            Trigger
+                          </button>
+                          {isPaused ? (
+                            <button className="secondary small" disabled={busy} onClick={() => runAction("resume schedule", () => setScheduleStatus(schedule.id, "resume"))}>Resume</button>
+                          ) : null}
+                          {canPause ? (
+                            <button className="secondary small" disabled={busy} onClick={() => runAction("pause schedule", () => setScheduleStatus(schedule.id, "pause"))}>Pause</button>
+                          ) : null}
+                          {canEnable ? (
+                            <button className="secondary small" disabled={busy} onClick={() => runAction("enable schedule", () => setScheduleStatus(schedule.id, "resume"))}>Enable</button>
+                          ) : null}
+                          {canDisable ? (
+                            <button className="secondary small" disabled={busy} onClick={() => runAction("disable schedule", () => setScheduleStatus(schedule.id, "disable"))}>Disable</button>
+                          ) : null}
+                          {isDeleted ? (
+                            <button className="secondary small" disabled={busy} onClick={() => runAction("restore schedule", () => setScheduleStatus(schedule.id, "restore"))}>Restore</button>
+                          ) : (
+                            <button className="secondary small" disabled={busy} onClick={() => runAction("delete schedule", () => setScheduleStatus(schedule.id, "delete"))}>Delete</button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })()
               ))}
               {!schedules.length ? (
                 <tr><td colSpan={8} className="muted">No schedules configured.</td></tr>

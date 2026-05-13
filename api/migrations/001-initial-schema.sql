@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS runs (
     phone VARCHAR(20),
     all_users BOOLEAN NOT NULL DEFAULT FALSE,
     no_auto_provision BOOLEAN NOT NULL DEFAULT FALSE,
+    enforce_websocket_gates BOOLEAN NOT NULL DEFAULT FALSE,
     post_order_actions BOOLEAN,
     extra_args JSONB DEFAULT '[]',
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'queued', 'running', 'cancelling', 'succeeded', 'failed', 'cancelled')),

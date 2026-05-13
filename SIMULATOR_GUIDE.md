@@ -17,6 +17,8 @@ Generated artifacts per run:
 - `runs/<timestamp>/report.md`: summary + bottlenecks + tabled findings + technical trace.
 - `runs/<timestamp>/story.md`: narrative scenario summary.
 - `events.json` includes decision records (`called`, `blocked`, `skipped`, `recovered`, `failed`) with reason code/message, next action, and whether the run continued.
+- Overview page behavior: Latest Run `Critical Findings` is filtered to server/API availability failures (`5xx`, transport/network, websocket connection availability). Missing-information or business-availability conditions (for example missing token, no saved card, no coupon) stay in `events.json`/`report.md`/`story.md` but are intentionally excluded from Overview.
+- Overview `Critical Findings` rows include failed route/endpoint when available, and the Latest Run hero surfaces context chips such as `profile:<name>`, `schedule:<name>`, and integration `route:<project/environment>`.
 
 Configuration precedence:
 
@@ -26,11 +28,23 @@ Configuration precedence:
 4. Built-in defaults.
 
 The GUI stores admin-created plans in `runs/gui-plans/` and launches them through the same `--plan` CLI path.
+On the Runs page, Start Run plan selection is dropdown-only: `sim_actors.json` is always shown, then GUI plans from `runs/gui-plans/`; manual text entry is not supported.
+Start Run now reads flow capabilities from `GET /api/v1/flows` and conditionally renders only flags valid for the selected `Flow`, resolved `Mode`, and selected `Suite/Scenarios`.
+Advanced Mode Overrides are optional and let operators explicitly set `--mode`, `--suite`, and repeated `--scenario` flags; command preview mirrors typed fields exactly.
+Trace-context fields in the launcher: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, `enforce_websocket_gates`.
+Load-context fields in the launcher: `users`, `orders`, `interval`, `reject`, `continuous`, `all_users`, plus shared store/phone/provision controls.
 
 Run scope enforcement is strict to the selected plan:
 - Stores must come from plan `stores[]`.
 - Phones/users must come from plan `users[]`.
 - Out-of-plan `--store` and `--phone` values fail fast instead of falling back to discovered/service-area entities.
+- Out-of-plan `STORE_ID` / `USER_PHONE_NUMBER` env values and cached identity reuse paths are rejected in both trace and load modes.
+- If the selected plan cannot be loaded or validated (missing/unreadable file, invalid JSON, or plan validation error), the simulator warns and falls back to repo default `sim_actors.json`.
+- If both selected plan and fallback plan fail, the run exits with a combined error showing both failures.
+- Strict mode still applies after fallback: when `--strict-plan` (or `rules.strict_plan=true`) is active, whichever plan is used must satisfy strict validation.
+- Trace/doctor order scenarios now use websocket-first gating for progression. The simulator waits for required websocket status events before each next action (store accept/reject, payment progression, ready, robot lifecycle, terminal state).
+- Websocket gate enforcement is configurable and defaults to off. With enforcement off, gate timeout/source failures are recorded as warnings and scenarios continue. With enforcement on, gate failures fail fast and stop downstream actions.
+- Controls: env `SIM_ENFORCE_WEBSOCKET_GATES=false` (default), CLI `--enforce-websocket-gates` / `--no-enforce-websocket-gates`, and Runs UI checkbox `Enforce Websocket Gates`.
 
 ## Plan-Backed Configuration
 
@@ -352,6 +366,7 @@ Common failure signatures:
 | `--skip-app-probes` | boolean | `false` | Disables user-side non-order probes | Affects `app_bootstrap`/doctor/full/audit evidence depth |
 | `--skip-store-dashboard-probes` | boolean | `false` | Disables store dashboard probes | Affects `store_dashboard` coverage |
 | `--post-order-actions` | boolean | from plan/env | Enables receipt/review/reorder after completed orders | Can create real review/receipt records |
+| `--enforce-websocket-gates` / `--no-enforce-websocket-gates` | boolean | from plan/env (`SIM_ENFORCE_WEBSOCKET_GATES=false`) | Controls whether websocket gate failures fail the scenario or are bypassed with warning evidence | Trace/doctor websocket progression behavior |
 | `--no-auto-provision` | boolean | `false` | Disables automatic setup/category/menu repair path | Sets `SIM_AUTO_PROVISION_FIXTURES=false` for run |
 
 ## 5) What We Test (Coverage Map)
@@ -493,6 +508,39 @@ python3 -m simulate store-setup --plan sim_actors.json --store FZY_926025 --timi
 - `No usable store candidate could serve this simulation`: every candidate store failed login/setup/fixture bootstrap.
 - `SIM_COUPON_ID is required for coupon flows`: configure a plan/env coupon or enable auto-select coupon.
 - `STRIPE_SECRET_KEY is required`: paid flow selected without Stripe key.
+- `websocket_gate_source_unavailable` + websocket `HTTP 502`: upstream `lastmile` proxy/gateway is rejecting websocket upgrade for `/ws/soc/...`; REST can still pass while websocket-gated scenarios fail.
+
+### Websocket 502 Recovery (Upstream Lastmile)
+
+When reports show websocket coverage failures like:
+
+- `server rejected WebSocket connection: HTTP 502`
+- `websocket_gate_source_unavailable`
+
+the fix is outside this simulator repo, on the reverse proxy that fronts `lastmile.fainzy.tech`.
+
+Required upstream nginx-style websocket settings for `/ws/` routes:
+
+```nginx
+location /ws/ {
+  proxy_pass http://<lastmile_backend_upstream>;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_set_header Host $host;
+  proxy_read_timeout 600s;
+  proxy_send_timeout 600s;
+  proxy_buffering off;
+}
+```
+
+Also ensure `/ws/soc/<user_id>/`, `/ws/soc/store_<subentity_id>/`, and `/ws/soc/store_statistics_<subentity_id>/` are routed to the websocket-capable backend and not an HTTP-only upstream.
+
+Handshake verification command (expects `101 Switching Protocols`):
+
+```bash
+scripts/check_lastmile_ws.sh https://lastmile.fainzy.tech 37 7
+```
 
 ## 11) Rebuild Outline (from scratch)
 
@@ -559,7 +607,7 @@ The authenticated app shell highlights the active route, including nested run de
 | `/overview` | Run status, flow distribution, success/failure split, failure trend, archive/purge backlog, schedule health, alerts, and platform status. |
 | `/runs` | Launch, cancel, replay, delete completed runs, inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles. |
 | `/config` | Edit GUI-owned run plans under `runs/gui-plans/`. |
-| `/schedules` | Create campaign-first schedules (simple requests are normalized to campaign steps); configure recurrence, period-specific run slots, all-day mode, run windows, blackout skip dates, and next automatic trigger visibility; active schedules run through the in-process scheduler and can also be manually triggered, paused, resumed, disabled, soft-deleted, and restored. |
+| `/schedules` | Create campaign-first schedules (simple requests are normalized to campaign steps); configure recurrence, period-specific run slots, all-day mode, run windows, blackout skip dates, and next automatic trigger visibility; active schedules run through the in-process scheduler and can also be manually triggered, paused/resumed, disabled/enabled, soft-deleted, and restored. |
 | `/archives` | Search archive candidates, raw-purge candidates, and retained run summaries. |
 | `/retention` | Inspect active/archive policy windows, archive/purge queues, retained summary fields, and purge-safety state. |
 | `/admin/users` | Create, edit, reset, deactivate, or delete users. |
@@ -715,13 +763,11 @@ Manual trigger launches runs immediately through the saved profile path and reco
 
 #### Recent Executions Statuses
 
-Recent Executions in `/schedules` surfaces lifecycle status per trigger:
-- `queued`: accepted by scheduler and queued.
-- `started`: trigger execution began.
-- `launched`: run creation submitted with `run_id`.
-- `failed`: launch failed before completion.
+Recent Executions in `/schedules` renders one current-state card per schedule:
+- Schedule phase chip: `Queued`/`Starting`/`Run launched`/`Launch failed` from latest schedule execution lifecycle.
+- Run status chip: latest linked run status (`Queued`, `Running`, `Succeeded`, `Failed`, `Cancelled`) from the actual run row.
 
-`run_id` is clickable and opens the corresponding run detail page.
+Cards are fully clickable to run detail when a latest run exists, with a `View run` hover tooltip; if no run exists yet, the card remains non-clickable and shows `No run created yet`.
 
 ### System Settings: Allowed Timezones
 

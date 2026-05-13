@@ -33,6 +33,31 @@ function commandPreview(command?: string | null): string {
   return command.length > 220 ? `${command.slice(0, 220)}...` : command;
 }
 
+function runContextChips(run: NonNullable<LatestRunOverview["run"]>): string[] {
+  const chips: string[] = [];
+  const context = (run.trigger_context || {}) as Record<string, unknown>;
+
+  const profileName = (context.profile_name as string | undefined) || (run.profile_id ? `#${run.profile_id}` : undefined);
+  if (profileName) chips.push(`profile:${profileName}`);
+
+  const scheduleName = (context.schedule_name as string | undefined) || (run.schedule_id ? `#${run.schedule_id}` : undefined);
+  if (scheduleName) chips.push(`schedule:${scheduleName}`);
+
+  const routeFromContext = (() => {
+    const project = context.project as string | undefined;
+    const environment = context.environment as string | undefined;
+    if (project && environment) return `${project}/${environment}`;
+    return undefined;
+  })();
+  const integrationRoute = context.route as string | undefined;
+  const route = routeFromContext
+    || integrationRoute
+    || (run.trigger_source === "github" ? run.trigger_label || undefined : undefined);
+  if (route) chips.push(`route:${route}`);
+
+  return chips;
+}
+
 export default function LatestRunHero({ overview }: { overview: LatestRunOverview }) {
   const run = overview.run;
   if (!run) {
@@ -59,6 +84,9 @@ export default function LatestRunHero({ overview }: { overview: LatestRunOvervie
           <p className="muted">
             {run.flow || "unknown flow"} · {run.mode || "default mode"} · {run.timing || "default timing"}
           </p>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            {runContextChips(run).map((chip) => <span key={chip} className="chip">{chip}</span>)}
+          </div>
         </div>
 
         <Link href={`/runs/${run.id}`} className="hero-link">
