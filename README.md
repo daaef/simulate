@@ -121,6 +121,31 @@ Keep actor and run behavior out of `.env`: do not set `USER_PHONE_NUMBER`, `STOR
 
 Admins can edit GUI-owned plans from `Config`. Use the saved plan path, for example `runs/gui-plans/daily-doctor.json`, in the Runs launcher or with `--plan`.
 
+## Email Notifications
+
+Config page now includes an **Email Notifications** panel for non-secret settings:
+- `email_enabled`
+- `email_from_email`
+- `email_from_name`
+- `email_subject_prefix`
+- `email_recipients`
+- `email_event_triggers` (`run_failed`, `schedule_launch_failed`, `critical_alert`)
+
+System API endpoints:
+- `GET /api/v1/system/email`
+- `PUT /api/v1/system/email`
+- `POST /api/v1/system/email/test`
+
+SMTP secrets remain env-only and are required for sends:
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_TLS_MODE` (`starttls` or `ssl`)
+
+`critical_alert` is mapped to run-failure notifications in v1 to avoid duplicate/noisy alert sources. Test-email endpoint enforces a short cooldown.
+Run/schedule failure emails now start with launch context in fixed order: `Profile`, `Trigger`, `Project`, `Repository` (and `Schedule` when applicable).
+
 ## Repo Map
 
 - `api/`: FastAPI service (auth, run orchestration, schedules, alerts, archive/retention, admin APIs) used by the web UI.

@@ -498,6 +498,17 @@ export type SystemTimezonesPolicy = {
   available_timezones: string[];
 };
 
+export type EmailEventTrigger = "run_failed" | "schedule_launch_failed" | "critical_alert";
+
+export type SystemEmailSettings = {
+  email_enabled: boolean;
+  email_from_email: string;
+  email_from_name: string;
+  email_subject_prefix: string;
+  email_recipients: string[];
+  email_event_triggers: EmailEventTrigger[];
+};
+
 export class ApiRequestError extends Error {
   source: string;
   status: number;
@@ -729,6 +740,43 @@ export async function updateSystemTimezones(request: {
       body: JSON.stringify(request),
     }),
     "system-timezones-update"
+  );
+}
+
+export async function fetchSystemEmailSettings(): Promise<SystemEmailSettings> {
+  return unwrap<SystemEmailSettings>(await fetch("/api/v1/system/email", withSession()), "system-email");
+}
+
+export async function updateSystemEmailSettings(request: {
+  email_enabled: boolean;
+  email_from_email: string;
+  email_from_name: string;
+  email_subject_prefix: string;
+  email_recipients: string[] | string;
+  email_event_triggers: EmailEventTrigger[];
+}): Promise<SystemEmailSettings> {
+  return unwrap<SystemEmailSettings>(
+    await fetch("/api/v1/system/email", {
+      method: "PUT",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "system-email-update"
+  );
+}
+
+export async function sendSystemTestEmail(): Promise<{
+  sent: boolean;
+  recipients?: string[];
+  subject?: string;
+  reason?: string;
+}> {
+  return unwrap(
+    await fetch("/api/v1/system/email/test", {
+      method: "POST",
+      ...withSession(),
+    }),
+    "system-email-test"
   );
 }
 

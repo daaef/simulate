@@ -1188,6 +1188,243 @@ class SystemTimezonesApiTests(unittest.TestCase):
             viewer_client.close()
 
 
+class SystemEmailApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_auth = _FakeCookieAuthManager()
+        self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
+        self.auth_enabled_patch.start()
+        self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
+        self.auth_manager_patch.start()
+        self.client = TestClient(web_api.app)
+        login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
+        assert login.status_code == 200
+        web_api._save_email_settings(
+            {
+                "email_enabled": False,
+                "email_from_email": "",
+                "email_from_name": "",
+                "email_subject_prefix": "",
+                "email_recipients": [],
+                "email_event_triggers": [],
+            }
+        )
+        web_api.EMAIL_TEST_LAST_SENT_AT = 0.0
+        web_api.EMAIL_EVENT_LAST_SENT.clear()
+
+    def tearDown(self) -> None:
+        self.auth_manager_patch.stop()
+        self.auth_enabled_patch.stop()
+        self.client.close()
+
+    def test_get_and_update_email_settings(self) -> None:
+        get_response = self.client.get("/api/v1/system/email")
+        self.assertEqual(get_response.status_code, 200)
+        self.assertFalse(get_response.json()["email_enabled"])
+
+        put_response = self.client.put(
+            "/api/v1/system/email",
+            json={
+                "email_enabled": True,
+                "email_from_email": "alerts@example.com",
+                "email_from_name": "Simulator",
+                "email_subject_prefix": "[SIM]",
+                "email_recipients": "ops@example.com,\neng@example.com",
+                "email_event_triggers": ["run_failed", "critical_alert"],
+            },
+        )
+        self.assertEqual(put_response.status_code, 200)
+        payload = put_response.json()
+        self.assertEqual(payload["email_recipients"], ["ops@example.com", "eng@example.com"])
+        self.assertEqual(payload["email_event_triggers"], ["run_failed", "critical_alert"])
+
+    def test_update_email_settings_rejects_invalid_values(self) -> None:
+        bad_email = self.client.put(
+            "/api/v1/system/email",
+            json={
+                "email_enabled": True,
+                "email_from_email": "not-an-email",
+                "email_recipients": ["ops@example.com"],
+                "email_event_triggers": ["run_failed"],
+            },
+        )
+        self.assertEqual(bad_email.status_code, 400)
+
+        missing_recipients = self.client.put(
+            "/api/v1/system/email",
+            json={
+                "email_enabled": True,
+                "email_from_email": "alerts@example.com",
+                "email_recipients": [],
+                "email_event_triggers": ["run_failed"],
+            },
+        )
+        self.assertEqual(missing_recipients.status_code, 400)
+
+    def test_test_email_endpoint_success_and_cooldown(self) -> None:
+        self.client.put(
+            "/api/v1/system/email",
+            json={
+                "email_enabled": True,
+                "email_from_email": "alerts@example.com",
+                "email_from_name": "Simulator",
+                "email_subject_prefix": "[SIM]",
+                "email_recipients": ["ops@example.com"],
+                "email_event_triggers": ["run_failed"],
+            },
+        )
+        env_patch = mock.patch.dict(
+            os.environ,
+            {
+                "SMTP_HOST": "smtp.example.com",
+                "SMTP_PORT": "587",
+                "SMTP_USERNAME": "user",
+                "SMTP_PASSWORD": "pass",
+                "SMTP_TLS_MODE": "starttls",
+            },
+            clear=False,
+        )
+        with env_patch, mock.patch.object(web_api, "send_plain_text_email", return_value={"ok": True}):
+            first = self.client.post("/api/v1/system/email/test")
+            self.assertEqual(first.status_code, 200)
+            self.assertTrue(first.json()["sent"])
+            second = self.client.post("/api/v1/system/email/test")
+            self.assertEqual(second.status_code, 429)
+
+    def test_failed_run_event_sends_when_trigger_enabled(self) -> None:
+        self.client.put(
+            "/api/v1/system/email",
+            json={
+                "email_enabled": True,
+                "email_from_email": "alerts@example.com",
+                "email_recipients": ["ops@example.com"],
+                "email_event_triggers": ["run_failed"],
+            },
+        )
+        env_patch = mock.patch.dict(
+            os.environ,
+            {
+                "SMTP_HOST": "smtp.example.com",
+                "SMTP_PORT": "587",
+                "SMTP_USERNAME": "user",
+                "SMTP_PASSWORD": "pass",
+                "SMTP_TLS_MODE": "starttls",
+            },
+            clear=False,
+        )
+        with env_patch, mock.patch.object(web_api, "send_plain_text_email", return_value={"ok": True}) as sender:
+            run = web_api._create_run(web_api.RunCreateRequest(flow="doctor", plan="sim_actors.json", timing="fast"))
+            web_api._update_run(int(run["id"]), status="failed", finished_at="2026-05-13T00:00:00+00:00", error="boom")
+            self.assertTrue(sender.called)
+            body = str(sender.call_args.kwargs.get("body") or "")
+            lines = body.splitlines()
+            self.assertGreaterEqual(len(lines), 4)
+            self.assertTrue(lines[0].startswith("Profile:"))
+            self.assertEqual(lines[1], "Trigger: manual")
+            self.assertEqual(lines[2], "Project: N/A")
+            self.assertEqual(lines[3], "Repository: N/A")
+
+    def test_webhook_run_failure_email_includes_project_and_repository(self) -> None:
+        self.client.put(
+            "/api/v1/system/email",
+            json={
+                "email_enabled": True,
+                "email_from_email": "alerts@example.com",
+                "email_recipients": ["ops@example.com"],
+                "email_event_triggers": ["run_failed"],
+            },
+        )
+        env_patch = mock.patch.dict(
+            os.environ,
+            {
+                "SMTP_HOST": "smtp.example.com",
+                "SMTP_PORT": "587",
+                "SMTP_USERNAME": "user",
+                "SMTP_PASSWORD": "pass",
+                "SMTP_TLS_MODE": "starttls",
+            },
+            clear=False,
+        )
+        with env_patch, mock.patch.object(web_api, "send_plain_text_email", return_value={"ok": True}) as sender:
+            run = web_api._create_run(
+                web_api.RunCreateRequest(
+                    flow="doctor",
+                    plan="sim_actors.json",
+                    timing="fast",
+                    trigger_source="github",
+                    trigger_context={
+                        "project": "fainzy-dashboard",
+                        "repository": "daaef/fainzy-dashboard",
+                        "profile_name": "dashboard",
+                    },
+                    profile_id=9,
+                )
+            )
+            web_api._update_run(int(run["id"]), status="failed", finished_at="2026-05-13T00:00:00+00:00", error="boom")
+            body = str(sender.call_args.kwargs.get("body") or "")
+            self.assertIn("Profile: dashboard", body)
+            self.assertIn("Trigger: github webhook", body)
+            self.assertIn("Project: fainzy-dashboard", body)
+            self.assertIn("Repository: daaef/fainzy-dashboard", body)
+
+    def test_schedule_launch_failure_email_includes_profile_first_context(self) -> None:
+        self.client.put(
+            "/api/v1/system/email",
+            json={
+                "email_enabled": True,
+                "email_from_email": "alerts@example.com",
+                "email_recipients": ["ops@example.com"],
+                "email_event_triggers": ["schedule_launch_failed"],
+            },
+        )
+        env_patch = mock.patch.dict(
+            os.environ,
+            {
+                "SMTP_HOST": "smtp.example.com",
+                "SMTP_PORT": "587",
+                "SMTP_USERNAME": "user",
+                "SMTP_PASSWORD": "pass",
+                "SMTP_TLS_MODE": "starttls",
+            },
+            clear=False,
+        )
+        with env_patch, mock.patch.object(web_api, "send_plain_text_email", return_value={"ok": True}) as sender:
+            profile_response = self.client.post(
+                "/api/v1/run-profiles",
+                json={
+                    "name": "dashboard-profile",
+                    "flow": "doctor",
+                    "plan": "sim_actors.json",
+                    "timing": "fast",
+                    "store_id": "FZY_123",
+                    "phone": "+2348000001111",
+                },
+            )
+            self.assertEqual(profile_response.status_code, 200)
+            profile_id = int(profile_response.json()["profile"]["id"])
+            schedule_response = self.client.post(
+                "/api/v1/schedules",
+                json={
+                    "name": "dashboard schedule",
+                    "schedule_type": "simple",
+                    "profile_id": profile_id,
+                    "cadence": "daily",
+                    "timezone": "UTC",
+                },
+            )
+            self.assertEqual(schedule_response.status_code, 200)
+            schedule_id = int(schedule_response.json()["schedule"]["id"])
+            with mock.patch.object(web_api, "_create_run", side_effect=RuntimeError("launch failed")):
+                response = self.client.post(f"/api/v1/schedules/{schedule_id}/trigger")
+            self.assertEqual(response.status_code, 500)
+            body = str(sender.call_args.kwargs.get("body") or "")
+            lines = body.splitlines()
+            self.assertGreaterEqual(len(lines), 5)
+            self.assertTrue(lines[0].startswith("Profile:"))
+            self.assertEqual(lines[1], "Trigger: schedule")
+            self.assertEqual(lines[2], "Project: N/A")
+            self.assertEqual(lines[3], "Repository: N/A")
+
+
 class AlertsAndRetentionApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fake_auth = _FakeCookieAuthManager()

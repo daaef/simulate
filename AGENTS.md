@@ -1,3 +1,8 @@
+---
+description: 
+alwaysApply: true
+---
+
 # Simulator Repo Instructions (Codex)
 
 Keep project docs current:

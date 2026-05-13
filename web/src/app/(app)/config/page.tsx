@@ -6,9 +6,14 @@ import {
   ApiRequestError,
   createSimulationPlan,
   deleteSimulationPlan,
+  fetchSystemEmailSettings,
   fetchSimulationPlan,
   fetchSimulationPlans,
+  sendSystemTestEmail,
+  type EmailEventTrigger,
+  type SystemEmailSettings,
   updateSimulationPlan,
+  updateSystemEmailSettings,
   type SimulationPlan,
   type SimulationPlanContent,
 } from "../../../lib/api";
@@ -119,6 +124,21 @@ function pretty(value: SimulationPlanContent): string {
   return JSON.stringify(value, null, 2);
 }
 
+const EMAIL_TRIGGER_OPTIONS: { value: EmailEventTrigger; label: string }[] = [
+  { value: "run_failed", label: "Run failed" },
+  { value: "schedule_launch_failed", label: "Schedule launch failed" },
+  { value: "critical_alert", label: "Critical alert (mapped to run failed)" },
+];
+
+const DEFAULT_EMAIL_SETTINGS: SystemEmailSettings = {
+  email_enabled: false,
+  email_from_email: "",
+  email_from_name: "",
+  email_subject_prefix: "",
+  email_recipients: [],
+  email_event_triggers: [],
+};
+
 export default function ConfigPage() {
   const { hasPermission } = useRole();
   const canConfigure = hasPermission("system", "configure");
@@ -130,6 +150,12 @@ export default function ConfigPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [emailSettings, setEmailSettings] = useState<SystemEmailSettings>(DEFAULT_EMAIL_SETTINGS);
+  const [emailRecipientsInput, setEmailRecipientsInput] = useState("");
+  const [emailMessage, setEmailMessage] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [isEmailSaving, setIsEmailSaving] = useState(false);
+  const [isEmailTesting, setIsEmailTesting] = useState(false);
 
   const selectedPlan = useMemo(
     () => plans.find((plan) => plan.id === selectedPlanId) ?? null,
@@ -156,6 +182,20 @@ export default function ConfigPage() {
 
   useEffect(() => {
     void loadPlans();
+  }, []);
+
+  useEffect(() => {
+    async function loadEmailSettings() {
+      setEmailError(null);
+      try {
+        const payload = await fetchSystemEmailSettings();
+        setEmailSettings(payload);
+        setEmailRecipientsInput((payload.email_recipients || []).join("\n"));
+      } catch (caught) {
+        setEmailError(formatError(caught));
+      }
+    }
+    void loadEmailSettings();
   }, []);
 
   async function loadPlan(planId: string) {
@@ -218,6 +258,43 @@ export default function ConfigPage() {
       setError(formatError(caught));
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function saveEmailSettings() {
+    setIsEmailSaving(true);
+    setEmailMessage(null);
+    setEmailError(null);
+    try {
+      const payload = await updateSystemEmailSettings({
+        ...emailSettings,
+        email_recipients: emailRecipientsInput,
+      });
+      setEmailSettings(payload);
+      setEmailRecipientsInput((payload.email_recipients || []).join("\n"));
+      setEmailMessage("Email settings saved.");
+    } catch (caught) {
+      setEmailError(formatError(caught));
+    } finally {
+      setIsEmailSaving(false);
+    }
+  }
+
+  async function sendTestEmail() {
+    setIsEmailTesting(true);
+    setEmailMessage(null);
+    setEmailError(null);
+    try {
+      const result = await sendSystemTestEmail();
+      if (!result.sent) {
+        setEmailMessage(`Test email not sent (${result.reason || "skipped"}).`);
+      } else {
+        setEmailMessage("Test email sent successfully.");
+      }
+    } catch (caught) {
+      setEmailError(formatError(caught));
+    } finally {
+      setIsEmailTesting(false);
     }
   }
 
@@ -319,6 +396,92 @@ export default function ConfigPage() {
           </div>
         </section>
       </div>
+      <section className="panel grid" style={{ gap: 12 }}>
+        <h2>Email Notifications</h2>
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={emailSettings.email_enabled}
+            onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_enabled: event.target.checked }))}
+          />
+          Enable email notifications
+        </label>
+        <div className="grid two">
+          <label>
+            From Email
+            <input
+              value={emailSettings.email_from_email}
+              onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_from_email: event.target.value }))}
+              placeholder="alerts@example.com"
+            />
+          </label>
+          <label>
+            From Name (Optional)
+            <input
+              value={emailSettings.email_from_name}
+              onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_from_name: event.target.value }))}
+              placeholder="Simulator Alerts"
+            />
+          </label>
+        </div>
+        <label>
+          Subject Prefix (Optional)
+          <input
+            value={emailSettings.email_subject_prefix}
+            onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_subject_prefix: event.target.value }))}
+            placeholder="[Simulator]"
+          />
+        </label>
+        <label>
+          Recipients (comma or newline separated)
+          <textarea
+            value={emailRecipientsInput}
+            onChange={(event) => setEmailRecipientsInput(event.target.value)}
+            rows={4}
+            spellCheck={false}
+            placeholder="ops@example.com&#10;eng@example.com"
+            style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
+          />
+        </label>
+        <div className="grid" style={{ gap: 8 }}>
+          <div style={{ fontWeight: 600 }}>Event Triggers</div>
+          {EMAIL_TRIGGER_OPTIONS.map((trigger) => (
+            <label key={trigger.value} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={emailSettings.email_event_triggers.includes(trigger.value)}
+                onChange={(event) => {
+                  setEmailSettings((prev) => {
+                    const next = new Set(prev.email_event_triggers);
+                    if (event.target.checked) next.add(trigger.value);
+                    else next.delete(trigger.value);
+                    return { ...prev, email_event_triggers: Array.from(next) as EmailEventTrigger[] };
+                  });
+                }}
+              />
+              {trigger.label}
+            </label>
+          ))}
+        </div>
+        {emailError ? (
+          <div style={{ border: "1px solid #fca5a5", color: "#991b1b", borderRadius: 6, padding: "10px 12px" }}>
+            {emailError}
+          </div>
+        ) : null}
+        {emailMessage ? (
+          <div style={{ border: "1px solid #86efac", color: "#166534", borderRadius: 6, padding: "10px 12px" }}>
+            {emailMessage}
+          </div>
+        ) : null}
+        <div className="grid two">
+          <button type="button" disabled={isEmailSaving} onClick={() => void saveEmailSettings()}>
+            {isEmailSaving ? "Saving..." : "Save Email Settings"}
+          </button>
+          <button type="button" className="secondary" disabled={isEmailTesting} onClick={() => void sendTestEmail()}>
+            {isEmailTesting ? "Sending..." : "Send Test Email"}
+          </button>
+        </div>
+      </section>
       <IntegrationMappingsPanel />
     </div>
   );

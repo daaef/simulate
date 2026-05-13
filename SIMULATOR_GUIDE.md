@@ -780,6 +780,37 @@ GET /api/v1/system/timezones
 PUT /api/v1/system/timezones
 ```
 
+### System Settings: Email Notifications
+
+Config page includes an Email Notifications panel to manage persisted non-secret settings:
+- `email_enabled`
+- `email_from_email`
+- `email_from_name`
+- `email_subject_prefix`
+- `email_recipients`
+- `email_event_triggers` (`run_failed`, `schedule_launch_failed`, `critical_alert`)
+
+Key endpoints:
+
+```bash
+GET /api/v1/system/email
+PUT /api/v1/system/email
+POST /api/v1/system/email/test
+```
+
+SMTP config must be provided through env secrets (not system settings):
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_TLS_MODE` (`starttls` or `ssl`)
+
+Behavior notes:
+- `critical_alert` maps to run-failure events in v1 (deduped).
+- Test-email endpoint has a cooldown and may return HTTP 429 if called repeatedly.
+- SMTP secrets are never returned in API payloads.
+- Failure emails include launch context first in this order: `Profile`, `Trigger`, `Project`, `Repository` (plus `Schedule` for schedule triggers).
+
 ### Alerts, Archives, and Retention
 
 Alerts are exposed at `GET /api/v1/alerts`. Current alert sources include failed runs, retention backlog, paused schedules, and degraded campaign schedules.

@@ -22,6 +22,7 @@ from urllib import request as urllib_request
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from email_validator import EmailNotValidError, validate_email
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -39,7 +40,8 @@ from .retention.service import configure_runtime as configure_retention_runtime
 from .schedules.models import ScheduleUpsertRequest
 from .schedules.routes import router as schedules_router
 from .schedules.service import configure_runtime as configure_schedules_runtime
-from .system.models import TimezonePolicyUpdateRequest
+from .system.email_sender import SmtpConfig, send_plain_text_email
+from .system.models import EmailSettingsUpdateRequest, TimezonePolicyUpdateRequest
 from .system.routes import router as system_router
 from .system.service import configure_runtime as configure_system_runtime
 from .simulation_plans.models import SimulationPlanUpsertRequest
@@ -151,6 +153,13 @@ GITHUB_STATUS_API_BASE = os.getenv("GITHUB_STATUS_API_BASE", "https://api.github
 GITHUB_STATUS_CONTEXT = os.getenv("GITHUB_STATUS_CONTEXT", "simulator/verification")
 SIMULATOR_EXTERNAL_BASE_URL = os.getenv("SIMULATOR_EXTERNAL_BASE_URL", "").rstrip("/")
 TERMINAL_RUN_STATUSES = {"succeeded", "failed", "cancelled"}
+EMAIL_SETTINGS_KEY = "email_notifications"
+EMAIL_EVENT_TRIGGERS = {"run_failed", "schedule_launch_failed", "critical_alert"}
+EMAIL_TEST_COOLDOWN_SECONDS = max(10, int(os.getenv("SIM_EMAIL_TEST_COOLDOWN_SECONDS", "30")))
+EMAIL_EVENT_DEDUPE_WINDOW_SECONDS = max(60, int(os.getenv("SIM_EMAIL_EVENT_DEDUPE_WINDOW_SECONDS", "600")))
+EMAIL_EVENT_LOCK = threading.Lock()
+EMAIL_TEST_LAST_SENT_AT = 0.0
+EMAIL_EVENT_LAST_SENT: dict[str, float] = {}
 
 
 # Database abstraction layer
@@ -762,6 +771,302 @@ def _set_system_timezones_policy(request: TimezonePolicyUpdateRequest) -> dict[s
     return _system_timezones_payload()
 
 
+def _normalize_email_value(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    try:
+        valid = validate_email(cleaned, check_deliverability=False)
+    except EmailNotValidError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid email address: {cleaned}") from exc
+    return valid.normalized
+
+
+def _normalize_recipients(value: Any) -> list[str]:
+    raw_items: list[str]
+    if isinstance(value, str):
+        raw_items = re.split(r"[,\n]+", value)
+    elif isinstance(value, list):
+        raw_items = [str(item) for item in value if str(item).strip()]
+    else:
+        raw_items = []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in raw_items:
+        email = _normalize_email_value(item)
+        if not email or email in seen:
+            continue
+        seen.add(email)
+        normalized.append(email)
+    return normalized
+
+
+def _normalize_event_triggers(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    triggers = [str(item).strip() for item in value if str(item).strip()]
+    unknown = sorted({item for item in triggers if item not in EMAIL_EVENT_TRIGGERS})
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown email triggers: {', '.join(unknown)}")
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in triggers:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
+
+
+def _default_email_settings() -> dict[str, Any]:
+    return {
+        "email_enabled": False,
+        "email_from_email": "",
+        "email_from_name": "",
+        "email_subject_prefix": "",
+        "email_recipients": [],
+        "email_event_triggers": [],
+    }
+
+
+def _normalize_email_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    base = _default_email_settings()
+    merged = {**base, **(payload or {})}
+    email_from_email = _normalize_email_value(merged.get("email_from_email") or "") if merged.get("email_from_email") else ""
+    recipients = _normalize_recipients(merged.get("email_recipients") or [])
+    triggers = _normalize_event_triggers(merged.get("email_event_triggers") or [])
+    normalized = {
+        "email_enabled": bool(merged.get("email_enabled")),
+        "email_from_email": email_from_email,
+        "email_from_name": str(merged.get("email_from_name") or "").strip(),
+        "email_subject_prefix": str(merged.get("email_subject_prefix") or "").strip(),
+        "email_recipients": recipients,
+        "email_event_triggers": triggers,
+    }
+    if normalized["email_enabled"]:
+        if not normalized["email_from_email"]:
+            raise HTTPException(status_code=400, detail="email_from_email is required when email is enabled.")
+        if not normalized["email_recipients"]:
+            raise HTTPException(status_code=400, detail="At least one recipient is required when email is enabled.")
+    return normalized
+
+
+def _load_email_settings() -> dict[str, Any]:
+    raw: dict[str, Any] | None = None
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT value FROM system_settings WHERE key = %s", (EMAIL_SETTINGS_KEY,))
+                row = cursor.fetchone()
+                if row:
+                    raw = row[0] if isinstance(row[0], dict) else json.loads(row[0] or "{}")
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (EMAIL_SETTINGS_KEY,)).fetchone()
+            if row is not None:
+                raw = json.loads(row["value"] or "{}")
+    return _normalize_email_settings_payload(raw or {})
+
+
+def _save_email_settings(settings_payload: dict[str, Any]) -> None:
+    normalized = _normalize_email_settings_payload(settings_payload)
+    payload = json.dumps(normalized)
+    now = _utc_now()
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO system_settings (key, value, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (key)
+                    DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+                    """,
+                    (EMAIL_SETTINGS_KEY, payload),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return
+    with DB_LOCK, _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO system_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (EMAIL_SETTINGS_KEY, payload, now),
+        )
+
+
+def _get_email_settings_payload() -> dict[str, Any]:
+    return _load_email_settings()
+
+
+def _set_email_settings_payload(request: EmailSettingsUpdateRequest) -> dict[str, Any]:
+    parsed = request.model_dump()
+    parsed["email_recipients"] = request.email_recipients
+    _save_email_settings(parsed)
+    return _load_email_settings()
+
+
+def _load_smtp_config() -> SmtpConfig:
+    missing: list[str] = []
+    host = os.getenv("SMTP_HOST", "").strip()
+    port_raw = os.getenv("SMTP_PORT", "").strip()
+    username = os.getenv("SMTP_USERNAME", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "").strip()
+    tls_mode = os.getenv("SMTP_TLS_MODE", "").strip().lower()
+    if not host:
+        missing.append("SMTP_HOST")
+    if not port_raw:
+        missing.append("SMTP_PORT")
+    if not username:
+        missing.append("SMTP_USERNAME")
+    if not password:
+        missing.append("SMTP_PASSWORD")
+    if not tls_mode:
+        missing.append("SMTP_TLS_MODE")
+    if missing:
+        raise HTTPException(status_code=503, detail=f"Missing SMTP environment values: {', '.join(missing)}")
+    try:
+        port = int(port_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="SMTP_PORT must be an integer.") from exc
+    if tls_mode not in {"starttls", "ssl"}:
+        raise HTTPException(status_code=503, detail="SMTP_TLS_MODE must be 'starttls' or 'ssl'.")
+    return SmtpConfig(host=host, port=port, username=username, password=password, tls_mode=tls_mode)
+
+
+def _build_email_subject(prefix: str, event_type: str, title: str) -> str:
+    base = f"[{event_type}] {title}"
+    cleaned_prefix = prefix.strip()
+    return f"{cleaned_prefix} {base}".strip() if cleaned_prefix else base
+
+
+def _trigger_source_label(trigger_source: str | None) -> str:
+    source = str(trigger_source or "").strip().lower()
+    mapping = {
+        "github": "github webhook",
+        "schedule": "schedule",
+        "profile": "profile launch",
+        "manual": "manual",
+        "replay": "replay",
+    }
+    return mapping.get(source, source or "N/A")
+
+
+def _launch_context_lines(run: dict[str, Any]) -> list[str]:
+    trigger_context = run.get("trigger_context") if isinstance(run.get("trigger_context"), dict) else {}
+    profile_name = str(trigger_context.get("profile_name") or "").strip()
+    profile_id = run.get("profile_id") or trigger_context.get("profile_id")
+    profile_value = profile_name or (f"Profile #{profile_id}" if profile_id is not None else "N/A")
+
+    trigger_value = _trigger_source_label(run.get("trigger_source"))
+    project = str(trigger_context.get("project") or "").strip() if isinstance(trigger_context, dict) else ""
+    repository = str(trigger_context.get("repository") or "").strip() if isinstance(trigger_context, dict) else ""
+    project_value = project or "N/A"
+    repository_value = repository or "N/A"
+
+    lines = [
+        f"Profile: {profile_value}",
+        f"Trigger: {trigger_value}",
+        f"Project: {project_value}",
+        f"Repository: {repository_value}",
+    ]
+    if str(run.get("trigger_source") or "").strip().lower() == "schedule":
+        schedule_name = str(trigger_context.get("schedule_name") or "").strip()
+        schedule_id = run.get("schedule_id") or trigger_context.get("schedule_id")
+        schedule_value = schedule_name or (f"#{schedule_id}" if schedule_id is not None else "N/A")
+        lines.append(f"Schedule: {schedule_value}")
+    return lines
+
+
+def _schedule_launch_context_lines(schedule: dict[str, Any], profile_name: str | None, profile_id: int | None) -> list[str]:
+    profile_value = (profile_name or "").strip() or (f"Profile #{profile_id}" if profile_id is not None else "N/A")
+    schedule_name = str(schedule.get("name") or "").strip()
+    schedule_id = schedule.get("id")
+    schedule_value = schedule_name or (f"#{schedule_id}" if schedule_id is not None else "N/A")
+    return [
+        f"Profile: {profile_value}",
+        "Trigger: schedule",
+        "Project: N/A",
+        "Repository: N/A",
+        f"Schedule: {schedule_value}",
+    ]
+
+
+def _send_email_notification(
+    event_type: str,
+    title: str,
+    lines: list[str],
+    dedupe_key: str | None = None,
+    ignore_trigger_gate: bool = False,
+) -> dict[str, Any]:
+    settings = _load_email_settings()
+    if not settings.get("email_enabled"):
+        return {"sent": False, "reason": "email_disabled"}
+    configured_triggers = set(settings.get("email_event_triggers") or [])
+    if not ignore_trigger_gate:
+        if event_type not in configured_triggers and not (event_type == "run_failed" and "critical_alert" in configured_triggers):
+            return {"sent": False, "reason": "trigger_not_enabled"}
+
+    if dedupe_key:
+        now = time.monotonic()
+        with EMAIL_EVENT_LOCK:
+            last_sent = EMAIL_EVENT_LAST_SENT.get(dedupe_key, 0.0)
+            if now - last_sent < EMAIL_EVENT_DEDUPE_WINDOW_SECONDS:
+                return {"sent": False, "reason": "deduped"}
+            EMAIL_EVENT_LAST_SENT[dedupe_key] = now
+            stale = [key for key, value in EMAIL_EVENT_LAST_SENT.items() if now - value > EMAIL_EVENT_DEDUPE_WINDOW_SECONDS * 4]
+            for key in stale:
+                EMAIL_EVENT_LAST_SENT.pop(key, None)
+
+    smtp = _load_smtp_config()
+    sender = settings.get("email_from_email") or ""
+    recipients = list(settings.get("email_recipients") or [])
+    if not sender or not recipients:
+        raise HTTPException(status_code=400, detail="Email sender and recipients must be configured before sending.")
+    subject = _build_email_subject(settings.get("email_subject_prefix") or "", event_type, title)
+    body = "\n".join(lines).strip()
+    response = send_plain_text_email(
+        smtp,
+        sender_email=sender,
+        sender_name=settings.get("email_from_name") or "",
+        recipients=recipients,
+        subject=subject,
+        body=body,
+    )
+    return {"sent": True, "recipients": recipients, "subject": subject, **response}
+
+
+def _send_test_email_payload() -> dict[str, Any]:
+    global EMAIL_TEST_LAST_SENT_AT
+    now = time.monotonic()
+    with EMAIL_EVENT_LOCK:
+        elapsed = now - EMAIL_TEST_LAST_SENT_AT
+        if elapsed < EMAIL_TEST_COOLDOWN_SECONDS:
+            wait_for = max(1, int(EMAIL_TEST_COOLDOWN_SECONDS - elapsed))
+            raise HTTPException(status_code=429, detail=f"Please wait {wait_for}s before sending another test email.")
+        EMAIL_TEST_LAST_SENT_AT = now
+    timestamp = _utc_now()
+    return _send_email_notification(
+        "run_failed",
+        "Simulator test email",
+        [
+            "This is a simulator test email.",
+            f"Timestamp: {timestamp}",
+            "If you received this, SMTP configuration is working.",
+        ],
+        dedupe_key=f"email-test-{int(now // EMAIL_TEST_COOLDOWN_SECONDS)}",
+        ignore_trigger_gate=True,
+    )
+
+
 def _validate_schedule_timezone(requested: str | None) -> None:
     tz = (requested or "").strip()
     if not tz:
@@ -1111,6 +1416,26 @@ def _update_run(run_id: int, **fields: Any) -> None:
                 (*values, run_id),
             )
     status = str(fields.get("status") or "").lower()
+    if status == "failed":
+        try:
+            run = _get_run(run_id)
+            trigger_label = _trigger_source_label(run.get("trigger_source"))
+            _send_email_notification(
+                "run_failed",
+                f"{trigger_label}: run {run_id} failed",
+                [
+                    *_launch_context_lines(run),
+                    f"Run ID: {run_id}",
+                    f"Flow: {run.get('flow')}",
+                    f"Status: {run.get('status')}",
+                    f"Finished At: {run.get('finished_at') or _utc_now()}",
+                    f"Error: {run.get('error') or 'Simulation failed.'}",
+                    f"Run URL: /runs/{run_id}",
+                ],
+                dedupe_key=f"run-failed:{run_id}",
+            )
+        except Exception as exc:
+            LOGGER.warning("Failed to send run failure email run_id=%s error=%s", run_id, exc)
     if status in TERMINAL_RUN_STATUSES:
         try:
             _handle_integration_run_terminal_status(run_id, status)
@@ -3424,6 +3749,40 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
             launched = _create_run(request, user_id)
             runs.append(launched)
     except Exception as exc:
+        failed_profile_name: str | None = None
+        failed_profile_id: int | None = None
+        if runs:
+            first_run = runs[0]
+            trigger_context = first_run.get("trigger_context") if isinstance(first_run.get("trigger_context"), dict) else {}
+            failed_profile_name = str(trigger_context.get("profile_name") or "") or None
+            raw_profile_id = first_run.get("profile_id") or trigger_context.get("profile_id")
+            try:
+                failed_profile_id = int(raw_profile_id) if raw_profile_id is not None else None
+            except (TypeError, ValueError):
+                failed_profile_id = None
+        elif schedule.get("schedule_type") == "simple" and schedule.get("profile_id") is not None:
+            try:
+                failed_profile_id = int(schedule.get("profile_id"))
+                failed_profile_name = str(_get_run_profile(failed_profile_id).get("name") or "") or None
+            except Exception:
+                failed_profile_id = int(schedule.get("profile_id")) if schedule.get("profile_id") is not None else None
+
+        try:
+            _send_email_notification(
+                "schedule_launch_failed",
+                f"Schedule {schedule_id} launch failed",
+                [
+                    *_schedule_launch_context_lines(schedule, failed_profile_name, failed_profile_id),
+                    f"Schedule ID: {schedule_id}",
+                    f"Status: failed",
+                    f"Timestamp: {_utc_now()}",
+                    f"Error: {exc}",
+                    "Schedules URL: /schedules",
+                ],
+                dedupe_key=f"schedule-launch-failed:{schedule_id}:{started_at}",
+            )
+        except Exception as email_exc:
+            LOGGER.warning("Failed to send schedule failure email schedule_id=%s error=%s", schedule_id, email_exc)
         execution = _record_schedule_execution(
             schedule_id,
             runs[0]["id"] if runs else None,
@@ -4526,6 +4885,9 @@ configure_simulation_plans_runtime(
 configure_system_runtime(
     get_timezones_policy=lambda: _system_timezones_payload(),
     set_timezones_policy=lambda request: _set_system_timezones_policy(request),
+    get_email_settings=lambda: _get_email_settings_payload(),
+    set_email_settings=lambda request: _set_email_settings_payload(request),
+    send_test_email=lambda: _send_test_email_payload(),
 )
 configure_integrations_runtime(
     list_mappings=lambda: _list_integration_mappings(),
