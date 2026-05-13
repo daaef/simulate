@@ -92,12 +92,37 @@ class WebsocketObserver:
         }
         self._tasks: list[asyncio.Task[None]] = []
         self._connection_errors: dict[str, int] = {}
+        self.coverage = {
+            "user_orders": {
+                "status": "not_started",
+                "reason": None,
+                "messages": 0,
+                "url": self.targets["user_orders"][0],
+            },
+            "store_orders": {
+                "status": "not_started",
+                "reason": None,
+                "messages": 0,
+                "url": self.targets["store_orders"][0],
+            },
+            "store_stats": {
+                "status": "not_started",
+                "reason": None,
+                "messages": 0,
+                "url": self.targets["store_stats"][0],
+            },
+            "expected_order_events": 0,
+            "matched_order_events": 0,
+            "missed_order_events": 0,
+        }
 
     async def start(self) -> None:
         for source, (url, subprotocols) in self.targets.items():
+            self.coverage[source]["status"] = "connecting"
             self._tasks.append(
                 asyncio.create_task(self._listen(source, url, subprotocols))
             )
+
         if config.SIM_WEBSOCKET_CONNECT_GRACE_SECONDS > 0:
             await asyncio.sleep(config.SIM_WEBSOCKET_CONNECT_GRACE_SECONDS)
 
@@ -106,7 +131,8 @@ class WebsocketObserver:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
-
+    def coverage_summary(self) -> dict[str, Any]:
+        return self.coverage
     async def _listen(
         self,
         source: str,
@@ -124,6 +150,8 @@ class WebsocketObserver:
                     ping_timeout=20,
                 ) as websocket:
                     console.print(f"[blue]websocket:[/] connected {source}")
+                    self.coverage[source]["status"] = "connected"
+                    self.coverage[source]["reason"] = None
                     self.recorder.record_event(
                         actor="websocket",
                         action="connected",
@@ -137,6 +165,8 @@ class WebsocketObserver:
             except Exception as exc:
                 count = self._connection_errors.get(source, 0) + 1
                 self._connection_errors[source] = count
+                self.coverage[source]["status"] = "failed"
+                self.coverage[source]["reason"] = str(exc)
                 if count <= 3:
                     self.recorder.record_issue(
                         severity="warning",
@@ -159,7 +189,8 @@ class WebsocketObserver:
                 details={"source": source, "raw": raw[:1000]},
             )
             return
-
+        if source in self.coverage:
+            self.coverage[source]["messages"] += 1
         try:
             nested = _nested_message(payload)
         except json.JSONDecodeError as exc:
@@ -196,6 +227,9 @@ def validate_websocket_events(recorder: RunRecorder) -> None:
     websocket_events = [
         event for event in recorder.events if event.get("category") == "websocket"
     ]
+    coverage = getattr(recorder, "websocket_coverage", None)
+    if isinstance(coverage, dict):
+        coverage["expected_order_events"] = len(expected)
     timeout_ms = int(config.SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS * 1000)
     early_tolerance_ms = 5000
 
@@ -217,6 +251,9 @@ def validate_websocket_events(recorder: RunRecorder) -> None:
                 "matched": False,
                 "source": "",
             }
+            coverage = getattr(recorder, "websocket_coverage", None)
+            if isinstance(coverage, dict):
+                coverage["missed_order_events"] = coverage.get("missed_order_events", 0) + 1
             recorder.record_issue(
                 severity="warning",
                 code="websocket_event_missing",
@@ -246,6 +283,9 @@ def validate_websocket_events(recorder: RunRecorder) -> None:
                 "latency_ms": best["elapsed_ms"] - event["elapsed_ms"],
                 "websocket_event_id": best["id"],
             }
+            coverage = getattr(recorder, "websocket_coverage", None)
+            if isinstance(coverage, dict):
+                coverage["matched_order_events"] = coverage.get("matched_order_events", 0) + 1
             continue
 
         first = min(matches, key=lambda item: abs(item["elapsed_ms"] - event["elapsed_ms"]))
@@ -255,6 +295,9 @@ def validate_websocket_events(recorder: RunRecorder) -> None:
             "latency_ms": first["elapsed_ms"] - event["elapsed_ms"],
             "websocket_event_id": first["id"],
         }
+        coverage = getattr(recorder, "websocket_coverage", None)
+        if isinstance(coverage, dict):
+            coverage["missed_order_events"] = coverage.get("missed_order_events", 0) + 1
         recorder.record_issue(
             severity="warning",
             code="websocket_event_late",

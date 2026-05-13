@@ -17,6 +17,7 @@ interface RunProfilesPanelProps {
   onLoadProfile: (profile: RunProfile) => void;
   onLaunchProfile: (profileId: number) => void;
   onDeleteProfile: (profileId: number) => void;
+  profileNameInputRef?: (node: HTMLInputElement | null) => void;
 }
 
 export default function RunProfilesPanel({
@@ -34,6 +35,7 @@ export default function RunProfilesPanel({
   onLoadProfile,
   onLaunchProfile,
   onDeleteProfile,
+  profileNameInputRef,
 }: RunProfilesPanelProps) {
   return (
     <div className="panel grid" style={{ gap: 12 }}>
@@ -44,7 +46,7 @@ export default function RunProfilesPanel({
       <div className="grid two">
         <label>
           Profile Name
-          <input value={profileName} onChange={(event) => onProfileNameChange(event.target.value)} placeholder="Daily Doctor - Jos Store" />
+          <input ref={profileNameInputRef} value={profileName} onChange={(event) => onProfileNameChange(event.target.value)} placeholder="Daily Doctor - Jos Store" />
         </label>
         <label>
           Description

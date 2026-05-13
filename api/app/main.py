@@ -210,7 +210,14 @@ def _init_db() -> None:
                 story_path TEXT,
                 events_path TEXT,
                 error TEXT,
-                execution_snapshot TEXT
+                execution_snapshot TEXT,
+                trigger_source TEXT,
+                trigger_label TEXT,
+                trigger_context TEXT NOT NULL DEFAULT '{}',
+                profile_id INTEGER,
+                schedule_id INTEGER,
+                integration_trigger_id INTEGER,
+                launched_by_user_id INTEGER
             )
             """
         )
@@ -348,6 +355,20 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE runs ADD COLUMN store_name TEXT")
     if "execution_snapshot" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN execution_snapshot TEXT")
+    if "trigger_source" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN trigger_source TEXT")
+    if "trigger_label" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN trigger_label TEXT")
+    if "trigger_context" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN trigger_context TEXT NOT NULL DEFAULT '{}'")
+    if "profile_id" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN profile_id INTEGER")
+    if "schedule_id" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN schedule_id INTEGER")
+    if "integration_trigger_id" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN integration_trigger_id INTEGER")
+    if "launched_by_user_id" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN launched_by_user_id INTEGER")
     profile_columns = [row[1] for row in conn.execute("PRAGMA table_info(run_profiles)").fetchall()]
     if profile_columns and "description" not in profile_columns:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN description TEXT")
@@ -396,6 +417,13 @@ def _migrate_postgres_schema() -> None:
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS user_name TEXT")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS store_name TEXT")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS execution_snapshot JSONB")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS trigger_source VARCHAR(32)")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS trigger_label TEXT")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS trigger_context JSONB DEFAULT '{}'::jsonb")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS profile_id INTEGER")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS schedule_id INTEGER")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS integration_trigger_id INTEGER")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS launched_by_user_id INTEGER")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS run_profiles (
@@ -689,14 +717,20 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     payload["extra_args"] = json.loads(payload["extra_args"] or "[]")
     if payload.get("execution_snapshot"):
         payload["execution_snapshot"] = json.loads(payload["execution_snapshot"])
+    if payload.get("trigger_context"):
+        payload["trigger_context"] = json.loads(payload["trigger_context"])
+    else:
+        payload["trigger_context"] = {}
     return payload
 
 
 def _row_to_dict_any(row) -> dict[str, Any]:
     """Convert database row to dict, supporting both SQLite and PostgreSQL"""
     if USE_POSTGRES:
-        # PostgreSQL returns dict-like objects
-        return dict(row)
+        payload = dict(row)
+        if payload.get("trigger_context") is None:
+            payload["trigger_context"] = {}
+        return payload
     else:
         # SQLite returns Row objects
         payload = dict(row)
@@ -708,6 +742,11 @@ def _row_to_dict_any(row) -> dict[str, Any]:
         snapshot = payload.get("execution_snapshot")
         if isinstance(snapshot, str) and snapshot:
             payload["execution_snapshot"] = json.loads(snapshot)
+        trigger_context = payload.get("trigger_context")
+        if isinstance(trigger_context, str) and trigger_context:
+            payload["trigger_context"] = json.loads(trigger_context)
+        elif trigger_context is None:
+            payload["trigger_context"] = {}
         return payload
 
 
@@ -1069,6 +1108,13 @@ def _profile_request_to_run_request(profile: dict[str, Any]) -> RunCreateRequest
         no_auto_provision=bool(profile.get("no_auto_provision")),
         post_order_actions=profile.get("post_order_actions"),
         extra_args=list(profile.get("extra_args") or []),
+        trigger_source="profile",
+        trigger_label=f"Profile launch: {profile.get('name') or profile.get('id')}",
+        trigger_context={
+            "profile_id": profile.get("id"),
+            "profile_name": profile.get("name"),
+        },
+        profile_id=profile.get("id"),
     )
 
 
@@ -1354,6 +1400,10 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
     execution_snapshot = _build_execution_snapshot(request, command, created_at)
     persisted_user_id = _resolve_persisted_user_id(user_id)
     
+    trigger_source = request.trigger_source or "manual"
+    trigger_label = request.trigger_label or "Manual launch"
+    trigger_context = request.trigger_context or {}
+
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
@@ -1363,8 +1413,10 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                     INSERT INTO runs (
                         user_id, flow, plan, timing, mode, store_id, phone, store_phone,
                         user_name, store_name, all_users, no_auto_provision,
-                        post_order_actions, extra_args, status, command, created_at, execution_snapshot
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        post_order_actions, extra_args, status, command, created_at, execution_snapshot,
+                        trigger_source, trigger_label, trigger_context, profile_id, schedule_id,
+                        integration_trigger_id, launched_by_user_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -1386,6 +1438,13 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                         " ".join(command),
                         created_at,
                         json.dumps(execution_snapshot),
+                        trigger_source,
+                        trigger_label,
+                        json.dumps(trigger_context),
+                        request.profile_id,
+                        request.schedule_id,
+                        request.integration_trigger_id,
+                        request.launched_by_user_id if request.launched_by_user_id is not None else persisted_user_id,
                     ),
                 )
                 run_id = cursor.fetchone()[0]
@@ -1398,8 +1457,9 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                 """
                 INSERT INTO runs (
                     flow, plan, timing, mode, store_id, phone, store_phone, user_name, store_name,
-                    all_users, no_auto_provision, post_order_actions, extra_args, status, command, created_at, execution_snapshot
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    all_users, no_auto_provision, post_order_actions, extra_args, status, command, created_at, execution_snapshot,
+                    trigger_source, trigger_label, trigger_context, profile_id, schedule_id, integration_trigger_id, launched_by_user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request.flow,
@@ -1419,6 +1479,13 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                     " ".join(command),
                     created_at,
                     json.dumps(execution_snapshot),
+                    trigger_source,
+                    trigger_label,
+                    json.dumps(trigger_context),
+                    request.profile_id,
+                    request.schedule_id,
+                    request.integration_trigger_id,
+                    request.launched_by_user_id if request.launched_by_user_id is not None else persisted_user_id,
                 ),
             )
             run_id = int(cursor.lastrowid)
@@ -1573,6 +1640,7 @@ def _delete_run_profile(profile_id: int) -> dict[str, Any]:
 def _launch_run_profile(profile_id: int, user_id: Optional[int] = None) -> dict[str, Any]:
     profile = _get_run_profile(profile_id)
     request = _profile_request_to_run_request(profile)
+    request.launched_by_user_id = user_id
     run = _create_run(request, user_id)
     return {"profile": profile, "run": run}
 
@@ -1875,11 +1943,32 @@ def _github_status_url_from_payload(payload: dict[str, Any]) -> str | None:
     return None
 
 
-def _enqueue_integration_profile_launch(trigger_id: int, profile_id: int) -> None:
+def _enqueue_integration_profile_launch(
+    trigger_id: int,
+    profile_id: int,
+    *,
+    project: str,
+    environment: str,
+    repository: str,
+) -> None:
     def _runner() -> None:
         try:
-            launch = _launch_run_profile(profile_id, None)
-            run_id = int(launch["run"]["id"])
+            profile = _get_run_profile(profile_id)
+            request = _profile_request_to_run_request(profile)
+            request.trigger_source = "github"
+            request.trigger_label = f"GitHub integration: {project}/{environment}"
+            request.trigger_context = {
+                "project": project,
+                "environment": environment,
+                "repository": repository,
+                "integration_trigger_id": trigger_id,
+                "profile_id": profile_id,
+                "profile_name": profile.get("name"),
+            }
+            request.integration_trigger_id = trigger_id
+            request.profile_id = profile_id
+            run = _create_run(request, None)
+            run_id = int(run["id"])
             _update_integration_trigger(trigger_id, status="launched", run_id=run_id)
         except Exception as exc:
             _update_integration_trigger(
@@ -1993,7 +2082,13 @@ def _process_github_deployment_webhook(body: bytes, headers: dict[str, str]) -> 
         }
 
     _update_integration_trigger(trigger["id"], status="queued", reason=None)
-    _enqueue_integration_profile_launch(int(trigger["id"]), int(mapping["profile_id"]))
+    _enqueue_integration_profile_launch(
+        int(trigger["id"]),
+        int(mapping["profile_id"]),
+        project=project,
+        environment=environment,
+        repository=repository,
+    )
     return {
         "accepted": True,
         "status": "queued",
@@ -3055,12 +3150,43 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
                 repeat_count = int(step.get("repeat_count") or 1)
                 profile_id = int(step["profile_id"])
                 for repeat_index in range(1, repeat_count + 1):
-                    launched = _launch_run_profile(profile_id, user_id)["run"]
+                    profile = _get_run_profile(profile_id)
+                    request = _profile_request_to_run_request(profile)
+                    request.trigger_source = "schedule"
+                    request.trigger_label = f"Schedule: {schedule.get('name') or schedule_id}"
+                    request.trigger_context = {
+                        "schedule_id": schedule_id,
+                        "schedule_name": schedule.get("name"),
+                        "schedule_type": schedule.get("schedule_type"),
+                        "campaign_step_index": step_index,
+                        "campaign_repeat_index": repeat_index,
+                        "profile_id": profile_id,
+                        "profile_name": profile.get("name"),
+                    }
+                    request.profile_id = profile_id
+                    request.schedule_id = schedule_id
+                    request.launched_by_user_id = user_id
+                    launched = _create_run(request, user_id)
                     launched["campaign_step_index"] = step_index
                     launched["campaign_repeat_index"] = repeat_index
                     runs.append(launched)
         else:
-            launched = _launch_run_profile(int(schedule["profile_id"]), user_id)["run"]
+            profile_id = int(schedule["profile_id"])
+            profile = _get_run_profile(profile_id)
+            request = _profile_request_to_run_request(profile)
+            request.trigger_source = "schedule"
+            request.trigger_label = f"Schedule: {schedule.get('name') or schedule_id}"
+            request.trigger_context = {
+                "schedule_id": schedule_id,
+                "schedule_name": schedule.get("name"),
+                "schedule_type": schedule.get("schedule_type"),
+                "profile_id": profile_id,
+                "profile_name": profile.get("name"),
+            }
+            request.profile_id = profile_id
+            request.schedule_id = schedule_id
+            request.launched_by_user_id = user_id
+            launched = _create_run(request, user_id)
             runs.append(launched)
     except Exception as exc:
         execution = _record_schedule_execution(
@@ -3234,6 +3360,14 @@ def _replay_run_logic(run_id: int, user_id: Optional[int] = None) -> dict[str, A
         no_auto_provision=bool(snapshot.get("no_auto_provision")),
         post_order_actions=snapshot.get("post_order_actions"),
         extra_args=list(snapshot.get("extra_args") or []),
+        trigger_source="replay",
+        trigger_label=f"Replay of run #{run_id}",
+        trigger_context={
+            "source_run_id": run_id,
+            "source_flow": snapshot.get("flow"),
+            "source_plan": snapshot.get("plan"),
+        },
+        launched_by_user_id=user_id,
     )
     replayed_run = _create_run(request, user_id)
     return {"source_run_id": run_id, "run": replayed_run, "snapshot": snapshot}
@@ -3454,6 +3588,10 @@ def _compact_event(event: dict[str, Any]) -> dict[str, Any]:
         "http_status": event.get("http_status"),
         "latency_ms": event.get("latency_ms"),
         "channel": event.get("channel"),
+        "reason_code": event.get("reason_code"),
+        "reason_message": event.get("reason_message"),
+        "next_action": event.get("next_action"),
+        "run_continued": event.get("run_continued"),
     }
     if isinstance(response_preview, str):
         compact["response_preview"] = _truncate_text(response_preview, 600)

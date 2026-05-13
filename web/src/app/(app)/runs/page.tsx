@@ -392,6 +392,8 @@ export default function App() {
 
   const [isStartRunExpanded, setIsStartRunExpanded] = useState(true);
   const [isLiveConsoleExpanded, setIsLiveConsoleExpanded] = useState(true);
+  const profilesSectionRef = useRef<HTMLDivElement | null>(null);
+  const profileNameInputRef = useRef<HTMLInputElement | null>(null);
   const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
   const backendHealthyRef = useRef<boolean | null>(null);
 
@@ -704,6 +706,13 @@ export default function App() {
 
   const logLines = logText.split("\n").filter((line) => line.length > 0);
 
+  function onSaveAsProfileShortcut() {
+    profilesSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => {
+      profileNameInputRef.current?.focus();
+    }, 120);
+  }
+
   return (
       <main className="grid" style={{ gap: 16 }}>
         <div className="panel grid" style={{ gap: 8 }}>
@@ -772,6 +781,7 @@ export default function App() {
                   onFormChange={(updater) => setForm(updater)}
                   onStartRun={onStartRun}
                   onCancelSelectedRun={() => selectedRun && onCancelRun(selectedRun.id)}
+                  onSaveAsProfileShortcut={onSaveAsProfileShortcut}
                   commandPreview={commandPreview}
                   canCancelSelectedRun={Boolean(selectedRun && isActiveStatus(selectedRun.status))}
                   planOptions={simulationPlans}
@@ -797,22 +807,27 @@ export default function App() {
         )}
 
         {canCreateRuns ? (
-          <RunProfilesPanel
-            profiles={profiles}
-            profileName={profileName}
-            profileDescription={profileDescription}
-            selectedProfileId={selectedProfileId}
-            isSaving={isProfileSubmitting}
-            isLaunching={isProfileLaunching}
-            form={form}
-            onProfileNameChange={setProfileName}
-            onProfileDescriptionChange={setProfileDescription}
-            onSaveProfile={onSaveProfile}
-            onUpdateProfile={onUpdateProfile}
-            onLoadProfile={onLoadProfile}
-            onLaunchProfile={onLaunchProfile}
-            onDeleteProfile={onDeleteProfile}
-          />
+          <div ref={profilesSectionRef}>
+            <RunProfilesPanel
+              profiles={profiles}
+              profileName={profileName}
+              profileDescription={profileDescription}
+              selectedProfileId={selectedProfileId}
+              isSaving={isProfileSubmitting}
+              isLaunching={isProfileLaunching}
+              form={form}
+              onProfileNameChange={setProfileName}
+              onProfileDescriptionChange={setProfileDescription}
+              onSaveProfile={onSaveProfile}
+              onUpdateProfile={onUpdateProfile}
+              onLoadProfile={onLoadProfile}
+              onLaunchProfile={onLaunchProfile}
+              onDeleteProfile={onDeleteProfile}
+              profileNameInputRef={(node) => {
+                profileNameInputRef.current = node;
+              }}
+            />
+          </div>
         ) : null}
 
 

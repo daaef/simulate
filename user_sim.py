@@ -341,15 +341,25 @@ async def bootstrap_auth(
                     user={"id": config.USER_ID},
                     token_source="user_cached_token",
                 )
-                # Fetch complete profile to ensure we have name and phone
-                try:
-                    profile = await fetch_user_profile(
-                        client, token=session.token, recorder=recorder, scenario=scenario
+                if recorder is not None:
+                    recorder.record_decision(
+                        actor="user",
+                        action="hydrate_cached_user_profile",
+                        status="skipped",
+                        reason="unsupported_profile_fetch_contract",
+                        message=(
+                            "Skipped cached-user profile hydration because the backend contract "
+                            "does not support the previous GET profile endpoint."
+                        ),
+                        scenario=scenario,
+                        step="auth_fetch_user_profile",
+                        reason_code="unsupported_profile_fetch_contract",
+                        reason_message=(
+                            "Profile hydration endpoint/method is not app-compatible for this token path."
+                        ),
+                        next_action="reuse_cached_identity_fields",
+                        run_continued=True,
                     )
-                    if profile:
-                        session.user.update(profile)
-                except Exception as exc:
-                    console.print(f"[yellow]user:[/] Profile fetch failed for cached token: {exc}")
                 
                 return session
             except HttpApiError as exc:
@@ -357,6 +367,30 @@ async def bootstrap_auth(
                     console.print(
                         "[yellow]user:[/] Cached user token was rejected; refreshing via OTP."
                     )
+                    if recorder is not None:
+                        recorder.record_decision(
+                            actor="user",
+                            action="validate_cached_user_token",
+                            status="recovered",
+                            reason="cached_token_invalid",
+                            message=(
+                                "Cached user token was rejected by the backend, so the simulator "
+                                "cleared it and refreshed authentication through OTP."
+                            ),
+                            scenario=scenario,
+                            step="auth_validate_cached_user_token",
+                            reason_code="cached_token_invalid",
+                            reason_message=(
+                                "Backend rejected cached token during validation."
+                            ),
+                            next_action="otp_refresh",
+                            run_continued=True,
+                            details={
+                                "http_status": exc.status_code,
+                                "response": exc.response_text[:500],
+                                "next_action": "otp_refresh",
+                            },
+                        )
                     _clear_cached_user_token()
                 else:
                     raise
@@ -438,6 +472,21 @@ async def bootstrap_auth(
 
     _persist_user_token(token=str(token), user_id=int(user_id))
     console.print(f"[green]user:[/] User token acquired for user_id={user_id}.")
+
+    recorder.record_decision(
+        actor="user",
+        action="refresh_user_auth",
+        status="called",
+        reason="otp_auth_succeeded",
+        message="User authentication was refreshed through OTP and the run continued.",
+        scenario=scenario,
+        step="auth_refresh",
+        reason_code="otp_auth_succeeded",
+        reason_message="OTP authentication succeeded.",
+        next_action="continue_run",
+        run_continued=True,
+    )
+    
     return UserSession(
         token=str(token),
         user_id=int(user_id),

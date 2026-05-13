@@ -1737,6 +1737,8 @@ async def run(
         finally:
             if observer is not None:
                 await observer.stop()
+                recorder.set_websocket_coverage(observer.coverage_summary())
+
             await store_sim.restore_store_status(
                 client,
                 session=store_session,

@@ -46,6 +46,9 @@ export default function RunDetailHeader({ run, onBack }: RunDetailHeaderProps) {
         <div className="muted">Phone: <strong>{run.phone || "Auto-selected"}</strong></div>
         <div className="muted">Created: <strong>{formatRelativeTime(run.created_at)}</strong></div>
         <div className="muted">Duration: <strong>{formatRunDuration(run.started_at, run.finished_at)}</strong></div>
+        <div className="muted">Launch: <strong>{run.trigger_source || "manual"}</strong></div>
+        <div className="muted">Reason: <strong>{run.trigger_label || "Manual launch"}</strong></div>
+        {run.profile_id ? <div className="muted">Profile: <strong>#{run.profile_id}</strong></div> : null}
         {run.exit_code !== null ? <div className="muted">Exit Code: <strong>{run.exit_code}</strong></div> : null}
       </div>
     </div>

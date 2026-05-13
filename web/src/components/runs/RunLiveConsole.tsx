@@ -63,7 +63,7 @@ export default function RunLiveConsole({
         <>
           {selectedRun ? (
             <div className="muted">
-              Run #{selectedRun.id} ({selectedRun.status}) | {selectedRun.flow} | {selectedRun.store_id || "auto-store"}
+              Run #{selectedRun.id} ({selectedRun.status}) | {selectedRun.flow} | {selectedRun.store_id || "auto-store"} | {selectedRun.trigger_source || "manual"} · {selectedRun.trigger_label || "Manual launch"}{selectedRun.profile_id ? ` · ${((selectedRun.trigger_context as Record<string, unknown> | undefined)?.profile_name as string) || `profile #${selectedRun.profile_id}`}` : ""}
             </div>
           ) : (
             <div className="muted">No run selected.</div>

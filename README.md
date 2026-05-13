@@ -8,6 +8,8 @@ This repo contains a CLI-driven ordering-flow simulator plus a Dockerized web UI
 docker compose up -d --build
 ```
 
+The `web` service runs `next start` (production mode) from the built image. Do not bind-mount `./web` into `/app` for this stack, or the image-built `.next` output will be hidden and the container will fail with `Could not find a production build in the '.next' directory`.
+
 Open:
 
 - Web UI: `http://localhost:8080`
@@ -30,6 +32,8 @@ The authenticated app shell includes active route highlighting for `Overview`, `
 
 - `Overview`: status cards, run status and success charts, flow distribution, failure trend, archive/purge backlog, schedule health, and alerts.
 - `Runs`: launch, cancel, replay, delete completed runs, and inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles.
+  - Runs now show launch attribution (`trigger_source`, `trigger_label`, optional `profile_id`) in list/console/detail views.
+  - Start Run now includes a `Save as profile` shortcut under command preview that scrolls/focuses the Saved Profiles name input.
 - `Schedules`: creates campaign-first schedules (simple requests are normalized to campaign execution), supports period-specific run slots, all-day mode, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, pause, resume, disable, soft delete, and restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
 - `Archives`: searchable archive/raw-purge candidate browsing with retained run summaries.
 - `Retention`: policy windows, archive/purge queues, retained-summary fields, and purge-safety state.
@@ -82,6 +86,11 @@ See `SIMULATOR_GUIDE.md` for the full command matrix, scenarios, flags, artifact
 `.env` is for secrets, auth cache values, credentials, and deployment URLs only. Non-sensitive simulator choices live in JSON run plans such as `sim_actors.json` or GUI-generated plans under `runs/gui-plans/`.
 
 Plan files define users, stores, delivery GPS, runtime defaults, autopilot rules, fixture/menu defaults, payment mode/coupon defaults, and review/new-user defaults. Existing CLI commands still work: explicit CLI flags override plan values, and `.env` is only a fallback for secret/auth/deployment values.
+
+Store and user scope for execution is now strict to the selected plan:
+- Load and trace runs only use stores defined in plan `stores[]`.
+- Run phones must exist in plan `users[]`.
+- Explicit `--store` / `--phone` values outside plan scope fail fast with a validation error.
 
 Keep actor and run behavior out of `.env`: do not set `USER_PHONE_NUMBER`, `STORE_ID`, `SIM_RUN_MODE`, `SIM_TRACE_SUITE`, `SIM_TIMING_PROFILE`, `N_USERS`, `SIM_ORDERS`, `ORDER_INTERVAL_SECONDS`, `REJECT_RATE`, `SIM_LAT`, or `SIM_LNG` there for normal use. Put those values in `sim_actors.json` or the selected GUI plan; use `--phone` or `--store` only for one-off overrides.
 

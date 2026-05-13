@@ -33,7 +33,7 @@ from scenarios import resolve_trace_scenarios
 import store_sim
 import trace_runner
 import user_sim
-from websocket_observer import validate_websocket_events
+from websocket_observer import WebsocketObserver, validate_websocket_events
 
 console = Console()
 
@@ -349,19 +349,41 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
     actor_stores = actors.get("stores", [])
     actor_users = actors.get("users", [])
 
-    # Determine which stores to login.
+    if not actor_stores:
+        raise RuntimeError(
+            "No stores were found in the selected plan. "
+            "Load runs require stores explicitly defined in plan stores[]."
+        )
+
+    plan_store_ids = [str(store.get("store_id")) for store in actor_stores if store.get("store_id")]
     if _store_from_cli and config.STORE_ID:
-        # --store flag: filter to that one store if it's in the list.
+        matching = [s for s in actor_stores if s.get("store_id") == config.STORE_ID]
+        if not matching:
+            raise RuntimeError(
+                f"Explicit store {config.STORE_ID!r} is not present in the selected plan stores."
+            )
+        actor_stores = matching
+    elif config.STORE_ID:
         matching = [s for s in actor_stores if s.get("store_id") == config.STORE_ID]
         if matching:
             actor_stores = matching
-        # else: STORE_ID is set but not in json — bootstrap_auth will use it directly.
+        else:
+            raise RuntimeError(
+                f"Configured store {config.STORE_ID!r} is not present in the selected plan stores: {plan_store_ids}."
+            )
 
     # Determine which user(s) to auth.
     if config.ALL_USERS:
         user_phones = [u.get("phone", "") for u in actor_users if u.get("phone")]
     else:
         user_phones = [config.USER_PHONE_NUMBER] if config.USER_PHONE_NUMBER else []
+    allowed_phones = {str(u.get("phone")) for u in actor_users if u.get("phone")}
+    out_of_plan_users = [phone for phone in user_phones if phone and phone not in allowed_phones]
+    if out_of_plan_users:
+        raise RuntimeError(
+            "All load-run users must be defined in the selected plan users[]. "
+            f"Out-of-plan phone(s): {out_of_plan_users}"
+        )
 
     if not user_phones:
         raise RuntimeError(
@@ -371,7 +393,7 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
 
     # ── Phase 1: Bootstrap ALL stores ──────────────────────────────────────
     console.print(
-        f"[cyan]main:[/] Phase 1 — Logging in {len(actor_stores) or 1} store(s) ..."
+        f"[cyan]main:[/] Phase 1 — Logging in {len(actor_stores)} store(s) ..."
     )
     store_sessions: list[store_sim.StoreSession] = []
 
@@ -396,15 +418,6 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
                     console.print(
                         f"[yellow]main:[/] Store {sid} login failed: {exc}  (skipping)"
                     )
-        else:
-            # No stores in json — fall back to single STORE_ID from config.
-            ss = await store_sim.bootstrap_auth(bootstrap_client, recorder)
-            store_sessions.append(ss)
-            recorder.set_store_identity(
-                subentity_id=ss.store_id,
-                login_id=ss.store_login_id or config.STORE_ID,
-                raw_store=ss.subentity,
-            )
 
     if not store_sessions:
         raise RuntimeError("No stores could be logged in. Cannot proceed.")
@@ -479,6 +492,7 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
                         recorder=recorder,
                         user_id=us.user_id,
                         user_token=us.token,
+                        user=us.user,
                         token_source=us.token_source,
                         currency=fixtures.currency,
                         scenario="load_app_probes",
@@ -525,6 +539,15 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
 
     all_tasks: list[asyncio.Task] = []
 
+    primary_user_id = user_bundles[0][0].user_id
+    primary_store_id = store_sessions[0].store_id
+    observer = WebsocketObserver(
+        recorder=recorder,
+        user_id=primary_user_id,
+        store_id=primary_store_id,
+    )
+    await observer.start()
+
     # Store listeners.
     for ss in store_sessions:
         all_tasks.append(
@@ -563,6 +586,9 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
         if config.SIM_WEBSOCKET_DRAIN_SECONDS > 0:
             await asyncio.sleep(config.SIM_WEBSOCKET_DRAIN_SECONDS)
     finally:
+        await observer.stop()
+        recorder.set_websocket_coverage(observer.coverage_summary())
+
         for task in all_tasks:
             if not task.done():
                 task.cancel()

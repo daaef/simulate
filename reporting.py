@@ -110,6 +110,8 @@ class RunRecorder:
         self.fixtures_summary = fixtures_summary
         self.events: list[dict[str, Any]] = []
         self.issues: list[dict[str, Any]] = []
+        self.decisions: list[dict[str, Any]] = []
+        self.websocket_coverage: dict[str, Any] = {}
         self.orders: dict[str, dict[str, Any]] = {}
         self.scenarios: dict[str, dict[str, Any]] = {}
         self.identity_context: dict[str, dict[str, Any]] = {
@@ -128,6 +130,29 @@ class RunRecorder:
         }
         self._next_event_id = 1
         self._next_issue_id = 1
+        self.websocket_coverage: dict[str, Any] = {
+            "user_orders": {
+                "status": "not_started",
+                "reason": "observer_not_started",
+                "messages": 0,
+                "url": "",
+            },
+            "store_orders": {
+                "status": "not_started",
+                "reason": "observer_not_started",
+                "messages": 0,
+                "url": "",
+            },
+            "store_stats": {
+                "status": "not_started",
+                "reason": "observer_not_started",
+                "messages": 0,
+                "url": "",
+            },
+            "expected_order_events": 0,
+            "matched_order_events": 0,
+            "missed_order_events": 0,
+        }
 
     @classmethod
     def bootstrap(cls) -> "RunRecorder":
@@ -396,6 +421,10 @@ class RunRecorder:
         expect_websocket: bool = False,
         track_order: bool = True,
         details: dict[str, Any] | None = None,
+        reason_code: str | None = None,
+        reason_message: str | None = None,
+        next_action: str | None = None,
+        run_continued: bool | None = None,
     ) -> dict[str, Any]:
         event: dict[str, Any] = {
             "id": self._next_event_id,
@@ -453,6 +482,14 @@ class RunRecorder:
             event["expect_websocket"] = True
         if details:
             event["details"] = _json_safe(details)
+        if reason_code is not None:
+            event["reason_code"] = reason_code
+        if reason_message is not None:
+            event["reason_message"] = reason_message
+        if next_action is not None:
+            event["next_action"] = next_action
+        if run_continued is not None:
+            event["run_continued"] = run_continued
 
         self.events.append(event)
         if scenario is not None:
@@ -507,6 +544,76 @@ class RunRecorder:
         self.issues.append(issue)
         return issue
 
+    def record_decision(
+        self,
+        *,
+        action: str,
+        status: str,
+        reason: str,
+        message: str,
+        actor: str | None = None,
+        scenario: str | None = None,
+        step: str | None = None,
+        required: dict[str, Any] | None = None,
+        details: dict[str, Any] | None = None,
+        reason_code: str | None = None,
+        reason_message: str | None = None,
+        next_action: str | None = None,
+        run_continued: bool | None = None,
+    ) -> dict[str, Any]:
+        decision = {
+            "id": len(self.decisions) + 1,
+            "ts": _utc_now(),
+            "elapsed_ms": self.elapsed_ms(),
+            "action": action,
+            "status": status,
+            "reason": reason,
+            "reason_code": reason_code or reason,
+            "reason_message": reason_message or message,
+            "message": message,
+            "next_action": next_action,
+            "run_continued": run_continued,
+            "identity": self._identity_snapshot(),
+        }
+        if actor is not None:
+            decision["actor"] = actor
+        if scenario is not None:
+            decision["scenario"] = scenario
+            self.start_scenario(scenario)
+        if step is not None:
+            decision["step"] = step
+        if required is not None:
+            decision["required"] = _json_safe(required)
+        if details is not None:
+            decision["details"] = _json_safe(details)
+
+        self.decisions.append(decision)
+        self.record_event(
+            actor=actor or "simulator",
+            action=action,
+            category="decision",
+            scenario=scenario,
+            step=step,
+            status=status,
+            ok=status in {"called", "recovered"},
+            reason_code=str(decision["reason_code"]),
+            reason_message=str(decision["reason_message"]),
+            next_action=next_action,
+            run_continued=run_continued,
+            details={
+                "reason_code": decision["reason_code"],
+                "reason_message": decision["reason_message"],
+                "next_action": next_action,
+                "run_continued": run_continued,
+                **(details or {}),
+            },
+            track_order=False,
+        )
+        return decision
+
+    def set_websocket_coverage(self, coverage: dict[str, Any]) -> None:
+        self.websocket_coverage = _json_safe(coverage)
+        
     def record_websocket(
         self,
         *,
@@ -594,6 +701,7 @@ class RunRecorder:
         events_path = self.run_dir / "events.json"
         report_path = self.run_dir / "report.md"
         story_path = self.run_dir / "story.md"
+        
         events_path.write_text(
             json.dumps(
                 {
@@ -608,6 +716,8 @@ class RunRecorder:
                     "orders": list(self.orders.values()),
                     "events": self.events,
                     "issues": self.issues,
+                    "decisions": self.decisions,
+                    "websocket_coverage": self.websocket_coverage,
                 },
                 indent=2,
                 default=str,
@@ -723,7 +833,101 @@ class RunRecorder:
             ]
             if part
         )
+    def _render_decision_sections(self) -> list[str]:
+        lines: list[str] = [
+            "## Why This Run Behaved This Way",
+            "",
+        ]
 
+        if not self.decisions:
+            lines.extend(
+                [
+                    "No skipped, blocked, or recovered simulator decisions were recorded.",
+                    "",
+                ]
+            )
+            return lines
+
+        important = [
+            item
+            for item in self.decisions
+            if item.get("status") in {"blocked", "skipped", "recovered", "failed"}
+        ]
+
+        if not important:
+            lines.extend(
+                [
+                    "All recorded simulator decisions were normal callable actions.",
+                    "",
+                ]
+            )
+            return lines
+
+        lines.extend(
+            [
+                "The simulator records these decisions so expected app behavior is not mistaken for backend failure.",
+                "",
+                _table_row(["Status", "Action", "Reason", "Message", "Scenario", "Step"]),
+                _table_row(["---", "---", "---", "---", "---", "---"]),
+            ]
+        )
+
+        for item in important:
+            lines.append(
+                _table_row(
+                    [
+                        item.get("status", ""),
+                        item.get("action", ""),
+                        item.get("reason", ""),
+                        item.get("message", ""),
+                        item.get("scenario", ""),
+                        item.get("step", ""),
+                    ]
+                )
+            )
+
+        lines.append("")
+        return lines
+
+    def _render_websocket_coverage_section(self) -> list[str]:
+        lines: list[str] = [
+            "## WebSocket Coverage",
+            "",
+        ]
+
+        if not self.websocket_coverage:
+            lines.extend(
+                [
+                    "No WebSocket coverage summary was recorded for this run.",
+                    "",
+                ]
+            )
+            return lines
+
+        lines.extend(
+            [
+                _table_row(["Socket", "Status", "Messages", "Reason"]),
+                _table_row(["---", "---", "---", "---"]),
+            ]
+        )
+
+        for key, value in self.websocket_coverage.items():
+            if not isinstance(value, dict):
+                continue
+
+            lines.append(
+                _table_row(
+                    [
+                        key,
+                        value.get("status", ""),
+                        value.get("messages", ""),
+                        value.get("reason", ""),
+                    ]
+                )
+            )
+
+        lines.append("")
+        return lines
     def _render_markdown(self) -> str:
         actor_counts = Counter(event["actor"] for event in self.events)
         terminal = Counter(
@@ -812,7 +1016,60 @@ class RunRecorder:
         else:
             lines.append(_table_row(["none", "", "", "", "", ""]))
         lines.append("")
+        lines.extend(
+            [
+                "## WebSocket Coverage",
+                _table_row(["Socket", "Status", "Messages", "Reason", "URL"]),
+                _table_row(["---", "---", "---", "---", "---"]),
+            ]
+        )
 
+        for source in ("user_orders", "store_orders", "store_stats"):
+            item = self.websocket_coverage.get(source, {})
+            lines.append(
+                _table_row(
+                    [
+                        source,
+                        item.get("status", ""),
+                        item.get("messages", 0),
+                        item.get("reason") or "",
+                        item.get("url") or "",
+                    ]
+                )
+            )
+
+        lines.extend(
+            [
+                _table_row(
+                    [
+                        "expected_order_events",
+                        self.websocket_coverage.get("expected_order_events", 0),
+                        "",
+                        "",
+                        "",
+                    ]
+                ),
+                _table_row(
+                    [
+                        "matched_order_events",
+                        self.websocket_coverage.get("matched_order_events", 0),
+                        "",
+                        "",
+                        "",
+                    ]
+                ),
+                _table_row(
+                    [
+                        "missed_order_events",
+                        self.websocket_coverage.get("missed_order_events", 0),
+                        "",
+                        "",
+                        "",
+                    ]
+                ),
+                "",
+            ]
+        )
         lines.extend(
             [
                 "## Websocket Assertions",
@@ -861,6 +1118,9 @@ class RunRecorder:
             lines.append(_table_row(["none", "", "", "", "", "", "", ""]))
         lines.append("")
 
+        lines.extend(self._render_decision_sections())
+        lines.extend(self._render_websocket_coverage_section())
+        
         lines.extend(
             [
                 "## Developer Findings",

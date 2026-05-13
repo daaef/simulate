@@ -35,6 +35,16 @@ function eventMessage(event: EventRow): string {
   return eventField(event, "message") || eventField(event, "details") || eventField(event, "detail") || eventField(event, "response_preview");
 }
 
+function detailField(event: EventRow, key: string): string {
+  const details = event["details"];
+  if (!details || typeof details !== "object") return "";
+  const value = (details as Record<string, unknown>)[key];
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
 function methodClass(method?: string): string {
   const m = (method || "").toUpperCase();
   if (m === "GET") return "method-get";
@@ -115,6 +125,8 @@ export default function RunEventsPanel({
                 <th>Actor</th>
                 <th>Action</th>
                 <th>Status</th>
+                <th>Reason</th>
+                <th>Next</th>
                 <th>Message</th>
               </tr>
             </thead>
@@ -125,6 +137,8 @@ export default function RunEventsPanel({
                   <td>{eventField(event, "actor") || "—"}</td>
                   <td>{eventField(event, "action") || eventField(event, "method") || "—"}</td>
                   <td>{eventStatus(event) || "—"}</td>
+                  <td>{eventField(event, "reason_code") || detailField(event, "reason_code") || "—"}</td>
+                  <td>{eventField(event, "next_action") || detailField(event, "next_action") || "—"}</td>
                   <td style={{ maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis" }}>{eventMessage(event) || "—"}</td>
                 </tr>
               ))}

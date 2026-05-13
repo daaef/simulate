@@ -2,6 +2,8 @@
 
 This simulator is a daily doctor for the ordering platform. It simulates user app, store app, and robot behavior; continuously checks HTTP and websocket paths; and writes operator-friendly reports plus full technical evidence.
 
+Docker note: this stack runs the Next.js web app with `next start` from the built image. If `./web` is bind-mounted over `/app`, the built `.next` directory can be masked and `web` will crash with `Could not find a production build in the '.next' directory`.
+
 ## 1) Inputs and Outputs
 
 Required operator inputs:
@@ -14,6 +16,7 @@ Generated artifacts per run:
 - `runs/<timestamp>/events.json`: complete event ledger.
 - `runs/<timestamp>/report.md`: summary + bottlenecks + tabled findings + technical trace.
 - `runs/<timestamp>/story.md`: narrative scenario summary.
+- `events.json` includes decision records (`called`, `blocked`, `skipped`, `recovered`, `failed`) with reason code/message, next action, and whether the run continued.
 
 Configuration precedence:
 
@@ -23,6 +26,11 @@ Configuration precedence:
 4. Built-in defaults.
 
 The GUI stores admin-created plans in `runs/gui-plans/` and launches them through the same `--plan` CLI path.
+
+Run scope enforcement is strict to the selected plan:
+- Stores must come from plan `stores[]`.
+- Phones/users must come from plan `users[]`.
+- Out-of-plan `--store` and `--phone` values fail fast instead of falling back to discovered/service-area entities.
 
 ## Plan-Backed Configuration
 

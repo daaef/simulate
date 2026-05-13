@@ -25,6 +25,13 @@ export type RunRow = {
   events_path: string | null;
   error: string | null;
   execution_snapshot?: Record<string, unknown> | null;
+  trigger_source?: "manual" | "profile" | "schedule" | "github" | "replay" | string | null;
+  trigger_label?: string | null;
+  trigger_context?: Record<string, unknown>;
+  profile_id?: number | null;
+  schedule_id?: number | null;
+  integration_trigger_id?: number | null;
+  launched_by_user_id?: number | null;
 };
 
 export type RunCreateRequest = {

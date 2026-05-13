@@ -12,6 +12,7 @@ interface RunLaunchPanelProps {
   onFormChange: (updater: (prev: RunCreateRequest) => RunCreateRequest) => void;
   onStartRun: () => void;
   onCancelSelectedRun: () => void;
+  onSaveAsProfileShortcut: () => void;
   commandPreview: string;
   canCancelSelectedRun: boolean;
   planOptions?: SimulationPlan[];
@@ -63,6 +64,7 @@ export default function RunLaunchPanel({
   onFormChange,
   onStartRun,
   onCancelSelectedRun,
+  onSaveAsProfileShortcut,
   commandPreview,
   canCancelSelectedRun,
   planOptions = [],
@@ -180,6 +182,9 @@ export default function RunLaunchPanel({
           <pre className="artifact command-preview">
             <code>{commandPreview}</code>
           </pre>
+          <button className="secondary" onClick={onSaveAsProfileShortcut}>
+            Save as profile
+          </button>
         </>
       ) : null}
     </div>

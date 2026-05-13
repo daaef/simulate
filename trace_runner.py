@@ -18,8 +18,7 @@ from interaction_catalog import (
     MENU_AVAILABLE,
     MENU_SOLD_OUT,
     MENU_UNAVAILABLE,
-    user_can_add_menu_item,
-    user_menu_block_reason,
+    menu_action_block_reason,
 )
 import robot_sim
 import post_order_actions
@@ -59,22 +58,32 @@ def _trace_requires_fixtures(scenarios: list[str]) -> bool:
 
 
 def _trace_store_candidates() -> list[str | None]:
-    if config.SIM_STORE_EXPLICIT:
-        return [config.STORE_ID or None]
-
-    candidates: list[str | None] = []
-    if config.STORE_ID:
-        candidates.append(config.STORE_ID)
-
     actors = getattr(config, "SIM_ACTORS", {}) or {}
+    actor_store_ids: list[str] = []
     for store in actors.get("stores", []):
         if not isinstance(store, dict):
             continue
         store_id = store.get("store_id")
-        if store_id and str(store_id) not in candidates:
-            candidates.append(str(store_id))
+        if store_id and str(store_id) not in actor_store_ids:
+            actor_store_ids.append(str(store_id))
 
-    return candidates or [None]
+    if not actor_store_ids:
+        raise RuntimeError(
+            "No stores were found in the selected plan. "
+            "All trace runs now require store selection from plan stores only."
+        )
+
+    if config.SIM_STORE_EXPLICIT:
+        explicit_store = config.STORE_ID or ""
+        if explicit_store not in actor_store_ids:
+            raise RuntimeError(
+                f"Explicit store {explicit_store!r} is not present in the selected plan stores."
+            )
+        return [explicit_store]
+
+    if config.STORE_ID and config.STORE_ID in actor_store_ids:
+        return [config.STORE_ID]
+    return actor_store_ids
 
 
 async def _bootstrap_store_auth(
@@ -1243,7 +1252,17 @@ def _run_menu_status_probe(
         )
 
     recorder.start_scenario(scenario, expected_final_status=expected)
+
     sample = fixtures.menu_items[0] if fixtures.menu_items else {}
+
+    # Create a simulated menu object that matches the scenario being tested.
+    menu = dict(sample)
+    menu["status"] = status
+
+    # Create a simulated store object that matches the scenario being tested.
+    store = dict(fixtures.store)
+    store["status"] = 1 if store_is_open else 0
+
     recorder.record_event(
         actor="user",
         action="tap_menu_item",
@@ -1251,39 +1270,108 @@ def _run_menu_status_probe(
         scenario=scenario,
         step="open_menu_detail",
         details={
-            "menu_id": sample.get("id"),
-            "menu_status": status,
+            "menu_id": menu.get("id"),
+            "menu_status": menu.get("status"),
             "store_is_open": store_is_open,
+            "store_status": store.get("status"),
             "category_tabs_available": True,
-            "side_extras_checkboxes_available": bool(sample.get("sides")),
+            "side_extras_checkboxes_available": bool(menu.get("sides")),
         },
         track_order=False,
     )
-    can_add = user_can_add_menu_item(status, store_is_open=store_is_open)
-    reason = user_menu_block_reason(status, store_is_open=store_is_open)
-    recorder.record_event(
+
+    blocked_reason = menu_action_block_reason(menu, store=store)
+    can_add = blocked_reason is None
+
+    expected_block = scenario in {
+        "menu_unavailable",
+        "menu_sold_out",
+        "menu_store_closed",
+    }
+
+    if can_add:
+        recorder.record_event(
+            actor="user",
+            action="tap_add_to_cart",
+            category="ui_gate",
+            scenario=scenario,
+            step="add_to_cart_gate",
+            ok=True,
+            status="allowed",
+            details={
+                "allowed": True,
+                "menu_id": menu.get("id"),
+                "menu_status": menu.get("status"),
+                "store_status": store.get("status"),
+                "expected_block": expected_block,
+            },
+            track_order=False,
+        )
+    else:
+        recorder.record_event(
+            actor="user",
+            action="tap_add_to_cart",
+            category="ui_gate",
+            scenario=scenario,
+            step="add_to_cart_gate",
+            ok=True,
+            status="blocked_expected" if expected_block else "blocked_unexpected",
+            details={
+                "allowed": False,
+                "blocked_reason": blocked_reason,
+                "expected_block": expected_block,
+                "menu_id": menu.get("id"),
+                "menu_status": menu.get("status"),
+                "store_status": store.get("status"),
+                "user_message": "This store can't take orders"
+                if blocked_reason == "store_closed"
+                else "This Item is sold out",
+            },
+            track_order=False,
+        )
+
+    actual = "add_to_cart_allowed" if can_add else "add_to_cart_blocked"
+
+    if expected_block and not can_add:
+        recorder.finish_scenario(
+            scenario,
+            verdict="passed",
+            actual_final_status=actual,
+            note=f"Add-to-cart correctly blocked: {blocked_reason}",
+        )
+        return
+
+    if not expected_block and can_add:
+        recorder.finish_scenario(
+            scenario,
+            verdict="passed",
+            actual_final_status=actual,
+            note="Add-to-cart correctly allowed.",
+        )
+        return
+
+    recorder.record_issue(
+        severity="error",
+        code="menu_gate_unexpected_result",
         actor="user",
-        action="tap_add_to_cart",
-        category="ui_gate",
         scenario=scenario,
         step="add_to_cart_gate",
-        ok=can_add,
+        message=(
+            f"Menu gate result was unexpected. "
+            f"expected_block={expected_block}, can_add={can_add}, reason={blocked_reason}"
+        ),
         details={
-            "allowed": can_add,
-            "blocked_reason": reason,
-            "user_message": None
-            if can_add
-            else (
-                "This store can't take orders"
-                if reason == "store_closed"
-                else "This Item is sold out"
-            ),
+            "menu_id": menu.get("id"),
+            "menu_status": menu.get("status"),
+            "store_status": store.get("status"),
         },
-        track_order=False,
     )
-    actual = "add_to_cart_allowed" if can_add else "add_to_cart_blocked"
-    _finish_checked(recorder, scenario, actual_final_status=actual)
-
+    recorder.finish_scenario(
+        scenario,
+        verdict="blocked",
+        actual_final_status=actual,
+        note=f"Unexpected menu gate result: {blocked_reason}",
+    )
 
 async def _run_store_first_setup(
     client: httpx.AsyncClient,
@@ -1399,6 +1487,7 @@ async def _run_app_bootstrap(
         recorder=recorder,
         user_id=user_session.user_id,
         user_token=user_session.token,
+        user=user_session.user,
         token_source=user_session.token_source,
         currency=fixtures.currency,
         scenario=scenario,
@@ -1521,6 +1610,18 @@ async def run(
         f"[bold cyan]trace:[/] Running trace mode scenarios: {', '.join(resolved)} "
         f"(timing={timing.name})"
     )
+    actors = getattr(config, "SIM_ACTORS", {}) or {}
+    actor_users = actors.get("users", [])
+    if not actor_users:
+        raise RuntimeError(
+            "No users were found in the selected plan. Trace runs require users defined in plan users[]."
+        )
+    allowed_phones = {str(user.get("phone")) for user in actor_users if isinstance(user, dict) and user.get("phone")}
+    configured_phone = str(getattr(config, "USER_PHONE_NUMBER", "") or "").strip()
+    if configured_phone and allowed_phones and configured_phone not in allowed_phones:
+        raise RuntimeError(
+            f"Configured phone {configured_phone!r} is not present in selected plan users[]."
+        )
 
     console.print("[cyan]trace:[/] Bootstrapping auth for trace sims ...")
     bootstrap_scenario = "new_user_setup" if "new_user_setup" in resolved else None
@@ -1737,6 +1838,7 @@ async def run(
         finally:
             if observer is not None:
                 await observer.stop()
+                recorder.set_websocket_coverage(observer.coverage_summary())
             await store_sim.restore_store_status(
                 client,
                 session=store_session,

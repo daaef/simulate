@@ -35,6 +35,7 @@ export default function RecentRunsTable({
             <th>ID</th>
             <th>Status</th>
             <th>Flow</th>
+            <th>Launch</th>
             <th>Store</th>
             <th>Phone</th>
             <th>Created</th>
@@ -48,6 +49,19 @@ export default function RecentRunsTable({
               <td>{run.id}</td>
               <td>{run.status}</td>
               <td>{run.flow}</td>
+              <td>
+                <div style={{ fontWeight: 500 }}>{run.trigger_source || "manual"}</div>
+                <div style={{ fontSize: "11px", opacity: 0.72, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "180px" }}>
+                  {run.trigger_label || "Manual launch"}
+                </div>
+                {run.profile_id ? (
+                  <div style={{ fontSize: "10px", opacity: 0.62 }}>
+                    {(run.trigger_context as Record<string, unknown> | undefined)?.profile_name
+                      ? `profile ${(run.trigger_context as Record<string, unknown>).profile_name as string}`
+                      : `profile #${run.profile_id}`}
+                  </div>
+                ) : null}
+              </td>
               <td>
                 <div style={{ fontWeight: 500 }}>{run.store_id || "-"}</div>
                 {run.store_name ? (
