@@ -84,6 +84,19 @@ export default function LatestRunHero({ overview }: { overview: LatestRunOvervie
           <p className="muted">
             {run.flow || "unknown flow"} · {run.mode || "default mode"} · {run.timing || "default timing"}
           </p>
+          <p
+            className="muted"
+            style={{
+              marginTop: 6,
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              alignItems: "center",
+            }}
+          >
+            <span className="chip">{run.trigger_source || "manual"}</span>
+            <span>{run.trigger_label || "Manual launch"}</span>
+          </p>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
             {runContextChips(run).map((chip) => <span key={chip} className="chip">{chip}</span>)}
           </div>

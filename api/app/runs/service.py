@@ -87,8 +87,12 @@ def delete_profile(profile_id: int) -> dict[str, Any]:
     return _callback("delete_profile")(profile_id)
 
 
-def launch_profile(profile_id: int, user_id: int | None) -> dict[str, Any]:
-    return _callback("launch_profile")(profile_id, user_id)
+def launch_profile(
+    profile_id: int,
+    user_id: int | None,
+    trigger_overlay: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _callback("launch_profile")(profile_id, user_id, trigger_overlay)
 
 
 def get_execution_snapshot(run_id: int) -> dict[str, Any]:

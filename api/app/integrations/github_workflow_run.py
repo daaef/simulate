@@ -339,8 +339,8 @@ def _bool_value(value: Any) -> bool:
     return False
 
 
-def _launch_profile(profile_id: int) -> int | None:
-    payload = runs_service.launch_profile(profile_id, None)
+def _launch_profile(profile_id: int, *, trigger_overlay: dict[str, Any] | None = None) -> int | None:
+    payload = runs_service.launch_profile(profile_id, None, trigger_overlay)
     run = payload.get("run") if isinstance(payload, dict) else None
 
     if isinstance(run, dict) and run.get("id") is not None:
@@ -501,7 +501,21 @@ def process_github_workflow_run_webhook(
         }
 
     profile_id = int(mapping["profile_id"])
-    run_id = _launch_profile(profile_id)
+    trigger_overlay: dict[str, Any] = {
+        "trigger_source": "github",
+        "trigger_label": f"GitHub integration: {project}/{environment}",
+        "integration_trigger_id": trigger_id,
+        "trigger_context": {
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+            "integration_trigger_id": trigger_id,
+            "profile_id": profile_id,
+            "github_event": "workflow_run",
+            "workflow_summary": summary,
+        },
+    }
+    run_id = _launch_profile(profile_id, trigger_overlay=trigger_overlay)
 
     _finish_trigger(
         trigger_id,

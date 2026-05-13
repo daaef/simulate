@@ -204,6 +204,6 @@ Production deployment is handled by a portable SSH workflow in `.github/workflow
 - Requires host-managed `.env.prod`; workflow fails if `.env.prod` is missing.
 - Uses `git@github.com:daaef/simulate.git` and defaults deployment path to `/root/simulate`.
 - Defaults to `http://127.0.0.1:8090` via `SIMULATOR_HOST_BIND=127.0.0.1` and `SIMULATOR_HOST_PORT=8090`; set `0.0.0.0` only when intentionally exposing publicly.
-- Supports cross-repository GitHub `deployment_status` webhooks at `POST /api/v1/integrations/github/deployment-complete`, with HMAC verification, `(project, environment)` profile mapping, idempotent trigger records, async profile launch, and deployment-status callback to GitHub (`simulator/verification` context).
+- Supports cross-repository GitHub webhooks at `POST /api/v1/integrations/github/deployment-complete`: `deployment_status` (success) and `workflow_run` (completed + success conclusion), each with HMAC verification, `(project, environment)` profile mapping, idempotent trigger records, and deployment-status callback to GitHub for deployment-driven runs (`simulator/verification` context). Runs record `trigger_source=github` and integration context so the web UI can show GitHub as the launch origin—not only a saved profile.
 
 See `docs/deployment.md` for first-time VPS setup, cross-project GitHub Actions trigger integration, verification, troubleshooting, and security hardening.

@@ -1193,9 +1193,11 @@ Deployment is idempotent (`git fetch` + `git checkout main` + `git reset --hard 
 GitHub deployment webhook automation:
 
 - Inbound endpoint: `POST /api/v1/integrations/github/deployment-complete`.
-- Required event: `deployment_status` with `state=success`; other states/events are rejected.
-- Security: HMAC verification via `X-Hub-Signature-256` using project-specific secrets from `GITHUB_WEBHOOK_PROJECT_SECRETS`.
-- Repository guardrail: repository must match `GITHUB_WEBHOOK_REPO_ALLOWLIST` for one configured project.
+- Supported events:
+  - `deployment_status` with `state=success` (required fields in payload); other states/events are rejected for launches.
+  - `workflow_run` with `action=completed` and `workflow_run.conclusion=success`; repository must be allowlisted and `(project, environment)` must map to a profile (same mapping table as deployments). **Runs created from `workflow_run` are stored with `trigger_source=github`**, `trigger_label` `GitHub integration: {project}/{environment}`, merged `trigger_context` (profile name, repository, workflow summary, `github_event: workflow_run`), and `integration_trigger_id` pointing at the `integration_triggers` row—same style as deployment-triggered runs, so the Runs page and overview chips show GitHub rather than a dashboard profile launch.
+- Security: HMAC verification via `X-Hub-Signature-256` using project-specific secrets from `SIMULATOR_WEBHOOK_PROJECT_SECRETS` (JSON map of project key → secret string).
+- Repository guardrail: repository must match `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` for one configured project (JSON map: project key → list of `owner/repo` strings).
 - Profile routing: simulator maps `(project, environment)` to a saved run profile through `integration_profile_mappings`.
 - Idempotency key: `project + environment + deployment_id + sha`; duplicate webhook deliveries do not launch duplicate runs.
 - Lifecycle states recorded per trigger: `validated`, `queued`, `launched`, `completed`/`failed`, `rejected`, `duplicate`.
@@ -1208,6 +1210,6 @@ Operational APIs:
 - `DELETE /api/v1/integrations/github/mappings/{mapping_id}`
 - `GET /api/v1/integrations/github/triggers` (audit and debugging feed)
 
-To identify webhook-triggered runs in the GUI, open `Runs` and correlate run creation time with integration trigger timestamps from `GET /api/v1/integrations/github/triggers`.
+To identify webhook-triggered runs in the GUI, use the **Launch** column on **Runs** (`trigger_source` is `github` and the label shows the integration route). For audit detail, use `GET /api/v1/integrations/github/triggers` and match `run_id` to the run.
 
 Use `docs/deployment.md` as the full production runbook for first-time host setup, GitHub secrets, backup/restore, rollback, logs, troubleshooting, and security hardening.

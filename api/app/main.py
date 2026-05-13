@@ -1614,6 +1614,24 @@ def _profile_request_to_run_request(profile: dict[str, Any]) -> RunCreateRequest
     )
 
 
+def _apply_profile_launch_trigger_overlay(request: RunCreateRequest, overlay: dict[str, Any]) -> None:
+    """Merge automation trigger fields onto a profile-derived run request (e.g. GitHub webhooks)."""
+    ts = overlay.get("trigger_source")
+    if ts in ("manual", "profile", "schedule", "github", "replay"):
+        request.trigger_source = ts
+    if "trigger_label" in overlay and overlay["trigger_label"] is not None:
+        request.trigger_label = str(overlay["trigger_label"])
+    if overlay.get("integration_trigger_id") is not None:
+        request.integration_trigger_id = int(overlay["integration_trigger_id"])
+    if overlay.get("schedule_id") is not None:
+        request.schedule_id = int(overlay["schedule_id"])
+    extra_ctx = overlay.get("trigger_context")
+    if isinstance(extra_ctx, dict) and extra_ctx:
+        merged = dict(request.trigger_context or {})
+        merged.update(extra_ctx)
+        request.trigger_context = merged
+
+
 def _parse_artifact_paths(line: str) -> tuple[str, str] | None:
     markers = (
         ("main: report:", "report_path"),
@@ -2172,10 +2190,16 @@ def _delete_run_profile(profile_id: int) -> dict[str, Any]:
     return {"profile_id": profile_id, "deleted": True}
 
 
-def _launch_run_profile(profile_id: int, user_id: Optional[int] = None) -> dict[str, Any]:
+def _launch_run_profile(
+    profile_id: int,
+    user_id: Optional[int] = None,
+    trigger_overlay: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     profile = _get_run_profile(profile_id)
     request = _profile_request_to_run_request(profile)
     request.launched_by_user_id = user_id
+    if trigger_overlay:
+        _apply_profile_launch_trigger_overlay(request, trigger_overlay)
     run = _create_run(request, user_id)
     return {"profile": profile, "run": run}
 
@@ -4896,7 +4920,9 @@ configure_runs_runtime(
     create_profile=lambda request, user_id: _create_run_profile(request, user_id),
     update_profile=lambda profile_id, request, user_id: _update_run_profile(profile_id, request, user_id),
     delete_profile=lambda profile_id: _delete_run_profile(profile_id),
-    launch_profile=lambda profile_id, user_id: _launch_run_profile(profile_id, user_id),
+    launch_profile=lambda profile_id, user_id, trigger_overlay=None: _launch_run_profile(
+        profile_id, user_id, trigger_overlay
+    ),
     get_execution_snapshot=lambda run_id: _run_execution_snapshot_payload(run_id),
     replay_run=lambda run_id, user_id: _replay_run_logic(run_id, user_id),
 )
