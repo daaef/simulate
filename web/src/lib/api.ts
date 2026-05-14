@@ -498,6 +498,8 @@ export type GitHubIntegrationTrigger = {
   deployment_id?: string | number | null;
   delivery_id?: string | null;
   created_at?: string | null;
+  /** Stored webhook body (API column `payload`): full JSON for `deployment_status`, workflow summary for `workflow_run`. */
+  payload?: unknown;
   meta?: Record<string, unknown> | null;
   [key: string]: unknown;
 };

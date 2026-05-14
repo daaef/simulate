@@ -64,6 +64,20 @@ function shortJson(value: unknown): string {
   }
 }
 
+/** API returns webhook body in `payload` (string on SQLite, object on Postgres). */
+function triggerPayloadForView(trigger: GitHubIntegrationTrigger): unknown {
+  const raw = trigger.payload ?? trigger.meta;
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw) as unknown;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
 export default function IntegrationMappingsPanel() {
   const [mappings, setMappings] = useState<IntegrationMapping[]>([]);
   const [profiles, setProfiles] = useState<RunProfile[]>([]);
@@ -440,7 +454,11 @@ export default function IntegrationMappingsPanel() {
         >
           <div>
             <h3 className="section-title" style={{ marginBottom: 4 }}>Recent GitHub Triggers</h3>
-            <p className="form-help">Audit trail for webhook delivery, matching, rejection reasons, and launched runs.</p>
+            <p className="form-help">
+              Audit trail for webhook delivery, matching, rejection reasons, and launched runs. Expand{" "}
+              <strong>GitHub payload</strong> to see the stored webhook body (full event for deployment webhooks, summary
+              for workflow runs).
+            </p>
           </div>
           <button type="button" className="secondary small" onClick={() => void loadAll()} disabled={busy || loading}>
             Refresh History
@@ -457,7 +475,7 @@ export default function IntegrationMappingsPanel() {
                   <th>Route</th>
                   <th>Status</th>
                   <th>Run</th>
-                  <th>Meta</th>
+                  <th>Payload</th>
                 </tr>
               </thead>
               <tbody>
@@ -486,11 +504,13 @@ export default function IntegrationMappingsPanel() {
                       </td>
                       <td>
                         <details>
-                          <summary className="muted" style={{ cursor: "pointer" }}>View</summary>
+                          <summary className="muted" style={{ cursor: "pointer" }}>
+                            GitHub payload
+                          </summary>
                           <pre
                             style={{
                               marginTop: 8,
-                              maxHeight: 180,
+                              maxHeight: 360,
                               overflow: "auto",
                               background: "var(--bg-log)",
                               color: "var(--text-log)",
@@ -499,7 +519,7 @@ export default function IntegrationMappingsPanel() {
                               whiteSpace: "pre-wrap",
                             }}
                           >
-                            {shortJson(trigger.meta)}
+                            {shortJson(triggerPayloadForView(trigger))}
                           </pre>
                         </details>
                       </td>

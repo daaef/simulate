@@ -191,6 +191,9 @@ Run/schedule failure emails now start with launch context in fixed order: `Profi
 ## Docs
 
 - `SIMULATOR_GUIDE.md`: Operator guide (CLI + web UI + auth/roles). Start with **Operator observability** and **Operator GUI (web)** for health vocabulary, flow ladder, and screen-by-screen UI semantics.
+- `docs/SIMULATOR_CAPABILITIES.md`: Capability catalog (every flow, mode, suite, scenario, CLI flag, run-plan key, environment variable, and web/API run-field mapping).
+- `docs/GUI_TESTING.md`: Manual test guide for the operator web UI (Runs launcher, profiles, validation, roles, other routes).
+- `docs/IDEAS_GUI_AND_FUNCTIONAL.md`: Brainstorm backlog for GUI and simulator/product improvements (not committed work).
 - `ARCHITECTURE.md`: System architecture and component responsibilities.
 - `docs/deployment.md`: Production deployment runbook (SSH + GitHub Actions + Docker Compose).
 

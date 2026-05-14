@@ -4,6 +4,12 @@ This simulator is a daily doctor for the ordering platform. It simulates user ap
 
 Docker note: this stack runs the Next.js web app with `next start` from the built image. If `./web` is bind-mounted over `/app`, the built `.next` directory can be masked and `web` will crash with `Could not find a production build in the '.next' directory`.
 
+**Capability catalog:** For an exhaustive reference to flows, suites, scenarios, CLI flags, run-plan JSON keys, environment variables, and web/API launch parity, see [docs/SIMULATOR_CAPABILITIES.md](docs/SIMULATOR_CAPABILITIES.md).
+
+**GUI manual testing:** For a from-the-ground-up checklist of the web UI (every Start Run control, client-side validation, profiles, run detail, and role expectations), see [docs/GUI_TESTING.md](docs/GUI_TESTING.md).
+
+**Ideas backlog:** For GUI and functional improvement ideas (not roadmap commitments), see [docs/IDEAS_GUI_AND_FUNCTIONAL.md](docs/IDEAS_GUI_AND_FUNCTIONAL.md).
+
 ## Operator observability (read first)
 
 ### Health contract: Up, Degraded, Down
@@ -20,6 +26,15 @@ Docker note: this stack runs the Next.js web app with `next start` from the buil
 2. **Targeted regression** → `trace` + narrow suite (`core`, `doctor`, or specific scenarios listed under Trace Mode in `ARCHITECTURE.md`).
 3. **Load / churn** → `load` mode (engineering; not the default “is the platform up?” check).
 
+### Trace mode and websocket evidence
+
+Use **trace** (or **`doctor`**, which runs in trace mode) when you need proof that **last-mile HTTP APIs** and, for order flows, **`wss://` traffic** behave—not only that the simulator API (`/healthz`) is up.
+
+- **APIs (REST and similar):** Scenarios issue real requests: place and mutate orders, run `app_bootstrap` and `store_dashboard` probes, menu checks, payment paths, store setup, and so on. Failures (for example 5xx, timeouts, auth errors) are recorded in the run ledger and summarized in `report.md` / `story.md` / `events.json` for that run.
+- **Websockets:** When the resolved scenario list includes **order-driving** scenarios (for example `completed`, `rejected`, `cancelled`, payment and robot completion paths, `receipt_review_reorder`), trace attaches a **`WebsocketObserver`**. That component **only opens the same socket URLs the apps use and receives messages**—it does **not** send app traffic to impersonate a user or store on those sockets. **Active** order-driving traffic still comes from the normal simulator paths (user / store / robot simulators and REST-driven steps). The observer is a **passive listener** used for **evidence** (coverage, recorded frames, optional gates).
+- **Websocket gate enforcement:** With enforcement **off** (default), missing or late socket events are usually **warnings** and the scenario can continue—good for signal without blocking every run. With enforcement **on** (`SIM_ENFORCE_WEBSOCKET_GATES`, CLI flags, plan `rules`, or Runs **Enforce Websocket Gates**), required status events must arrive within the configured window or the run **fails**—a stricter check when you care whether “HTTP succeeded but realtime never showed up.”
+- **Full scenario and flag matrix:** See [docs/SIMULATOR_CAPABILITIES.md](docs/SIMULATOR_CAPABILITIES.md) for every scenario name, suite, and launcher field.
+
 ### Trace scenarios and flags (process truth)
 
 | Scenario | Role in “does ordering work?” |
@@ -32,7 +47,7 @@ Docker note: this stack runs the Next.js web app with `next start` from the buil
 | `store_dashboard` | Store orders, statistics, top customers |
 | `receipt_review_reorder` | Receipt PDF, review, reorder fetch after completion |
 
-**Websocket gates:** `SIM_ENFORCE_WEBSOCKET_GATES` (default **off** in env; off in Runs checkbox) records gate issues as warnings and continues. **On** = fail fast when required socket events are missing—stricter **Down** signal, more noise. **`SIM_STRICT_PLAN` / `rules.strict_plan`:** rejects invalid plans after any fallback—can flip a run from “best effort” to **Down** if the plan is wrong.
+**Websocket gates:** See **Trace mode and websocket evidence** above for how trace exercises APIs and passively observes sockets. In short: `SIM_ENFORCE_WEBSOCKET_GATES` default **off** (Runs checkbox off) records gate issues as **warnings** and continues; **on** = fail fast when required socket events are missing—stricter **Down** signal, more noise. **`SIM_STRICT_PLAN` / `rules.strict_plan`:** rejects invalid plans after any fallback—can flip a run from “best effort” to **Down** if the plan is wrong.
 
 **Daily plan:** Prefer one owner-approved JSON path and document expected duration; failures surface in run log, `report.md`, Overview alerts, and optional email (`run_failed` / `critical_alert`).
 
@@ -168,7 +183,7 @@ Run scope enforcement is strict to the selected plan:
 - If the selected plan cannot be loaded or validated (missing/unreadable file, invalid JSON, or plan validation error), the simulator warns and falls back to repo default `sim_actors.json`.
 - If both selected plan and fallback plan fail, the run exits with a combined error showing both failures.
 - Strict mode still applies after fallback: when `--strict-plan` (or `rules.strict_plan=true`) is active, whichever plan is used must satisfy strict validation.
-- Trace/doctor order scenarios now use websocket-first gating for progression. The simulator waits for required websocket status events before each next action (store accept/reject, payment progression, ready, robot lifecycle, terminal state).
+- Trace/doctor order scenarios use **websocket-first gating** for progression (see **Trace mode and websocket evidence** in Operator observability for the passive observer model). The simulator waits for required websocket status events before each next action (store accept/reject, payment progression, ready, robot lifecycle, terminal state).
 - Websocket gate enforcement is configurable and defaults to off. With enforcement off, gate timeout/source failures are recorded as warnings and scenarios continue. With enforcement on, gate failures fail fast and stop downstream actions.
 - Controls: env `SIM_ENFORCE_WEBSOCKET_GATES=false` (default), CLI `--enforce-websocket-gates` / `--no-enforce-websocket-gates`, and Runs UI checkbox `Enforce Websocket Gates`.
 
@@ -1211,5 +1226,9 @@ Operational APIs:
 - `GET /api/v1/integrations/github/triggers` (audit and debugging feed)
 
 To identify webhook-triggered runs in the GUI, use the **Launch** column on **Runs** (`trigger_source` is `github` and the label shows the integration route). For audit detail, use `GET /api/v1/integrations/github/triggers` and match `run_id` to the run.
+
+**Config → Integration Mappings → Recent GitHub Triggers:** each row’s **GitHub payload** disclosure shows the stored `payload` field from the API: the full parsed webhook JSON for `deployment_status` events, or a compact workflow summary for `workflow_run` events (same column in `integration_triggers`).
+
+**Why multiple trigger rows for one push:** the simulator does **not** fan out one webhook to every enabled route. It selects at most one mapping per delivery using `(project, environment)` where `environment` comes from GitHub’s deployment environment (`deployment.environment` on `deployment_status`). Seeing two rows for the same repository at the same time usually means GitHub completed **two** successful deployments (for example `dev-cluster` and `production`) and delivered two webhooks. To stop production from queuing runs, **disable or delete** the production mapping on **Config**; GitHub may still record a trigger row with status `rejected` / reason `mapping_disabled` if a success webhook arrives for that environment. To verify upstream behavior, inspect the repository’s **Deployments** (or Actions deployment jobs) and confirm how many environments transition to success per event.
 
 Use `docs/deployment.md` as the full production runbook for first-time host setup, GitHub secrets, backup/restore, rollback, logs, troubleshooting, and security hardening.
