@@ -507,6 +507,16 @@ class OverviewLatestRunTests(unittest.TestCase):
         self.assertIn("issues", payload)
         self.assertIsInstance(payload["issues"], list)
 
+    def test_run_overview_uses_run_id_lookup(self) -> None:
+        run = {"id": 321, "status": "succeeded"}
+        with mock.patch.object(overview_service.runs_service, "get_run", return_value=run):
+            with mock.patch.object(overview_service, "_load_events", return_value=([], [], {})):
+                with mock.patch.object(overview_service, "_load_metrics", return_value=None):
+                    payload = overview_service.run_overview(321)
+
+        self.assertIsNotNone(payload.get("run"))
+        self.assertEqual(payload["run"]["id"], 321)
+
 
 class RunDeletionSafetyTests(unittest.TestCase):
     class _FakeThread:

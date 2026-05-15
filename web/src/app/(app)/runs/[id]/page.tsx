@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
   fetchExecutionSnapshot,
+  fetchRunOverview,
   fetchRun,
   fetchRunArtifactEvents,
   fetchRunArtifactText,
@@ -12,6 +13,7 @@ import {
   replayRun,
   type RunMetrics,
   type RunRow,
+  type LatestRunIssue,
 } from "../../../../lib/api";
 import RunArtifactMarkdown from "../../../../components/runs/detail/RunArtifactMarkdown";
 import RunDetailHeader from "../../../../components/runs/detail/RunDetailHeader";
@@ -52,6 +54,7 @@ export default function RunDetailPage() {
 
   const [run, setRun] = useState<RunRow | null>(null);
   const [metrics, setMetrics] = useState<RunMetrics | null>(null);
+  const [issues, setIssues] = useState<LatestRunIssue[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +102,13 @@ export default function RunDetailPage() {
       })
       .catch(() => {
         // Snapshot not available, ignore
+      });
+    fetchRunOverview(runId)
+      .then((payload) => {
+        setIssues(payload.issues || []);
+      })
+      .catch(() => {
+        setIssues([]);
       });
   }, [runId]);
 
@@ -190,7 +200,7 @@ export default function RunDetailPage() {
 
         <div>
           {activeTab === "overview" && (
-            <RunDetailOverview metrics={metrics} runStatus={run.status} runError={run.error} />
+            <RunDetailOverview metrics={metrics} runStatus={run.status} runError={run.error} issues={issues} />
           )}
 
           {activeTab === "execution" && <RunExecutionSnapshotPanel run={run} onReplay={handleReplay} replaying={isReplaying} />}

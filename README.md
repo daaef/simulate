@@ -65,7 +65,10 @@ The authenticated app shell includes active route highlighting for `Overview`, `
   - `Critical Findings` now includes the failed API route/endpoint when available.
   - Latest Run hero now shows run-context chips when present: `profile:<name>`, `schedule:<name>`, and integration route context (`route:<project/environment>`).
 - `Runs`: launch, cancel, replay, delete completed runs, and inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles.
-  - Run detail **Overview** tab: summary counts plus a metrics dashboard (Business default, Operations/Engineering switch, collapsed technical drill-down with action-key search). Per-endpoint charts are still not shown until wired from real traffic data; use **Traffic** and **Console** tabs for depth.
+  - Run detail **Overview** tab: summary counts plus a metrics dashboard (Business default, Operations/Engineering switch, collapsed technical drill-down with action-key search).
+  - Run detail Overview now includes side-by-side findings panels: **Critical Findings** (server/API availability failures) and **Operational Findings** (non-critical warnings/info from the same run).
+  - Run detail findings are loaded from `GET /api/v1/overview/runs/{run_id}`; latest-run overview remains available at `GET /api/v1/overview/latest-run`.
+  - Per-endpoint charts are still not shown until wired from real traffic data; use **Traffic** and **Console** tabs for depth.
   - Runs now show launch attribution (`trigger_source`, `trigger_label`, optional `profile_id`) in list/console/detail views.
   - Start Run now includes a `Save as profile` shortcut under command preview that scrolls/focuses the Saved Profiles name input.
   - Plan selection is dropdown-only in Start Run: `sim_actors.json` is always available and GUI plans are appended when present; free-text plan entry has been removed.

@@ -593,6 +593,15 @@ def latest_run_overview() -> dict[str, Any]:
             "run_meta": {},
         }
 
+    return _build_overview_payload(run)
+
+
+def run_overview(run_id: int) -> dict[str, Any]:
+    run = runs_service.get_run(run_id)
+    return _build_overview_payload(run)
+
+
+def _build_overview_payload(run: dict[str, Any]) -> dict[str, Any]:
     run_id = int(run["id"])
     events, artifact_issues, run_meta = _load_events(run_id)
     metrics = _load_metrics(run_id) or _derived_metrics(events)

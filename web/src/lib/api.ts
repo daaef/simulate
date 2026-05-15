@@ -664,6 +664,13 @@ export async function fetchLatestRunOverview(): Promise<LatestRunOverview> {
   );
 }
 
+export async function fetchRunOverview(runId: number): Promise<LatestRunOverview> {
+  return unwrap<LatestRunOverview>(
+    await fetch(`/api/v1/overview/runs/${runId}`, withSession()),
+    "run-overview"
+  );
+}
+
 export async function fetchArchiveSummary(): Promise<ArchiveSummary> {
   return unwrap<ArchiveSummary>(await fetch("/api/v1/archives/summary", withSession()), "archives-summary");
 }

@@ -79,7 +79,9 @@ export default function RunProfilesPanel({
         </thead>
         <tbody>
           {profiles.length ? (
-            profiles.map((profile) => (
+            profiles.map((profile) => {
+              const isCatalogProfile = Boolean(profile.catalog_slug);
+              return (
               <tr key={profile.id} style={selectedProfileId === profile.id ? { background: "var(--bg-tertiary)" } : undefined}>
                 <td>
                   <div style={{ fontWeight: 600 }}>
@@ -102,11 +104,14 @@ export default function RunProfilesPanel({
                     <button className="small" disabled={isLaunching} onClick={() => onLaunchProfile(profile.id)}>
                       {isLaunching ? "Launching..." : "Launch"}
                     </button>
-                    <button className="secondary small" onClick={() => onDeleteProfile(profile.id)}>Delete</button>
+                    {!isCatalogProfile ? (
+                      <button className="secondary small" onClick={() => onDeleteProfile(profile.id)}>Delete</button>
+                    ) : null}
                   </div>
                 </td>
               </tr>
-            ))
+            );
+            })
           ) : (
             <tr>
               <td colSpan={6} className="muted" style={{ textAlign: "center", padding: "18px 12px" }}>

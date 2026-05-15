@@ -1,12 +1,13 @@
 "use client";
 
 import RunActionCountsPanel from "../RunActionCountsPanel";
-import type { RunMetrics } from "../../../lib/api";
+import type { LatestRunIssue, RunMetrics } from "../../../lib/api";
 
 interface RunDetailOverviewProps {
   metrics: RunMetrics | null;
   runStatus: string;
   runError: string | null;
+  issues: LatestRunIssue[];
 }
 
 function MetricsGrid({ metrics }: { metrics: RunMetrics }) {
@@ -64,8 +65,16 @@ function TopList({
   );
 }
 
-export default function RunDetailOverview({ metrics, runStatus, runError }: RunDetailOverviewProps) {
+export default function RunDetailOverview({ metrics, runStatus, runError, issues }: RunDetailOverviewProps) {
   const topActors = metrics ? Object.entries(metrics.top_actors).sort((a, b) => b[1] - a[1]) : [];
+  const criticalFindings = issues.filter((issue) => {
+    const severity = String(issue.severity || "").toLowerCase();
+    return severity === "critical" || severity === "error";
+  });
+  const operationalFindings = issues.filter((issue) => {
+    const severity = String(issue.severity || "").toLowerCase();
+    return severity !== "critical" && severity !== "error";
+  });
 
   return (
     <>
@@ -100,6 +109,51 @@ export default function RunDetailOverview({ metrics, runStatus, runError }: RunD
           </div>
         ) : null}
         {!runError && runStatus === "failed" && !metrics ? <p className="muted">Run failed before metrics were recorded.</p> : null}
+      </div>
+
+      <div className="grid two" style={{ alignItems: "start", gap: 12 }}>
+        <div className="panel grid" style={{ gap: 10 }}>
+          <div className="section-heading-row">
+            <h3 style={{ margin: 0 }}>Critical Findings</h3>
+            <span className="muted">{criticalFindings.length} items</span>
+          </div>
+          {criticalFindings.length ? (
+            criticalFindings.slice(0, 8).map((issue, index) => (
+              <div key={`critical-${issue.code}-${index}`} className="finding-row">
+                <div className="finding-row-head">
+                  <strong>{issue.code}</strong>
+                  <span className="alert-pill severity-critical">{issue.severity}</span>
+                </div>
+                <p className="muted">{issue.message}</p>
+                {issue.route ? <p className="muted">route: {issue.route}</p> : null}
+                {issue.actor ? <span className="chip">{issue.actor}</span> : null}
+              </div>
+            ))
+          ) : (
+            <div className="chart-empty">No critical findings for this run.</div>
+          )}
+        </div>
+        <div className="panel grid" style={{ gap: 10 }}>
+          <div className="section-heading-row">
+            <h3 style={{ margin: 0 }}>Operational Findings</h3>
+            <span className="muted">{operationalFindings.length} items</span>
+          </div>
+          {operationalFindings.length ? (
+            operationalFindings.slice(0, 8).map((issue, index) => (
+              <div key={`ops-${issue.code}-${index}`} className="finding-row">
+                <div className="finding-row-head">
+                  <strong>{issue.code}</strong>
+                  <span className="alert-pill severity-warning">{issue.severity}</span>
+                </div>
+                <p className="muted">{issue.message}</p>
+                {issue.route ? <p className="muted">route: {issue.route}</p> : null}
+                {issue.actor ? <span className="chip">{issue.actor}</span> : null}
+              </div>
+            ))
+          ) : (
+            <div className="chart-empty">No non-critical findings for this run.</div>
+          )}
+        </div>
       </div>
 
       <div className="grid two">

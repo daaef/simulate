@@ -167,7 +167,7 @@ Clear fields and confirm button re-enables.
 | 9.2 | **Load** on a profile | Form repopulates including suite/scenarios/checkboxes/numerics. |
 | 9.3 | **Update Selected Profile** | Persisted changes after edit. |
 | 9.4 | **Launch** | New run created without manually pressing Start Simulation. |
-| 9.5 | **Delete** profile | Row removed. |
+| 9.5 | **Delete** custom profile | Row removed. Catalog profiles show **Catalog** label and no Delete action. |
 | 9.6 | **Save as profile** (under command preview) | Scrolls to profiles section; focuses profile name input (`onSaveAsProfileShortcut`). |
 
 ---
