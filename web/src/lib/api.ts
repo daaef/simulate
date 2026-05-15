@@ -87,6 +87,7 @@ export type RunProfile = {
   extra_args: string[];
   created_at: string;
   updated_at: string;
+  catalog_slug?: string | null;
 };
 
 export type RunProfileUpsertRequest = {
@@ -247,6 +248,7 @@ export type Schedule = {
   schedule_type: ScheduleType;
   status: ScheduleStatus;
   profile_id: number | null;
+  catalog_slug?: string | null;
   anchor_start_at: string | null;
   period: SchedulePeriod | null;
   stop_rule: ScheduleStopRule | null;
@@ -351,6 +353,11 @@ export type AlertItem = {
   created_at: string;
 };
 
+export type RunActionCount = {
+  action: string;
+  count: number;
+};
+
 export type RunMetrics = {
   total_events: number;
   failed_events: number;
@@ -359,6 +366,8 @@ export type RunMetrics = {
   avg_http_latency_ms?: number;
   top_actors: Record<string, number>;
   top_actions: Record<string, number>;
+  /** Every distinct event `action` value with counts, sorted by count desc then action asc. */
+  action_counts?: RunActionCount[];
 };
 
 export type ActorSummary = {

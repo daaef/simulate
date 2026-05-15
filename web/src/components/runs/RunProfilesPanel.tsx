@@ -82,7 +82,14 @@ export default function RunProfilesPanel({
             profiles.map((profile) => (
               <tr key={profile.id} style={selectedProfileId === profile.id ? { background: "var(--bg-tertiary)" } : undefined}>
                 <td>
-                  <div style={{ fontWeight: 600 }}>{profile.name}</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {profile.name}
+                    {profile.catalog_slug ? (
+                      <span className="muted" style={{ marginLeft: 8, fontSize: "11px", fontWeight: 500 }}>
+                        Catalog
+                      </span>
+                    ) : null}
+                  </div>
                   {profile.description ? <div style={{ fontSize: "12px", opacity: 0.75 }}>{profile.description}</div> : null}
                 </td>
                 <td>{profile.flow}</td>

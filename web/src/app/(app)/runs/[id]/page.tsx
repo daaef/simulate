@@ -155,52 +155,6 @@ export default function RunDetailPage() {
     }
   };
 
-  // Prepare chart data from metrics
-  const prepareTimelineData = () => {
-    if (!metrics || !run) return { events: [], startTime: 0, endTime: 0 };
-    
-    const startTime = new Date(run.created_at).getTime();
-    const endTime = run.finished_at 
-      ? new Date(run.finished_at).getTime() 
-      : Date.now();
-    
-    // This is a simplified timeline - in a real implementation,
-    // you'd parse the events.json for detailed timestamps
-    const events = [
-      { timestamp: startTime, label: "Start", category: "scenario" as const, status: "success" as const },
-    ];
-    
-    return { events, startTime, endTime };
-  };
-
-  const prepareLatencyData = () => {
-    if (!metrics) return [];
-    // This would be populated from actual HTTP call data
-    return [];
-  };
-
-  const prepareSuccessData = () => {
-    if (!metrics) {
-      return {
-        httpSuccess: 0,
-        httpFailed: 0,
-        wsSuccess: 0,
-        wsFailed: 0,
-        scenariosPassed: 0,
-        scenariosFailed: 0,
-      };
-    }
-    
-    return {
-      httpSuccess: metrics.http_calls - metrics.failed_events,
-      httpFailed: metrics.failed_events,
-      wsSuccess: metrics.websocket_events,
-      wsFailed: 0,
-      scenariosPassed: run?.status === "succeeded" ? 1 : 0,
-      scenariosFailed: run?.status === "failed" ? 1 : 0,
-    };
-  };
-
   if (loading) {
     return (
       <main style={{ maxWidth: 1200, margin: "0 auto", padding: 40, textAlign: "center" }}>
@@ -221,10 +175,6 @@ export default function RunDetailPage() {
     );
   }
 
-  const timelineData = prepareTimelineData();
-  const latencyData = prepareLatencyData();
-  const successData = prepareSuccessData();
-
   return (
     <main className="grid" style={{ gap: 16 }}>
       <RunDetailHeader run={run} onBack={goBack} />
@@ -240,14 +190,7 @@ export default function RunDetailPage() {
 
         <div>
           {activeTab === "overview" && (
-            <RunDetailOverview
-              metrics={metrics}
-              runStatus={run.status}
-              runError={run.error}
-              timelineData={timelineData}
-              latencyData={latencyData}
-              successData={successData}
-            />
+            <RunDetailOverview metrics={metrics} runStatus={run.status} runError={run.error} />
           )}
 
           {activeTab === "execution" && <RunExecutionSnapshotPanel run={run} onReplay={handleReplay} replaying={isReplaying} />}

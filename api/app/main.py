@@ -421,6 +421,8 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN reject REAL")
     if profile_columns and "continuous" not in profile_columns:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN continuous INTEGER NOT NULL DEFAULT 0")
+    if profile_columns and "catalog_slug" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN catalog_slug TEXT")
     schedule_columns = [row[1] for row in conn.execute("PRAGMA table_info(schedules)").fetchall()]
     if schedule_columns and "custom_anchor_at" not in schedule_columns:
         conn.execute("ALTER TABLE schedules ADD COLUMN custom_anchor_at TEXT")
@@ -448,6 +450,8 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE schedules ADD COLUMN recurrence_config TEXT NOT NULL DEFAULT '{}'")
     if schedule_columns and "run_slots" not in schedule_columns:
         conn.execute("ALTER TABLE schedules ADD COLUMN run_slots TEXT NOT NULL DEFAULT '[]'")
+    if schedule_columns and "catalog_slug" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN catalog_slug TEXT")
     mapping_columns = [row[1] for row in conn.execute("PRAGMA table_info(integration_profile_mappings)").fetchall()]
     if mapping_columns and "enabled" not in mapping_columns:
         conn.execute("ALTER TABLE integration_profile_mappings ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
@@ -456,6 +460,12 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE integration_triggers ADD COLUMN deployment_status_id TEXT")
     if trigger_columns and "github_status_url" not in trigger_columns:
         conn.execute("ALTER TABLE integration_triggers ADD COLUMN github_status_url TEXT")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_run_profiles_catalog_slug ON run_profiles(catalog_slug) WHERE catalog_slug IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_schedules_catalog_slug ON schedules(catalog_slug) WHERE catalog_slug IS NOT NULL"
+    )
 
 
 def _migrate_postgres_schema() -> None:
@@ -503,7 +513,8 @@ def _migrate_postgres_schema() -> None:
                     continuous BOOLEAN NOT NULL DEFAULT FALSE,
                     extra_args JSONB DEFAULT '[]',
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    catalog_slug VARCHAR(80)
                 )
                 """
             )
@@ -553,7 +564,8 @@ def _migrate_postgres_schema() -> None:
                     next_run_at TIMESTAMP WITH TIME ZONE,
                     next_run_reason VARCHAR(64),
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    catalog_slug VARCHAR(80)
                 )
                 """
             )
@@ -634,6 +646,14 @@ def _migrate_postgres_schema() -> None:
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE")
             cursor.execute("ALTER TABLE integration_triggers ADD COLUMN IF NOT EXISTS deployment_status_id VARCHAR(80)")
             cursor.execute("ALTER TABLE integration_triggers ADD COLUMN IF NOT EXISTS github_status_url TEXT")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS catalog_slug VARCHAR(80)")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS catalog_slug VARCHAR(80)")
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_run_profiles_catalog_slug ON run_profiles(catalog_slug) WHERE catalog_slug IS NOT NULL"
+            )
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_schedules_catalog_slug ON schedules(catalog_slug) WHERE catalog_slug IS NOT NULL"
+            )
         conn.commit()
     finally:
         conn.close()
@@ -1029,8 +1049,8 @@ def _send_email_notification(
     if dedupe_key:
         now = time.monotonic()
         with EMAIL_EVENT_LOCK:
-            last_sent = EMAIL_EVENT_LAST_SENT.get(dedupe_key, 0.0)
-            if now - last_sent < EMAIL_EVENT_DEDUPE_WINDOW_SECONDS:
+            last_sent = EMAIL_EVENT_LAST_SENT.get(dedupe_key)
+            if last_sent is not None and now - last_sent < EMAIL_EVENT_DEDUPE_WINDOW_SECONDS:
                 return {"sent": False, "reason": "deduped"}
             EMAIL_EVENT_LAST_SENT[dedupe_key] = now
             stale = [key for key, value in EMAIL_EVENT_LAST_SENT.items() if now - value > EMAIL_EVENT_DEDUPE_WINDOW_SECONDS * 4]
@@ -1060,7 +1080,7 @@ def _send_test_email_payload() -> dict[str, Any]:
     now = time.monotonic()
     with EMAIL_EVENT_LOCK:
         elapsed = now - EMAIL_TEST_LAST_SENT_AT
-        if elapsed < EMAIL_TEST_COOLDOWN_SECONDS:
+        if EMAIL_TEST_LAST_SENT_AT > 0.0 and elapsed < EMAIL_TEST_COOLDOWN_SECONDS:
             wait_for = max(1, int(EMAIL_TEST_COOLDOWN_SECONDS - elapsed))
             raise HTTPException(status_code=429, detail=f"Please wait {wait_for}s before sending another test email.")
         EMAIL_TEST_LAST_SENT_AT = now
@@ -1073,7 +1093,7 @@ def _send_test_email_payload() -> dict[str, Any]:
             f"Timestamp: {timestamp}",
             "If you received this, SMTP configuration is working.",
         ],
-        dedupe_key=f"email-test-{int(now // EMAIL_TEST_COOLDOWN_SECONDS)}",
+        dedupe_key=None,
         ignore_trigger_gate=True,
     )
 
@@ -2175,7 +2195,9 @@ def _update_run_profile(profile_id: int, request, user_id: Optional[int] = None)
 
 
 def _delete_run_profile(profile_id: int) -> dict[str, Any]:
-    _get_run_profile(profile_id)
+    profile = _get_run_profile(profile_id)
+    if profile.get("catalog_slug"):
+        raise HTTPException(status_code=403, detail="Catalog run profiles cannot be deleted.")
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
@@ -3591,10 +3613,34 @@ def _update_schedule(
     return {"schedule": _schedule_row_to_dict_any(row)}
 
 
+def _persist_schedule_catalog_slug(schedule_id: int, catalog_slug: str) -> None:
+    """Attach stable catalog slug to a schedule row (internal / seeding)."""
+    updated_at = _utc_now()
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE schedules SET catalog_slug = %s, updated_at = %s WHERE id = %s",
+                    (catalog_slug, updated_at, schedule_id),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute(
+                "UPDATE schedules SET catalog_slug = ?, updated_at = ? WHERE id = ?",
+                (catalog_slug, updated_at, schedule_id),
+            )
+
+
 def _set_schedule_status(schedule_id: int, status: str) -> dict[str, Any]:
     if status not in {"active", "paused", "disabled", "deleted"}:
         raise HTTPException(status_code=400, detail=f"Unsupported schedule status {status!r}.")
     schedule = _get_schedule(schedule_id)
+    if status == "deleted" and schedule.get("catalog_slug"):
+        raise HTTPException(status_code=403, detail="Catalog schedules cannot be deleted.")
     updated_at = _utc_now()
     if status == "active":
         next_run_at, next_run_reason = _calculate_next_run(schedule, _parse_run_timestamp(updated_at))
@@ -4465,6 +4511,10 @@ def _event_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         if event.get("channel"):
             websocket_events += 1
     avg_latency_ms = round(sum(latency_values) / len(latency_values), 2) if latency_values else 0.0
+    action_counts = [
+        {"action": name, "count": count}
+        for name, count in sorted(actions.items(), key=lambda item: (-item[1], item[0]))
+    ]
     return {
         "total_events": len(events),
         "failed_events": failed_events,
@@ -4473,6 +4523,7 @@ def _event_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_http_latency_ms": avg_latency_ms,
         "top_actors": dict(sorted(actors.items(), key=lambda item: (-item[1], item[0]))[:10]),
         "top_actions": dict(sorted(actions.items(), key=lambda item: (-item[1], item[0]))[:10]),
+        "action_counts": action_counts,
     }
 
 
@@ -4728,6 +4779,7 @@ def _run_metrics_payload(run_id: int) -> dict[str, Any]:
                 "websocket_events": 0,
                 "top_actors": {},
                 "top_actions": {},
+                "action_counts": [],
             },
         }
     cached = _load_events_cached(path)
@@ -4875,6 +4927,9 @@ def _run_autopilot_job() -> None:
 
 
 _init_db()
+from .catalog_seed import ensure_catalog_seed
+
+ensure_catalog_seed()
 scheduler = BackgroundScheduler(timezone="UTC")
 scheduler.add_job(
     _run_scheduled_jobs,

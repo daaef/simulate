@@ -1,29 +1,12 @@
 "use client";
 
-import { ActorHeatmap } from "../../charts/ActorHeatmap";
-import { EventTimeline } from "../../charts/EventTimeline";
-import { LatencyBarChart } from "../../charts/LatencyBarChart";
-import { SuccessDonut } from "../../charts/SuccessDonut";
+import RunActionCountsPanel from "../RunActionCountsPanel";
 import type { RunMetrics } from "../../../lib/api";
 
 interface RunDetailOverviewProps {
   metrics: RunMetrics | null;
   runStatus: string;
   runError: string | null;
-  timelineData: {
-    events: Array<{ timestamp: number; label: string; category: "scenario"; status: "success" }>;
-    startTime: number;
-    endTime: number;
-  };
-  latencyData: Array<{ endpoint: string; latency: number; status: number; count: number }>;
-  successData: {
-    httpSuccess: number;
-    httpFailed: number;
-    wsSuccess: number;
-    wsFailed: number;
-    scenariosPassed: number;
-    scenariosFailed: number;
-  };
 }
 
 function MetricsGrid({ metrics }: { metrics: RunMetrics }) {
@@ -81,36 +64,36 @@ function TopList({
   );
 }
 
-export default function RunDetailOverview({
-  metrics,
-  runStatus,
-  runError,
-  timelineData,
-  latencyData,
-  successData,
-}: RunDetailOverviewProps) {
+export default function RunDetailOverview({ metrics, runStatus, runError }: RunDetailOverviewProps) {
   const topActors = metrics ? Object.entries(metrics.top_actors).sort((a, b) => b[1] - a[1]) : [];
-  const topActions = metrics ? Object.entries(metrics.top_actions).sort((a, b) => b[1] - a[1]) : [];
 
   return (
     <>
       {metrics ? (
         <div className="panel">
-          <h3 style={{ marginBottom: 12 }}>Summary Metrics</h3>
+          <h3 style={{ marginBottom: 12 }}>Summary</h3>
           <MetricsGrid metrics={metrics} />
         </div>
       ) : null}
-      <div className="panel">
-        <h3 style={{ marginBottom: 12 }}>Data Visualizations</h3>
-        <div className="grid two">
-          <EventTimeline events={timelineData.events} startTime={timelineData.startTime} endTime={timelineData.endTime} />
-          <LatencyBarChart data={latencyData} />
-          <SuccessDonut data={successData} />
-          <ActorHeatmap data={[]} actors={[]} timeBuckets={[]} />
-        </div>
+
+      <RunActionCountsPanel
+        action_counts={metrics?.action_counts}
+        total_events={metrics?.total_events ?? 0}
+        failed_events={metrics?.failed_events ?? 0}
+        http_calls={metrics?.http_calls ?? 0}
+        websocket_events={metrics?.websocket_events ?? 0}
+        top_actors={metrics?.top_actors}
+        title="Run Metrics Dashboard"
+        showOutcomeChips
+      />
+
+      <div className="panel muted" style={{ fontSize: 14, lineHeight: 1.5 }}>
+        <strong style={{ color: "var(--text-primary)" }}>Charts</strong> — Per-endpoint latency and success donuts need data
+        that is not part of run metrics. Use the <strong>Traffic</strong> tab for raw events and <strong>Console</strong> for process
+        output.
       </div>
+
       <div className="grid" style={{ gap: 12 }}>
-        {metrics ? <MetricsGrid metrics={metrics} /> : <p className="muted">Loading metrics...</p>}
         {runError ? (
           <div className="panel" style={{ borderColor: "#ef4444", color: "#b91c1c" }}>
             <strong>Error:</strong> {runError}
@@ -118,9 +101,9 @@ export default function RunDetailOverview({
         ) : null}
         {!runError && runStatus === "failed" && !metrics ? <p className="muted">Run failed before metrics were recorded.</p> : null}
       </div>
+
       <div className="grid two">
-        <TopList title="Top Actors" entries={topActors} emptyMessage="No actor breakdown recorded." />
-        <TopList title="Top Actions" entries={topActions} emptyMessage="No action breakdown recorded." />
+        {metrics ? <TopList title="Top actors (preview)" entries={topActors} emptyMessage="No actor breakdown recorded." /> : null}
       </div>
     </>
   );

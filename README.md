@@ -60,10 +60,12 @@ Use the **same words** in the web UI, email footers, and this README so owners a
 The authenticated app shell includes active route highlighting for `Overview`, `Runs`, `Config`, `Schedules`, `Archives`, `Retention`, and `Admin`.
 
 - `Overview`: status cards, run status and success charts, flow distribution, failure trend, archive/purge backlog, schedule health, and alerts.
+  - **Latest run metrics dashboard:** Under the latest-run hero, an expandable metrics dashboard shows Business KPIs by default with a segmented switch for Business, Operations, and Engineering views. The technical action list remains available as a collapsed drill-down with action-key search. Run metrics from `GET /api/v1/runs/{id}/metrics` still include `action_counts` (complete list) plus `top_actions` (top 10 only, unchanged for compatibility).
   - Latest Run Overview `Critical Findings` is intentionally server-focused: it shows server/API availability failures (`5xx`, transport/network, websocket availability) and excludes expected missing-information/business-availability states (for example missing token, no saved card, no coupon). Full raw findings still remain in `events.json`, `report.md`, and `story.md`.
   - `Critical Findings` now includes the failed API route/endpoint when available.
   - Latest Run hero now shows run-context chips when present: `profile:<name>`, `schedule:<name>`, and integration route context (`route:<project/environment>`).
 - `Runs`: launch, cancel, replay, delete completed runs, and inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles.
+  - Run detail **Overview** tab: summary counts plus a metrics dashboard (Business default, Operations/Engineering switch, collapsed technical drill-down with action-key search). Per-endpoint charts are still not shown until wired from real traffic data; use **Traffic** and **Console** tabs for depth.
   - Runs now show launch attribution (`trigger_source`, `trigger_label`, optional `profile_id`) in list/console/detail views.
   - Start Run now includes a `Save as profile` shortcut under command preview that scrolls/focuses the Saved Profiles name input.
   - Plan selection is dropdown-only in Start Run: `sim_actors.json` is always available and GUI plans are appended when present; free-text plan entry has been removed.
@@ -149,6 +151,12 @@ Store and user scope for execution is now strict to the selected plan:
 Keep actor and run behavior out of `.env`: do not set `USER_PHONE_NUMBER`, `STORE_ID`, `SIM_RUN_MODE`, `SIM_TRACE_SUITE`, `SIM_TIMING_PROFILE`, `N_USERS`, `SIM_ORDERS`, `ORDER_INTERVAL_SECONDS`, `REJECT_RATE`, `SIM_LAT`, or `SIM_LNG` there for normal use. Put those values in `sim_actors.json` or the selected GUI plan; use `--phone` or `--store` only for one-off overrides.
 
 Admins can edit GUI-owned plans from `Config`. Use the saved plan path, for example `runs/gui-plans/daily-doctor.json`, in the Runs launcher or with `--plan`.
+
+### Catalog run profiles and paused schedules
+
+When the API starts and initializes its database, it **idempotently** upserts six built-in run profiles (stable `catalog_slug` values: `daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and a matching **paused** daily schedule for each (08:00 UTC, one slot). Use **Resume** in `/schedules` when you want automatic triggers. Catalog profiles and their catalog schedules cannot be deleted from the API (HTTP 403); adjust copies in user-owned profiles/schedules instead.
+
+- **Skip seeding:** set `SIM_SKIP_CATALOG_SEED` to `1`, `true`, or `yes` if you must avoid touching catalog rows (for example some tests or air-gapped installs).
 
 ## Email Notifications
 

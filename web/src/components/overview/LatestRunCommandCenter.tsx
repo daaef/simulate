@@ -1,6 +1,7 @@
 "use client";
 
 import type { LatestRunOverview } from "../../lib/api";
+import RunActionCountsPanel from "../runs/RunActionCountsPanel";
 import ActorStrip from "./ActorStrip";
 import CriticalFindings from "./CriticalFindings";
 import LatestRunHero from "./LatestRunHero";
@@ -26,6 +27,19 @@ export default function LatestRunCommandCenter({
   return (
     <section className="latest-run-command-center">
       <LatestRunHero overview={overview} />
+      {overview.run && overview.metrics ? (
+        <RunActionCountsPanel
+          action_counts={overview.metrics.action_counts}
+          total_events={overview.metrics.total_events}
+          failed_events={overview.metrics.failed_events}
+          http_calls={overview.metrics.http_calls}
+          websocket_events={overview.metrics.websocket_events}
+          top_actors={overview.metrics.top_actors}
+          title={`Run #${overview.run.id} Metrics Dashboard`}
+          defaultCollapsed
+          showOutcomeChips
+        />
+      ) : null}
       <ActorStrip actors={overview.actors || {}} />
       <ProtocolHealthBoard
         http={overview.protocols?.http || {}}

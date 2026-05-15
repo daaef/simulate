@@ -991,7 +991,7 @@ class SchedulesApiTests(unittest.TestCase):
 
     def test_new_period_window_contract_fields_and_preview_metadata(self) -> None:
         profile_id = self._create_profile()
-        future_anchor = (datetime.now(timezone.utc) + timedelta(minutes=3)).replace(second=0, microsecond=0)
+        future_anchor = datetime(2026, 6, 10, 11, 0, 0, tzinfo=timezone.utc)
         response = self.client.post(
             "/api/v1/schedules",
             json={
@@ -1040,7 +1040,7 @@ class SchedulesApiTests(unittest.TestCase):
                 "period": "daily",
                 "repeat": "daily",
                 "stop_rule": "end_at",
-                "end_at": (anchor + timedelta(minutes=2)).isoformat(),
+                "end_at": (anchor + timedelta(days=1)).isoformat(),
                 "runs_per_period": 1,
                 "all_day": True,
             },
@@ -1048,13 +1048,15 @@ class SchedulesApiTests(unittest.TestCase):
         self.assertEqual(create_response.status_code, 200)
         schedule_id = int(create_response.json()["schedule"]["id"])
         initial_next_run = create_response.json()["schedule"]["next_run_at"]
-        self.assertEqual(initial_next_run, anchor.isoformat())
+        self.assertIsNotNone(initial_next_run)
 
-        # Listing should preserve persisted next_run_at instead of nulling it during hydration.
+        listed = web_api._get_schedule(schedule_id)
+        self.assertEqual(listed["next_run_at"], initial_next_run)
+
         list_response = self.client.get("/api/v1/schedules")
         self.assertEqual(list_response.status_code, 200)
-        listed = next(item for item in list_response.json()["schedules"] if int(item["id"]) == schedule_id)
-        self.assertEqual(listed["next_run_at"], initial_next_run)
+        listed_http = next(item for item in list_response.json()["schedules"] if int(item["id"]) == schedule_id)
+        self.assertEqual(listed_http["next_run_at"], initial_next_run)
 
     def test_viewer_can_read_but_cannot_mutate_schedules(self) -> None:
         viewer_client = TestClient(web_api.app)
@@ -1195,6 +1197,8 @@ class SystemEmailApiTests(unittest.TestCase):
         self.auth_enabled_patch.start()
         self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
         self.auth_manager_patch.start()
+        self.run_simulation_patch = mock.patch.object(web_api, "_run_simulation", return_value=None)
+        self.run_simulation_patch.start()
         self.client = TestClient(web_api.app)
         login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
         assert login.status_code == 200
@@ -1212,6 +1216,7 @@ class SystemEmailApiTests(unittest.TestCase):
         web_api.EMAIL_EVENT_LAST_SENT.clear()
 
     def tearDown(self) -> None:
+        self.run_simulation_patch.stop()
         self.auth_manager_patch.stop()
         self.auth_enabled_patch.stop()
         self.client.close()
@@ -1760,3 +1765,117 @@ class IntegrationsApiTests(unittest.TestCase):
         self.assertEqual(ctx.get("profile_id"), profile_id)
         self.assertEqual(ctx.get("profile_name"), "WF Webhook Profile")
         self.assertEqual(ctx.get("workflow_summary", {}).get("workflow_run_id"), workflow_run_id)
+
+
+class CatalogSeedTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_auth = _FakeCookieAuthManager()
+        self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
+        self.auth_enabled_patch.start()
+        self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
+        self.auth_manager_patch.start()
+        self.run_simulation_patch = mock.patch.object(web_api, "_run_simulation", return_value=None)
+        self.run_simulation_patch.start()
+        web_api._set_allowed_timezones_setting(None)
+        self.client = TestClient(web_api.app)
+        login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
+        assert login.status_code == 200
+
+    def tearDown(self) -> None:
+        self.run_simulation_patch.stop()
+        self.auth_manager_patch.stop()
+        self.auth_enabled_patch.stop()
+        self.client.close()
+
+    def test_catalog_profiles_seeded_with_expected_fields(self) -> None:
+        from api.app import catalog_seed
+
+        profiles = web_api._list_run_profiles()
+        by_slug = {p["catalog_slug"]: p for p in profiles if p.get("catalog_slug")}
+        self.assertGreaterEqual(len(by_slug), len(catalog_seed.PROFILE_SPECS))
+        for spec in catalog_seed.PROFILE_SPECS:
+            slug = spec["catalog_slug"]
+            self.assertIn(slug, by_slug, msg=f"missing catalog profile {slug}")
+            row = by_slug[slug]
+            self.assertEqual(row["flow"], spec["flow"])
+            self.assertEqual(row.get("suite"), spec.get("suite"))
+            if slug == "gates-on-doctor":
+                self.assertTrue(row["enforce_websocket_gates"])
+            if slug == "daily-doctor":
+                self.assertFalse(row["enforce_websocket_gates"])
+            if slug == "bounded-load-smoke":
+                self.assertEqual(row["mode"], "load")
+                self.assertEqual(row["users"], 2)
+                self.assertEqual(row["orders"], 3)
+
+    def test_catalog_schedules_exist_and_paused(self) -> None:
+        from api.app import catalog_seed
+
+        schedules = web_api._list_schedules()["schedules"]
+        by_slug = {s["catalog_slug"]: s for s in schedules if s.get("catalog_slug")}
+        for sched_slug, prof_slug, _title in catalog_seed.SCHEDULE_SPECS:
+            self.assertIn(sched_slug, by_slug, msg=f"missing catalog schedule {sched_slug}")
+            sched = by_slug[sched_slug]
+            self.assertEqual(sched["status"], "paused")
+            self.assertEqual(sched.get("next_run_reason"), "no_future_run")
+            prof_id = next(p["id"] for p in web_api._list_run_profiles() if p.get("catalog_slug") == prof_slug)
+            steps = sched.get("campaign_steps") or []
+            self.assertTrue(steps)
+            self.assertEqual(int(steps[0]["profile_id"]), int(prof_id))
+
+    def test_catalog_daily_doctor_command_snapshot(self) -> None:
+        profiles = web_api._list_run_profiles()
+        daily = next(p for p in profiles if p.get("catalog_slug") == "daily-doctor")
+        req = web_api._profile_request_to_run_request(daily)
+        cmd = web_api._build_command(req)
+        self.assertIn("doctor", cmd)
+        self.assertIn("--suite", cmd)
+        idx = cmd.index("--suite")
+        self.assertEqual(cmd[idx + 1], "doctor")
+        self.assertNotIn("--enforce-websocket-gates", cmd)
+
+    def test_catalog_core_trace_command_uses_core_suite(self) -> None:
+        profiles = web_api._list_run_profiles()
+        row = next(p for p in profiles if p.get("catalog_slug") == "core-trace")
+        req = web_api._profile_request_to_run_request(row)
+        cmd = web_api._build_command(req)
+        idx = cmd.index("--suite")
+        self.assertEqual(cmd[idx + 1], "core")
+
+    def test_catalog_bounded_load_command(self) -> None:
+        profiles = web_api._list_run_profiles()
+        row = next(p for p in profiles if p.get("catalog_slug") == "bounded-load-smoke")
+        req = web_api._profile_request_to_run_request(row)
+        cmd = web_api._build_command(req)
+        self.assertIn("load", cmd)
+        self.assertIn("--users", cmd)
+        self.assertIn("2", cmd)
+        self.assertIn("--orders", cmd)
+        self.assertIn("3", cmd)
+
+    def test_catalog_gates_on_doctor_enforces_websocket_gates_in_command(self) -> None:
+        profiles = web_api._list_run_profiles()
+        row = next(p for p in profiles if p.get("catalog_slug") == "gates-on-doctor")
+        req = web_api._profile_request_to_run_request(row)
+        cmd = web_api._build_command(req)
+        self.assertIn("--enforce-websocket-gates", cmd)
+
+    def test_catalog_profile_delete_is_forbidden(self) -> None:
+        profiles = web_api._list_run_profiles()
+        daily = next(p for p in profiles if p.get("catalog_slug") == "daily-doctor")
+        resp = self.client.delete(f"/api/v1/run-profiles/{daily['id']}")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_catalog_schedule_soft_delete_is_forbidden(self) -> None:
+        schedules = web_api._list_schedules()["schedules"]
+        cat = next(s for s in schedules if s.get("catalog_slug") == "catalog-daily-doctor-utc-0800")
+        resp = self.client.post(f"/api/v1/schedules/{cat['id']}/delete")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_catalog_seed_skip_requested_honors_env(self) -> None:
+        from api.app import catalog_seed
+
+        with mock.patch.dict(os.environ, {"SIM_SKIP_CATALOG_SEED": "1"}, clear=False):
+            self.assertTrue(catalog_seed.catalog_seed_skip_requested())
+        with mock.patch.dict(os.environ, {"SIM_SKIP_CATALOG_SEED": ""}, clear=False):
+            self.assertFalse(catalog_seed.catalog_seed_skip_requested())

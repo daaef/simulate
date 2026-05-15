@@ -549,7 +549,8 @@ def _derived_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
     websocket_events = [event for event in events if _is_websocket_event(event)]
 
     top_actors = Counter(_event_actor(event) or "unknown" for event in events)
-    top_actions = Counter(_event_action(event) or "event" for event in events)
+    # Align action keys with `_event_metrics` in `main.py` (raw `action` field, else "unknown").
+    action_totals = Counter(str(event.get("action") or "unknown") for event in events)
 
     latencies = []
     for event in http_events:
@@ -559,6 +560,11 @@ def _derived_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         except (TypeError, ValueError):
             pass
 
+    action_counts = [
+        {"action": name, "count": count}
+        for name, count in sorted(action_totals.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
     return {
         "total_events": len(events),
         "failed_events": len(failed),
@@ -566,7 +572,8 @@ def _derived_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         "websocket_events": len(websocket_events),
         "avg_http_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else None,
         "top_actors": dict(top_actors.most_common(10)),
-        "top_actions": dict(top_actions.most_common(10)),
+        "top_actions": dict(action_totals.most_common(10)),
+        "action_counts": action_counts,
     }
 
 

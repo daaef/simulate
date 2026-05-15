@@ -91,7 +91,7 @@ Redirects to `/overview` when a session cookie exists, otherwise `/auth/login`.
 
 **Blocks:**
 
-- **Latest Run Command Center** — Hero for most recent run: status, duration, context chips (`profile:`, `schedule:`, `route:`), actor strip, HTTP/WebSocket protocol boards, lifecycle timeline, **Critical Findings** (server/API/websocket **availability** only—see README Overview notes), top traffic.
+- **Latest Run Command Center** — Hero for most recent run: status, duration, context chips (`profile:`, `schedule:`, `route:`), **Metrics Dashboard** (expandable; Business KPI cards by default with segmented Business/Operations/Engineering switching, plus a collapsed technical action drill-down sourced from full run `action_counts`), actor strip, HTTP/WebSocket protocol boards, lifecycle timeline, **Critical Findings** (server/API/websocket **availability** only—see README Overview notes), top traffic.
 - **Which simulation should I run?** — Anchor `id="which-simulation-flow"`. Short ladder: doctor vs trace vs load; points to this guide for depth.
 - **Recent run outcomes** — **Last succeeded** and **Last failed** from dashboard API (quick links to run detail).
 - **Stat cards** — Total runs, success rate, active runs, failed (24h), schedules count, alert count.
@@ -120,6 +120,8 @@ Redirects to `/overview` when a session cookie exists, otherwise `/auth/login`.
 ### Route: `/runs/{id}`
 
 Run detail: summary, log download, artifacts (`report.md`, `story.md`, `events.json`), metrics—deep dive after a failure.
+
+**Overview tab:** Shows aggregate metrics plus a **metrics-first dashboard** (Business default view, segmented Operations/Engineering views, and collapsed technical action drill-down with action-key search). `GET /api/v1/runs/{id}/metrics` returns `action_counts` as `{ action, count }[]` (every distinct `action` in `events.json`, sorted by count then name), and the dashboard derives KPI cards from these counts and existing totals/actors. `top_actions` remains a capped top-10 map for older consumers. Misleading placeholder charts were removed; use **Traffic** for the raw event stream and **Console** for process output.
 
 ### Route: `/config`
 
@@ -792,6 +794,10 @@ Scheduling procedure:
 5. Add blackout dates for full local calendar days when automatic triggers must not run. Manual `Trigger` still launches immediately.
 6. Save the schedule, then confirm the `Next Automatic Trigger` panel and table metadata.
 7. Use `Pause`, `Resume`, `Disable`, `Delete`, and `Restore` for lifecycle control. `pause`, `disable`, and `delete` clear `next_run_at`; `resume` and `restore` recalculate it.
+
+#### Catalog presets (paused templates)
+
+On database init, the API seeds six **catalog** run profiles (`daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and one **paused** daily schedule per profile (08:00 UTC). They appear in **Runs** (profiles may show a **Catalog** label) and **Schedules**; resume a schedule when you want that preset to run automatically. Catalog profiles and catalog-backed schedules are not deletable via the API (403). To disable this seed entirely, set env `SIM_SKIP_CATALOG_SEED` to `1`, `true`, or `yes` before starting the API.
 
 Key endpoints:
 
