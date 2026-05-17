@@ -1,0 +1,307 @@
+0 verbose cli /Users/mars/.nvm/versions/node/v24.12.0/bin/node /Users/mars/.nvm/versions/node/v24.12.0/bin/npm
+1 info using npm@11.6.2
+2 info using node@v24.12.0
+3 silly config load:file:/Users/mars/.nvm/versions/node/v24.12.0/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/mars/FAINZY/simulate/web/.npmrc
+5 silly config load:file:/Users/mars/.npmrc
+6 silly config load:file:/Users/mars/.nvm/versions/node/v24.12.0/etc/npmrc
+7 verbose title npm install
+8 verbose argv "install"
+9 verbose logfile logs-max:10 dir:/Users/mars/FAINZY/simulate/.npm-cache/_logs/2026-05-16T17_00_40_826Z-
+10 verbose logfile /Users/mars/FAINZY/simulate/.npm-cache/_logs/2026-05-16T17_00_40_826Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 http fetch GET https://registry.npmjs.org/npm attempt 1 failed with ENOTFOUND
+14 silly idealTree buildDeps
+15 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/busboy' ]
+16 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/caniuse-lite' ]
+17 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/client-only' ]
+18 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/csstype' ]
+19 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/graceful-fs' ]
+20 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/js-tokens' ]
+21 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/loose-envify' ]
+22 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/nanoid' ]
+23 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/next' ]
+24 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/picocolors' ]
+25 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/postcss' ]
+26 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/react' ]
+27 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/react-dom' ]
+28 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/source-map-js' ]
+29 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/scheduler' ]
+30 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/streamsearch' ]
+31 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/styled-jsx' ]
+32 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/tslib' ]
+33 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/undici-types' ]
+34 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/typescript' ]
+35 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/@next/env' ]
+36 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/@swc/counter' ]
+37 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/@swc/helpers' ]
+38 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/@types/node' ]
+39 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/@types/prop-types' ]
+40 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/@types/react' ]
+41 silly reify mark retired [ '/Users/mars/FAINZY/simulate/web/node_modules/@types/react-dom' ]
+42 silly reify moves {
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/busboy': '/Users/mars/FAINZY/simulate/web/node_modules/.busboy-bpf0Wapu',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/caniuse-lite': '/Users/mars/FAINZY/simulate/web/node_modules/.caniuse-lite-44qPfhxn',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/client-only': '/Users/mars/FAINZY/simulate/web/node_modules/.client-only-JsrArh3S',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/csstype': '/Users/mars/FAINZY/simulate/web/node_modules/.csstype-o0Ppcetb',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/graceful-fs': '/Users/mars/FAINZY/simulate/web/node_modules/.graceful-fs-0GnWd9Ko',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/js-tokens': '/Users/mars/FAINZY/simulate/web/node_modules/.js-tokens-razyKBFo',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/loose-envify': '/Users/mars/FAINZY/simulate/web/node_modules/.loose-envify-y0mNxUlK',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/nanoid': '/Users/mars/FAINZY/simulate/web/node_modules/.nanoid-Xq6w4VfJ',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/next': '/Users/mars/FAINZY/simulate/web/node_modules/.next-GG5AhjfQ',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/picocolors': '/Users/mars/FAINZY/simulate/web/node_modules/.picocolors-HvBzLBOG',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/postcss': '/Users/mars/FAINZY/simulate/web/node_modules/.postcss-ZQvpVpU4',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/react': '/Users/mars/FAINZY/simulate/web/node_modules/.react-yg6yxRNi',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/react-dom': '/Users/mars/FAINZY/simulate/web/node_modules/.react-dom-suoAHLvf',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/source-map-js': '/Users/mars/FAINZY/simulate/web/node_modules/.source-map-js-ite4hLyh',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/scheduler': '/Users/mars/FAINZY/simulate/web/node_modules/.scheduler-nxD8Ngl1',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/streamsearch': '/Users/mars/FAINZY/simulate/web/node_modules/.streamsearch-MZhTejiX',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/styled-jsx': '/Users/mars/FAINZY/simulate/web/node_modules/.styled-jsx-KoWNgErO',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/tslib': '/Users/mars/FAINZY/simulate/web/node_modules/.tslib-33P4X8Ek',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/undici-types': '/Users/mars/FAINZY/simulate/web/node_modules/.undici-types-qDM18GOp',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/typescript': '/Users/mars/FAINZY/simulate/web/node_modules/.typescript-eWOtpZ9i',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/@next/env': '/Users/mars/FAINZY/simulate/web/node_modules/@next/.env-BXmHJudR',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/@swc/counter': '/Users/mars/FAINZY/simulate/web/node_modules/@swc/.counter-46q8MxdI',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/@swc/helpers': '/Users/mars/FAINZY/simulate/web/node_modules/@swc/.helpers-9SpY6RMs',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/@types/node': '/Users/mars/FAINZY/simulate/web/node_modules/@types/.node-GYxoigtL',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/@types/prop-types': '/Users/mars/FAINZY/simulate/web/node_modules/@types/.prop-types-tj4vRawx',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/@types/react': '/Users/mars/FAINZY/simulate/web/node_modules/@types/.react-cA5lRJHV',
+42 silly reify   '/Users/mars/FAINZY/simulate/web/node_modules/@types/react-dom': '/Users/mars/FAINZY/simulate/web/node_modules/@types/.react-dom-NXdtWnFw'
+42 silly reify }
+43 silly audit bulk request {
+43 silly audit   '@next/env': [ '14.2.33' ],
+43 silly audit   '@next/swc-darwin-arm64': [ '14.2.33' ],
+43 silly audit   '@next/swc-darwin-x64': [ '14.2.33' ],
+43 silly audit   '@next/swc-linux-arm64-gnu': [ '14.2.33' ],
+43 silly audit   '@next/swc-linux-arm64-musl': [ '14.2.33' ],
+43 silly audit   '@next/swc-linux-x64-gnu': [ '14.2.33' ],
+43 silly audit   '@next/swc-linux-x64-musl': [ '14.2.33' ],
+43 silly audit   '@next/swc-win32-arm64-msvc': [ '14.2.33' ],
+43 silly audit   '@next/swc-win32-ia32-msvc': [ '14.2.33' ],
+43 silly audit   '@next/swc-win32-x64-msvc': [ '14.2.33' ],
+43 silly audit   '@swc/counter': [ '0.1.3' ],
+43 silly audit   '@swc/helpers': [ '0.5.5' ],
+43 silly audit   '@types/debug': [ '4.1.13' ],
+43 silly audit   '@types/estree': [ '1.0.8' ],
+43 silly audit   '@types/estree-jsx': [ '1.0.5' ],
+43 silly audit   '@types/hast': [ '3.0.4' ],
+43 silly audit   '@types/mdast': [ '4.0.4' ],
+43 silly audit   '@types/ms': [ '2.1.0' ],
+43 silly audit   '@types/node': [ '20.17.57' ],
+43 silly audit   '@types/prop-types': [ '15.7.15' ],
+43 silly audit   '@types/react': [ '18.3.18' ],
+43 silly audit   '@types/react-dom': [ '18.3.5' ],
+43 silly audit   '@types/unist': [ '3.0.3', '2.0.11' ],
+43 silly audit   '@ungap/structured-clone': [ '1.3.0' ],
+43 silly audit   bail: [ '2.0.2' ],
+43 silly audit   busboy: [ '1.6.0' ],
+43 silly audit   'caniuse-lite': [ '1.0.30001791' ],
+43 silly audit   ccount: [ '2.0.1' ],
+43 silly audit   'character-entities': [ '2.0.2' ],
+43 silly audit   'character-entities-html4': [ '2.1.0' ],
+43 silly audit   'character-entities-legacy': [ '3.0.0' ],
+43 silly audit   'character-reference-invalid': [ '2.0.1' ],
+43 silly audit   'client-only': [ '0.0.1' ],
+43 silly audit   'comma-separated-tokens': [ '2.0.3' ],
+43 silly audit   csstype: [ '3.2.3' ],
+43 silly audit   debug: [ '4.4.3' ],
+43 silly audit   'decode-named-character-reference': [ '1.3.0' ],
+43 silly audit   dequal: [ '2.0.3' ],
+43 silly audit   devlop: [ '1.1.0' ],
+43 silly audit   'escape-string-regexp': [ '5.0.0' ],
+43 silly audit   'estree-util-is-identifier-name': [ '3.0.0' ],
+43 silly audit   extend: [ '3.0.2' ],
+43 silly audit   'graceful-fs': [ '4.2.11' ],
+43 silly audit   'hast-util-to-jsx-runtime': [ '2.3.6' ],
+43 silly audit   'hast-util-whitespace': [ '3.0.0' ],
+43 silly audit   'html-url-attributes': [ '3.0.1' ],
+43 silly audit   'inline-style-parser': [ '0.2.7' ],
+43 silly audit   'is-alphabetical': [ '2.0.1' ],
+43 silly audit   'is-alphanumerical': [ '2.0.1' ],
+43 silly audit   'is-decimal': [ '2.0.1' ],
+43 silly audit   'is-hexadecimal': [ '2.0.1' ],
+43 silly audit   'is-plain-obj': [ '4.1.0' ],
+43 silly audit   'js-tokens': [ '4.0.0' ],
+43 silly audit   'longest-streak': [ '3.1.0' ],
+43 silly audit   'loose-envify': [ '1.4.0' ],
+43 silly audit   'markdown-table': [ '3.0.4' ],
+43 silly audit   'mdast-util-find-and-replace': [ '3.0.2' ],
+43 silly audit   'mdast-util-from-markdown': [ '2.0.3' ],
+43 silly audit   'mdast-util-gfm': [ '3.1.0' ],
+43 silly audit   'mdast-util-gfm-autolink-literal': [ '2.0.1' ],
+43 silly audit   'mdast-util-gfm-footnote': [ '2.1.0' ],
+43 silly audit   'mdast-util-gfm-strikethrough': [ '2.0.0' ],
+43 silly audit   'mdast-util-gfm-table': [ '2.0.0' ],
+43 silly audit   'mdast-util-gfm-task-list-item': [ '2.0.0' ],
+43 silly audit   'mdast-util-mdx-expression': [ '2.0.1' ],
+43 silly audit   'mdast-util-mdx-jsx': [ '3.2.0' ],
+43 silly audit   'mdast-util-mdxjs-esm': [ '2.0.1' ],
+43 silly audit   'mdast-util-phrasing': [ '4.1.0' ],
+43 silly audit   'mdast-util-to-hast': [ '13.2.1' ],
+43 silly audit   'mdast-util-to-markdown': [ '2.1.2' ],
+43 silly audit   'mdast-util-to-string': [ '4.0.0' ],
+43 silly audit   micromark: [ '4.0.2' ],
+43 silly audit   'micromark-core-commonmark': [ '2.0.3' ],
+43 silly audit   'micromark-extension-gfm': [ '3.0.0' ],
+43 silly audit   'micromark-extension-gfm-autolink-literal': [ '2.1.0' ],
+43 silly audit   'micromark-extension-gfm-footnote': [ '2.1.0' ],
+43 silly audit   'micromark-extension-gfm-strikethrough': [ '2.1.0' ],
+43 silly audit   'micromark-extension-gfm-table': [ '2.1.1' ],
+43 silly audit   'micromark-extension-gfm-tagfilter': [ '2.0.0' ],
+43 silly audit   'micromark-extension-gfm-task-list-item': [ '2.1.0' ],
+43 silly audit   'micromark-factory-destination': [ '2.0.1' ],
+43 silly audit   'micromark-factory-label': [ '2.0.1' ],
+43 silly audit   'micromark-factory-space': [ '2.0.1' ],
+43 silly audit   'micromark-factory-title': [ '2.0.1' ],
+43 silly audit   'micromark-factory-whitespace': [ '2.0.1' ],
+43 silly audit   'micromark-util-character': [ '2.1.1' ],
+43 silly audit   'micromark-util-chunked': [ '2.0.1' ],
+43 silly audit   'micromark-util-classify-character': [ '2.0.1' ],
+43 silly audit   'micromark-util-combine-extensions': [ '2.0.1' ],
+43 silly audit   'micromark-util-decode-numeric-character-reference': [ '2.0.2' ],
+43 silly audit   'micromark-util-decode-string': [ '2.0.1' ],
+43 silly audit   'micromark-util-encode': [ '2.0.1' ],
+43 silly audit   'micromark-util-html-tag-name': [ '2.0.1' ],
+43 silly audit   'micromark-util-normalize-identifier': [ '2.0.1' ],
+43 silly audit   'micromark-util-resolve-all': [ '2.0.1' ],
+43 silly audit   'micromark-util-sanitize-uri': [ '2.0.1' ],
+43 silly audit   'micromark-util-subtokenize': [ '2.1.0' ],
+43 silly audit   'micromark-util-symbol': [ '2.0.1' ],
+43 silly audit   'micromark-util-types': [ '2.0.2' ],
+43 silly audit   ms: [ '2.1.3' ],
+43 silly audit   nanoid: [ '3.3.12' ],
+43 silly audit   next: [ '14.2.33' ],
+43 silly audit   'parse-entities': [ '4.0.2' ],
+43 silly audit   picocolors: [ '1.1.1' ],
+43 silly audit   postcss: [ '8.4.31' ],
+43 silly audit   'property-information': [ '7.1.0' ],
+43 silly audit   react: [ '18.3.1' ],
+43 silly audit   'react-dom': [ '18.3.1' ],
+43 silly audit   'react-markdown': [ '9.0.1' ],
+43 silly audit   'remark-gfm': [ '4.0.0' ],
+43 silly audit   'remark-parse': [ '11.0.0' ],
+43 silly audit   'remark-rehype': [ '11.1.2' ],
+43 silly audit   'remark-stringify': [ '11.0.0' ],
+43 silly audit   scheduler: [ '0.23.2' ],
+43 silly audit   'source-map-js': [ '1.2.1' ],
+43 silly audit   'space-separated-tokens': [ '2.0.2' ],
+43 silly audit   streamsearch: [ '1.1.0' ],
+43 silly audit   'stringify-entities': [ '4.0.4' ],
+43 silly audit   'style-to-js': [ '1.1.21' ],
+43 silly audit   'style-to-object': [ '1.0.14' ],
+43 silly audit   'styled-jsx': [ '5.1.1' ],
+43 silly audit   'trim-lines': [ '3.0.1' ],
+43 silly audit   trough: [ '2.2.0' ],
+43 silly audit   tslib: [ '2.8.1' ],
+43 silly audit   typescript: [ '5.8.3' ],
+43 silly audit   'undici-types': [ '6.19.8' ],
+43 silly audit   unified: [ '11.0.5' ],
+43 silly audit   'unist-util-is': [ '6.0.1' ],
+43 silly audit   'unist-util-position': [ '5.0.0' ],
+43 silly audit   'unist-util-stringify-position': [ '4.0.0' ],
+43 silly audit   'unist-util-visit': [ '5.1.0' ],
+43 silly audit   'unist-util-visit-parents': [ '6.0.2' ],
+43 silly audit   vfile: [ '6.0.3' ],
+43 silly audit   'vfile-message': [ '4.0.3' ],
+43 silly audit   zwitch: [ '2.0.4' ]
+43 silly audit }
+44 verbose audit error FetchError: request to https://registry.npmjs.org/-/npm/v1/security/advisories/bulk failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org
+44 verbose audit error     at ClientRequest.<anonymous> (/Users/mars/.nvm/versions/node/v24.12.0/lib/node_modules/npm/node_modules/minipass-fetch/lib/index.js:130:14)
+44 verbose audit error     at ClientRequest.emit (node:events:508:28)
+44 verbose audit error     at emitErrorEvent (node:_http_client:108:11)
+44 verbose audit error     at _destroy (node:_http_client:962:9)
+44 verbose audit error     at onSocketNT (node:_http_client:982:5)
+44 verbose audit error     at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+44 verbose audit error   code: 'ENOTFOUND',
+44 verbose audit error   errno: 'ENOTFOUND',
+44 verbose audit error   syscall: 'getaddrinfo',
+44 verbose audit error   hostname: 'registry.npmjs.org',
+44 verbose audit error   type: 'system'
+44 verbose audit error }
+45 silly audit error undefined
+46 silly audit report null
+47 silly packumentCache corgi:https://registry.npmjs.org/@types%2freact-dom cache-miss
+48 silly packumentCache corgi:https://registry.npmjs.org/@types%2fprop-types cache-miss
+49 silly packumentCache corgi:https://registry.npmjs.org/@swc%2fhelpers cache-miss
+50 silly packumentCache corgi:https://registry.npmjs.org/@swc%2fcounter cache-miss
+51 silly packumentCache corgi:https://registry.npmjs.org/@types%2fnode cache-miss
+52 silly packumentCache corgi:https://registry.npmjs.org/@next%2fenv cache-miss
+53 silly packumentCache corgi:https://registry.npmjs.org/@types%2freact cache-miss
+54 silly packumentCache corgi:https://registry.npmjs.org/undici-types cache-miss
+55 silly packumentCache corgi:https://registry.npmjs.org/typescript cache-miss
+56 silly packumentCache corgi:https://registry.npmjs.org/tslib cache-miss
+57 silly packumentCache corgi:https://registry.npmjs.org/styled-jsx cache-miss
+58 silly packumentCache corgi:https://registry.npmjs.org/streamsearch cache-miss
+59 silly packumentCache corgi:https://registry.npmjs.org/source-map-js cache-miss
+60 silly packumentCache corgi:https://registry.npmjs.org/react-dom cache-miss
+61 silly packumentCache corgi:https://registry.npmjs.org/react cache-miss
+62 silly packumentCache corgi:https://registry.npmjs.org/postcss cache-miss
+63 silly packumentCache corgi:https://registry.npmjs.org/picocolors cache-miss
+64 silly packumentCache corgi:https://registry.npmjs.org/nanoid cache-miss
+65 silly packumentCache corgi:https://registry.npmjs.org/loose-envify cache-miss
+66 silly packumentCache corgi:https://registry.npmjs.org/js-tokens cache-miss
+67 silly packumentCache corgi:https://registry.npmjs.org/graceful-fs cache-miss
+68 silly packumentCache corgi:https://registry.npmjs.org/scheduler cache-miss
+69 silly packumentCache corgi:https://registry.npmjs.org/next cache-miss
+70 silly packumentCache corgi:https://registry.npmjs.org/csstype cache-miss
+71 silly packumentCache corgi:https://registry.npmjs.org/client-only cache-miss
+72 silly packumentCache corgi:https://registry.npmjs.org/busboy cache-miss
+73 silly packumentCache corgi:https://registry.npmjs.org/caniuse-lite cache-miss
+74 http fetch GET https://registry.npmjs.org/@types%2freact-dom attempt 1 failed with ENOTFOUND
+75 http fetch GET https://registry.npmjs.org/@types%2fprop-types attempt 1 failed with ENOTFOUND
+76 http fetch GET https://registry.npmjs.org/@swc%2fhelpers attempt 1 failed with ENOTFOUND
+77 http fetch GET https://registry.npmjs.org/@swc%2fcounter attempt 1 failed with ENOTFOUND
+78 http fetch GET https://registry.npmjs.org/@types%2fnode attempt 1 failed with ENOTFOUND
+79 http fetch GET https://registry.npmjs.org/@next%2fenv attempt 1 failed with ENOTFOUND
+80 http fetch GET https://registry.npmjs.org/@types%2freact attempt 1 failed with ENOTFOUND
+81 http fetch GET https://registry.npmjs.org/undici-types attempt 1 failed with ENOTFOUND
+82 http fetch GET https://registry.npmjs.org/typescript attempt 1 failed with ENOTFOUND
+83 http fetch GET https://registry.npmjs.org/tslib attempt 1 failed with ENOTFOUND
+84 http fetch GET https://registry.npmjs.org/styled-jsx attempt 1 failed with ENOTFOUND
+85 http fetch GET https://registry.npmjs.org/streamsearch attempt 1 failed with ENOTFOUND
+86 http fetch GET https://registry.npmjs.org/source-map-js attempt 1 failed with ENOTFOUND
+87 http fetch GET https://registry.npmjs.org/react-dom attempt 1 failed with ENOTFOUND
+88 http fetch GET https://registry.npmjs.org/react attempt 1 failed with ENOTFOUND
+89 http fetch GET https://registry.npmjs.org/npm attempt 2 failed with ENOTFOUND
+90 http fetch GET https://registry.npmjs.org/@types%2freact-dom attempt 2 failed with ENOTFOUND
+91 http fetch GET https://registry.npmjs.org/@types%2fprop-types attempt 2 failed with ENOTFOUND
+92 http fetch GET https://registry.npmjs.org/@swc%2fhelpers attempt 2 failed with ENOTFOUND
+93 http fetch GET https://registry.npmjs.org/@swc%2fcounter attempt 2 failed with ENOTFOUND
+94 http fetch GET https://registry.npmjs.org/@types%2fnode attempt 2 failed with ENOTFOUND
+95 http fetch GET https://registry.npmjs.org/@next%2fenv attempt 2 failed with ENOTFOUND
+96 http fetch GET https://registry.npmjs.org/@types%2freact attempt 2 failed with ENOTFOUND
+97 http fetch GET https://registry.npmjs.org/undici-types attempt 2 failed with ENOTFOUND
+98 http fetch GET https://registry.npmjs.org/typescript attempt 2 failed with ENOTFOUND
+99 http fetch GET https://registry.npmjs.org/tslib attempt 2 failed with ENOTFOUND
+100 http fetch GET https://registry.npmjs.org/styled-jsx attempt 2 failed with ENOTFOUND
+101 http fetch GET https://registry.npmjs.org/streamsearch attempt 2 failed with ENOTFOUND
+102 http fetch GET https://registry.npmjs.org/source-map-js attempt 2 failed with ENOTFOUND
+103 http fetch GET https://registry.npmjs.org/react-dom attempt 2 failed with ENOTFOUND
+104 http fetch GET https://registry.npmjs.org/react attempt 2 failed with ENOTFOUND
+105 http fetch GET https://registry.npmjs.org/npm attempt 3 failed with ENOTFOUND
+106 http fetch GET https://registry.npmjs.org/@types%2freact-dom attempt 3 failed with ENOTFOUND
+107 http fetch GET https://registry.npmjs.org/@types%2fprop-types attempt 3 failed with ENOTFOUND
+108 http fetch GET https://registry.npmjs.org/@swc%2fhelpers attempt 3 failed with ENOTFOUND
+109 http fetch GET https://registry.npmjs.org/@swc%2fcounter attempt 3 failed with ENOTFOUND
+110 http fetch GET https://registry.npmjs.org/@types%2fnode attempt 3 failed with ENOTFOUND
+111 http fetch GET https://registry.npmjs.org/@next%2fenv attempt 3 failed with ENOTFOUND
+112 http fetch GET https://registry.npmjs.org/@types%2freact attempt 3 failed with ENOTFOUND
+113 http fetch GET https://registry.npmjs.org/undici-types attempt 3 failed with ENOTFOUND
+114 http fetch GET https://registry.npmjs.org/typescript attempt 3 failed with ENOTFOUND
+115 http fetch GET https://registry.npmjs.org/tslib attempt 3 failed with ENOTFOUND
+116 http fetch GET https://registry.npmjs.org/styled-jsx attempt 3 failed with ENOTFOUND
+117 http fetch GET https://registry.npmjs.org/streamsearch attempt 3 failed with ENOTFOUND
+118 http fetch GET https://registry.npmjs.org/source-map-js attempt 3 failed with ENOTFOUND
+119 http fetch GET https://registry.npmjs.org/react-dom attempt 3 failed with ENOTFOUND
+120 http fetch GET https://registry.npmjs.org/react attempt 3 failed with ENOTFOUND
+121 verbose cwd /Users/mars/FAINZY/simulate/web
+122 verbose os Darwin 24.6.0
+123 verbose node v24.12.0
+124 verbose npm  v11.6.2
+125 error Exit handler never called!
+126 error This is an error with npm itself. Please report this error at:
+127 error   <https://github.com/npm/cli/issues>
+128 verbose exit 1
+129 verbose code 1
+130 error A complete log of this run can be found in: /Users/mars/FAINZY/simulate/.npm-cache/_logs/2026-05-16T17_00_40_826Z-debug-0.log

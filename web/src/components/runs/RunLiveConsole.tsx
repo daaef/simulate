@@ -1,10 +1,11 @@
 "use client";
 
 import type { RunRow } from "../../lib/api";
+import RunLogViewer from "./RunLogViewer";
 
 interface RunLiveConsoleProps {
   selectedRun: RunRow | null;
-  logLines: string[];
+  log: string;
   isExpanded: boolean;
   onToggleExpanded: () => void;
   logClassForLine: (line: string) => string;
@@ -46,40 +47,46 @@ function CollapseButton({
   );
 }
 
+function collapsedSummary(selectedRun: RunRow | null): string {
+  if (!selectedRun) {
+    return "No run selected";
+  }
+  return `Run #${selectedRun.id} · ${selectedRun.status} · ${selectedRun.flow}`;
+}
+
 export default function RunLiveConsole({
   selectedRun,
-  logLines,
+  log,
   isExpanded,
   onToggleExpanded,
   logClassForLine,
 }: RunLiveConsoleProps) {
   return (
-    <div className="panel grid" style={{ gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <h2 style={{ margin: 0 }}>Live Console</h2>
+    <div className="panel grid live-console-panel" style={{ gap: 12 }}>
+      <div className="live-console-header">
+        <div>
+          <h2 style={{ margin: 0 }}>Live Console</h2>
+          {!isExpanded ? (
+            <p className="muted live-console-collapsed-summary" style={{ margin: "6px 0 0", fontSize: 13 }}>
+              {collapsedSummary(selectedRun)}
+            </p>
+          ) : null}
+        </div>
         <CollapseButton isExpanded={isExpanded} onToggle={onToggleExpanded} title="Live Console" />
       </div>
       {isExpanded ? (
         <>
           {selectedRun ? (
             <div className="muted">
-              Run #{selectedRun.id} ({selectedRun.status}) | {selectedRun.flow} | {selectedRun.store_id || "auto-store"} | {selectedRun.trigger_source || "manual"} · {selectedRun.trigger_label || "Manual launch"}{selectedRun.profile_id ? ` · ${((selectedRun.trigger_context as Record<string, unknown> | undefined)?.profile_name as string) || `profile #${selectedRun.profile_id}`}` : ""}
+              Run #{selectedRun.id} ({selectedRun.status}) | {selectedRun.flow} | {selectedRun.store_id || "auto-store"} | {selectedRun.trigger_source || "manual"} · {selectedRun.trigger_label || "Manual launch"}
+              {selectedRun.profile_id
+                ? ` · ${((selectedRun.trigger_context as Record<string, unknown> | undefined)?.profile_name as string) || `profile #${selectedRun.profile_id}`}`
+                : ""}
             </div>
           ) : (
             <div className="muted">No run selected.</div>
           )}
-          <pre className="log">
-            {logLines.length ? (
-              logLines.map((line, index) => (
-                <span key={`${index}-${line}`} className={logClassForLine(line)}>
-                  {line}
-                  {"\n"}
-                </span>
-              ))
-            ) : (
-              <span className="log-line-default">No log output yet.</span>
-            )}
-          </pre>
+          <RunLogViewer log={log || null} logClassForLine={logClassForLine} />
         </>
       ) : null}
     </div>

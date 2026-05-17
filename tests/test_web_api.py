@@ -489,9 +489,78 @@ class OverviewLatestRunTests(unittest.TestCase):
                     payload = overview_service.latest_run_overview()
 
         issues = payload["issues"]
+        findings = payload["findings"]
         self.assertGreaterEqual(len(issues), 1)
         self.assertTrue(any((issue.get("route") == "/v1/core/orders/") for issue in issues))
         self.assertFalse(any(("missing_user_token" == issue.get("code")) for issue in issues))
+        self.assertEqual(issues, findings["critical"])
+        self.assertTrue(any(item.get("code") == "missing_user_token" for item in findings["operational"]))
+        self.assertEqual(payload["metrics"]["failed_events"], 1)
+
+    def test_latest_run_overview_classifies_websocket_and_gate_buckets(self) -> None:
+        run = {"id": 1001, "status": "failed"}
+        artifact_issues = [
+            {
+                "severity": "warning",
+                "code": "websocket_event_missing",
+                "message": "No websocket event observed for status pending",
+            },
+            {
+                "severity": "warning",
+                "code": "websocket_gate_timeout",
+                "message": "Websocket gate bypassed",
+                "details": {"enforced": False},
+            },
+            {
+                "severity": "error",
+                "code": "websocket_gate_timeout",
+                "message": "Websocket gate failed",
+                "details": {"enforced": True},
+            },
+        ]
+        with mock.patch.object(overview_service, "_load_latest_run", return_value=run):
+            with mock.patch.object(overview_service, "_load_events", return_value=([], artifact_issues, {})):
+                with mock.patch.object(overview_service, "_load_metrics", return_value=None):
+                    payload = overview_service.latest_run_overview()
+
+        critical_codes = {item.get("code") for item in payload["findings"]["critical"]}
+        operational_codes = {item.get("code") for item in payload["findings"]["operational"]}
+        self.assertIn("websocket_event_missing", critical_codes)
+        self.assertIn("websocket_gate_timeout", critical_codes)
+        self.assertEqual(len(operational_codes), 1)
+        self.assertIn("websocket_gate_timeout", operational_codes)
+
+    def test_latest_run_overview_treats_informational_decisions_as_non_failures(self) -> None:
+        run = {"id": 1002, "status": "failed"}
+        events = [
+            {
+                "id": 1,
+                "actor": "user",
+                "category": "decision",
+                "action": "probe_saved_cards",
+                "status": "skipped",
+                "reason_code": "no_customer_id",
+                "message": "Saved cards were skipped because this user has no Stripe/customer ID.",
+                "ok": False,
+            },
+            {
+                "id": 2,
+                "actor": "user",
+                "action": "probe_user_active_orders",
+                "endpoint": "/v1/core/orders/",
+                "code": "probe_failed",
+                "message": "connection timed out",
+                "ok": False,
+            },
+        ]
+
+        with mock.patch.object(overview_service, "_load_latest_run", return_value=run):
+            with mock.patch.object(overview_service, "_load_events", return_value=(events, [], {})):
+                with mock.patch.object(overview_service, "_load_metrics", return_value=None):
+                    payload = overview_service.latest_run_overview()
+
+        critical_codes = {item.get("code") for item in payload["findings"]["critical"]}
+        self.assertNotIn("no_customer_id", critical_codes)
         self.assertEqual(payload["metrics"]["failed_events"], 1)
 
     def test_latest_run_overview_tolerates_malformed_issue_payloads(self) -> None:
@@ -516,6 +585,22 @@ class OverviewLatestRunTests(unittest.TestCase):
 
         self.assertIsNotNone(payload.get("run"))
         self.assertEqual(payload["run"]["id"], 321)
+
+    def test_run_log_payload_rejects_mismatched_log_path(self) -> None:
+        run = {"id": 55, "log_path": str(web_api.LOG_DIR / "run-999.log")}
+        with mock.patch.object(web_api, "_get_run", return_value=run):
+            payload = web_api._run_log_payload(55, 100)
+        self.assertEqual(payload["log"], "")
+
+    def test_run_log_payload_tails_matching_log_path(self) -> None:
+        log_dir = web_api.LOG_DIR
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "run-56.log"
+        log_path.write_text("line-one\nline-two\n", encoding="utf-8")
+        run = {"id": 56, "log_path": str(log_path)}
+        with mock.patch.object(web_api, "_get_run", return_value=run):
+            payload = web_api._run_log_payload(56, 10)
+        self.assertIn("line-two", payload["log"])
 
 
 class RunDeletionSafetyTests(unittest.TestCase):
@@ -642,6 +727,24 @@ class RunDeletionSafetyTests(unittest.TestCase):
             self.assertTrue(log_dir.is_dir())
             launched_log_path = self._FakeThread.instances[-1].args[2]
             self.assertEqual(launched_log_path, log_dir / f"run-{run['id']}.log")
+
+    def test_running_run_does_not_hydrate_artifacts_from_old_log_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = pathlib.Path(tmpdir) / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row()
+            run_id = int(run["id"])
+            log_path = log_dir / f"run-{run_id}.log"
+            stale_events = pathlib.Path(tmpdir) / "stale-events.json"
+            stale_events.write_text("[]", encoding="utf-8")
+            log_path.write_text(
+                f"main: events: {stale_events}\n",
+                encoding="utf-8",
+            )
+            web_api._update_run(run_id, status="running", log_path=str(log_path))
+
+            hydrated = web_api._get_run(run_id)
+            self.assertIsNone(hydrated.get("events_path"))
 
 
 class RunProfilesApiTests(unittest.TestCase):
@@ -1817,6 +1920,7 @@ class CatalogSeedTests(unittest.TestCase):
                 self.assertEqual(row["mode"], "load")
                 self.assertEqual(row["users"], 2)
                 self.assertEqual(row["orders"], 3)
+                self.assertIn("--bounded-load-smoke-policy", row["extra_args"])
 
     def test_catalog_schedules_exist_and_paused(self) -> None:
         from api.app import catalog_seed
@@ -1862,6 +1966,8 @@ class CatalogSeedTests(unittest.TestCase):
         self.assertIn("2", cmd)
         self.assertIn("--orders", cmd)
         self.assertIn("3", cmd)
+        self.assertIn("--bounded-load-smoke-policy", cmd)
+        self.assertIn("--bounded-baseline-min-completed", cmd)
 
     def test_catalog_gates_on_doctor_enforces_websocket_gates_in_command(self) -> None:
         profiles = web_api._list_run_profiles()

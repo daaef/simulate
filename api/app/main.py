@@ -1783,19 +1783,26 @@ def _parse_identity_from_lines(lines: list[str]) -> dict[str, str]:
 
 
 def _hydrate_run_artifacts(run: dict[str, Any]) -> dict[str, Any]:
-    log_path = _safe_path(run.get("log_path"))
+    run_id = int(run["id"])
+    log_path = _run_log_path_for_run(run_id, run.get("log_path"))
     if log_path is None:
         return run
-    
+
+    # Do not hydrate artifact paths for active runs; they may still be writing and must
+    # not inherit stale metadata from reused log names.
+    status = str(run.get("status") or "").strip().lower()
+    if status in {"queued", "pending", "running", "cancelling"}:
+        return run
+
     metadata = _extract_metadata_from_log(log_path)
     artifacts = metadata.get("artifacts", {})
     identity = metadata.get("identity", {})
-    
+
     updates: dict[str, Any] = {}
     for field in ARTIFACT_FIELDS:
         if not run.get(field) and artifacts.get(field):
             updates[field] = artifacts[field]
-    
+
     # Hydrate identity fields if missing
     if not run.get("store_id") and metadata.get("store_id"):
         updates["store_id"] = metadata["store_id"]
@@ -1820,6 +1827,8 @@ def _hydrate_run_artifacts(run: dict[str, Any]) -> dict[str, Any]:
 def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     _update_run(run_id, status="running", started_at=_utc_now(), log_path=str(log_path))
+    # Truncate any previous content for this run-id log file.
+    log_path.write_text("", encoding="utf-8")
     process = subprocess.Popen(
         command,
         cwd=SIMULATOR_WORKDIR,
@@ -4185,12 +4194,36 @@ def _simulation_plan_payload(path: Path) -> dict[str, Any]:
     }
 
 
+def _default_sim_actors_plan_path() -> Path:
+    return Path(PROJECT_DIR) / "sim_actors.json"
+
+
+def _default_sim_actors_plan_payload() -> dict[str, Any] | None:
+    path = _default_sim_actors_plan_path()
+    if not path.is_file():
+        return None
+    try:
+        content = _read_simulation_plan_file(path)
+    except HTTPException:
+        return None
+    name = str(content.get("name") or "sim_actors")
+    return {
+        "id": "sim-actors",
+        "name": name,
+        "path": "sim_actors.json",
+        "content": content,
+    }
+
+
 def _list_simulation_plans_payload() -> dict[str, Any]:
     plans = [
         _simulation_plan_payload(path)
         for path in sorted(_simulation_plans_dir().glob("*.json"))
         if path.is_file()
     ]
+    default_plan = _default_sim_actors_plan_payload()
+    if default_plan and not any(plan.get("path") == "sim_actors.json" for plan in plans):
+        plans.insert(0, default_plan)
     return {"plans": plans}
 
 
@@ -4716,12 +4749,26 @@ def _alerts_payload() -> dict[str, Any]:
     return {"alerts": alerts, "total": len(alerts)}
 
 
+def _run_log_path_for_run(run_id: int, log_path_value: str | None) -> Path | None:
+    path = _safe_path(log_path_value)
+    if path is None:
+        return None
+    expected_name = f"run-{run_id}.log"
+    if path.name != expected_name:
+        return None
+    try:
+        path.resolve().relative_to(LOG_DIR.resolve())
+    except ValueError:
+        return None
+    return path
+
+
 def _run_log_payload(run_id: int, tail: int) -> dict[str, Any]:
     run = _get_run(run_id)
-    log_path = run.get("log_path")
-    if not log_path:
+    path = _run_log_path_for_run(run_id, run.get("log_path"))
+    if path is None:
         return {"run_id": run_id, "log": ""}
-    return {"run_id": run_id, "log": _tail_log(Path(log_path), tail)}
+    return {"run_id": run_id, "log": _tail_log(path, tail)}
 
 
 def _run_artifact_payload(

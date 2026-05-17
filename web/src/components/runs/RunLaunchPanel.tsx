@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { FlowCapability, RunCreateRequest, RunRow, SimulationPlan } from "../../lib/api";
+import type {
+  FlowCapability,
+  RunCreateRequest,
+  RunRow,
+  SimulationPlan,
+  SimulationPlanContent,
+} from "../../lib/api";
+import type { LauncherFieldId } from "../../lib/run-launcher-config";
+import LaunchActorSelect from "./LaunchActorSelect";
+import { launcherFieldFocusHandlers, notifyLauncherField } from "./RunLaunchHelpSidebar";
 
 interface RunLaunchPanelProps {
   flows: string[];
@@ -18,9 +27,11 @@ interface RunLaunchPanelProps {
   onStartRun: () => void;
   onCancelSelectedRun: () => void;
   onSaveAsProfileShortcut: () => void;
+  onFocusField: (fieldId: LauncherFieldId | null) => void;
   commandPreview: string;
   canCancelSelectedRun: boolean;
   planOptions?: SimulationPlan[];
+  planContent?: SimulationPlanContent | null;
 }
 
 function CollapseButton({
@@ -74,9 +85,11 @@ export default function RunLaunchPanel({
   onStartRun,
   onCancelSelectedRun,
   onSaveAsProfileShortcut,
+  onFocusField,
   commandPreview,
   canCancelSelectedRun,
   planOptions = [],
+  planContent = null,
 }: RunLaunchPanelProps) {
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const capability = useMemo(() => flowCapabilities[form.flow] || null, [flowCapabilities, form.flow]);
@@ -84,21 +97,24 @@ export default function RunLaunchPanel({
   const scenarioOptions = capability?.available_scenarios || [];
   const isTraceMode = resolvedMode === "trace";
   const isLoadMode = resolvedMode === "load";
+  const focus = (fieldId: LauncherFieldId) => launcherFieldFocusHandlers(fieldId, onFocusField);
+  const touch = (fieldId: LauncherFieldId) => notifyLauncherField(fieldId, onFocusField);
 
   return (
-    <div className="panel grid" style={{ gap: 12 }}>
+    <div id="launch-settings" className="panel grid" style={{ gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <h2 style={{ margin: 0 }}>Start Run</h2>
-        <CollapseButton isExpanded={isExpanded} onToggle={onToggleExpanded} title="Start Run" />
+        <h2 style={{ margin: 0 }}>Launch settings</h2>
+        <CollapseButton isExpanded={isExpanded} onToggle={onToggleExpanded} title="launch settings" />
       </div>
       {isExpanded ? (
         <>
           <div className="grid three">
-            <label>
-              Flow
+            <label {...focus("flow")}>
+              <div>Flow</div>
               <select
                 value={form.flow}
-                onChange={(event) =>
+                onChange={(event) => {
+                  touch("flow");
                   onFormChange((prev) => {
                     const nextFlow = event.target.value;
                     const nextMode = flowCapabilities[nextFlow]?.resolved_mode || "trace";
@@ -113,8 +129,8 @@ export default function RunLaunchPanel({
                       reject: nextMode === "trace" ? undefined : prev.reject,
                       continuous: nextMode === "trace" ? false : prev.continuous,
                     };
-                  })
-                }
+                  });
+                }}
               >
                 {(flows.length ? flows : ["doctor"]).map((flow) => (
                   <option value={flow} key={flow}>
@@ -123,23 +139,27 @@ export default function RunLaunchPanel({
                 ))}
               </select>
             </label>
-            <label>
-              Timing
+            <label {...focus("timing")}>
+              <div>Timing</div>
               <select
                 value={form.timing}
-                onChange={(event) =>
-                  onFormChange((prev) => ({ ...prev, timing: event.target.value as "fast" | "realistic" }))
-                }
+                onChange={(event) => {
+                  touch("timing");
+                  onFormChange((prev) => ({ ...prev, timing: event.target.value as "fast" | "realistic" }));
+                }}
               >
                 <option value="fast">fast</option>
                 <option value="realistic">realistic</option>
               </select>
             </label>
-            <label>
-              Plan
+            <label {...focus("plan")}>
+              <div>Plan</div>
               <select
                 value={form.plan}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, plan: event.target.value }))}
+                onChange={(event) => {
+                  touch("plan");
+                  onFormChange((prev) => ({ ...prev, plan: event.target.value }));
+                }}
               >
                 <option value="sim_actors.json">sim_actors.json</option>
                 {planOptions.map((plan) => (
@@ -161,11 +181,12 @@ export default function RunLaunchPanel({
           </div>
           {advancedExpanded ? (
             <div className="grid two">
-              <label>
-                Mode Override
+              <label {...focus("mode")}>
+                <div>Mode Override</div>
                 <select
                   value={form.mode || ""}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    touch("mode");
                     onFormChange((prev) => ({
                       ...prev,
                       mode: event.target.value ? (event.target.value as "trace" | "load") : undefined,
@@ -176,22 +197,23 @@ export default function RunLaunchPanel({
                       interval: event.target.value === "trace" ? undefined : prev.interval,
                       reject: event.target.value === "trace" ? undefined : prev.reject,
                       continuous: event.target.value === "trace" ? false : prev.continuous,
-                    }))
-                  }
+                    }));
+                  }}
                 >
                   <option value="">Use flow default</option>
                   <option value="trace">trace</option>
                   <option value="load">load</option>
                 </select>
               </label>
-              <label>
-                Suite (trace only)
+              <label {...focus("suite")}>
+                <div>Suite (trace only)</div>
                 <select
                   value={form.suite || ""}
                   disabled={!isTraceMode}
-                  onChange={(event) =>
-                    onFormChange((prev) => ({ ...prev, suite: event.target.value || undefined }))
-                  }
+                  onChange={(event) => {
+                    touch("suite");
+                    onFormChange((prev) => ({ ...prev, suite: event.target.value || undefined }));
+                  }}
                 >
                   <option value="">Flow default</option>
                   {suiteOptions.map((suite) => (
@@ -201,18 +223,19 @@ export default function RunLaunchPanel({
                   ))}
                 </select>
               </label>
-              <label style={{ gridColumn: "1 / -1" }}>
-                Scenarios (trace only)
+              <label style={{ gridColumn: "1 / -1" }} {...focus("scenarios")}>
+                <div>Scenarios (trace only)</div>
                 <select
                   multiple
                   value={form.scenarios || []}
                   disabled={!isTraceMode}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    touch("scenarios");
                     onFormChange((prev) => ({
                       ...prev,
                       scenarios: Array.from(event.target.selectedOptions).map((option) => option.value),
-                    }))
-                  }
+                    }));
+                  }}
                   style={{ minHeight: 120 }}
                 >
                   {scenarioOptions.map((scenario) => (
@@ -225,165 +248,213 @@ export default function RunLaunchPanel({
             </div>
           ) : null}
           <div className="grid three">
-            <label>
-              Store ID
-              <input
-                type="text"
+            <label {...focus("store")}>
+              <div>Store ID</div>
+              <LaunchActorSelect
+                fieldId="store"
+                planContent={planContent}
                 value={form.store_id}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, store_id: event.target.value }))}
-                placeholder="Optional: store ID"
+                onFocus={() => onFocusField("store")}
+                onBlur={() => onFocusField(null)}
+                onTouch={() => touch("store")}
+                onChange={(store_id) => onFormChange((prev) => ({ ...prev, store_id }))}
               />
             </label>
-            <label>
-              Phone
-              <input
-                type="text"
+            <label {...focus("phone")}>
+              <div>Phone</div>
+              <LaunchActorSelect
+                fieldId="phone"
+                planContent={planContent}
                 value={form.phone}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, phone: event.target.value }))}
-                placeholder="Optional: phone number"
+                onFocus={() => onFocusField("phone")}
+                onBlur={() => onFocusField(null)}
+                onTouch={() => touch("phone")}
+                onChange={(phone) => onFormChange((prev) => ({ ...prev, phone }))}
               />
             </label>
             {isLoadMode ? (
-              <label>
-                Users
+              <label {...focus("users")}>
+                <div>Users</div>
                 <input
                   type="number"
                   min={1}
                   value={form.users ?? ""}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    touch("users");
                     onFormChange((prev) => ({
                       ...prev,
                       users: event.target.value ? Number(event.target.value) : undefined,
-                    }))
-                  }
-                  placeholder="Optional: load users"
+                    }));
+                  }}
+                  placeholder="e.g. 5"
                 />
               </label>
             ) : null}
             {isLoadMode ? (
-              <label>
-                Orders
+              <label {...focus("orders")}>
+                <div>Orders</div>
                 <input
                   type="number"
                   min={1}
                   value={form.orders ?? ""}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    touch("orders");
                     onFormChange((prev) => ({
                       ...prev,
                       orders: event.target.value ? Number(event.target.value) : undefined,
-                    }))
-                  }
-                  placeholder="Optional: load orders"
+                    }));
+                  }}
+                  placeholder="e.g. 50"
                 />
               </label>
             ) : null}
             {isLoadMode ? (
-              <label>
-                Interval (sec)
+              <label {...focus("interval")}>
+                <div>Interval (sec)</div>
                 <input
                   type="number"
                   min={0}
                   step="0.1"
                   value={form.interval ?? ""}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    touch("interval");
                     onFormChange((prev) => ({
                       ...prev,
                       interval: event.target.value ? Number(event.target.value) : undefined,
-                    }))
-                  }
-                  placeholder="Optional: load interval"
+                    }));
+                  }}
+                  placeholder="e.g. 3"
                 />
               </label>
             ) : null}
             {isLoadMode ? (
-              <label>
-                Reject Rate
+              <label {...focus("reject")}>
+                <div>Reject Rate</div>
                 <input
                   type="number"
                   min={0}
                   max={1}
                   step="0.01"
                   value={form.reject ?? ""}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    touch("reject");
                     onFormChange((prev) => ({
                       ...prev,
                       reject: event.target.value ? Number(event.target.value) : undefined,
-                    }))
-                  }
-                  placeholder="Optional: 0..1"
+                    }));
+                  }}
+                  placeholder="e.g. 0.10"
                 />
               </label>
             ) : null}
           </div>
           <div className="grid three">
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={form.all_users}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, all_users: event.target.checked }))}
-              />
-              All Users
-            </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={form.strict_plan || false}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, strict_plan: event.target.checked }))}
-              />
-              Strict Plan
-            </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={form.skip_app_probes || false}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, skip_app_probes: event.target.checked }))}
-              />
-              Skip App Probes
-            </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={form.skip_store_dashboard_probes || false}
-                onChange={(event) =>
-                  onFormChange((prev) => ({ ...prev, skip_store_dashboard_probes: event.target.checked }))
-                }
-              />
-              Skip Store Dashboard Probes
-            </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={form.no_auto_provision}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, no_auto_provision: event.target.checked }))}
-              />
-              No Auto Provision
-            </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={form.post_order_actions || false}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, post_order_actions: event.target.checked }))}
-              />
-              Post-Order Actions
-            </label>
-            {isLoadMode ? (
+            <div className="launcher-field-group" {...focus("all_users")}>
               <label className="checkbox">
                 <input
                   type="checkbox"
-                  checked={form.continuous || false}
-                  onChange={(event) => onFormChange((prev) => ({ ...prev, continuous: event.target.checked }))}
+                  checked={form.all_users}
+                  onChange={(event) => {
+                    touch("all_users");
+                    onFormChange((prev) => ({ ...prev, all_users: event.target.checked }));
+                  }}
                 />
-                Continuous
+                All Users
               </label>
+            </div>
+            <div className="launcher-field-group" {...focus("strict_plan")}>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.strict_plan || false}
+                  onChange={(event) => {
+                    touch("strict_plan");
+                    onFormChange((prev) => ({ ...prev, strict_plan: event.target.checked }));
+                  }}
+                />
+                Strict Plan
+              </label>
+            </div>
+            <div className="launcher-field-group" {...focus("skip_app_probes")}>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.skip_app_probes || false}
+                  onChange={(event) => {
+                    touch("skip_app_probes");
+                    onFormChange((prev) => ({ ...prev, skip_app_probes: event.target.checked }));
+                  }}
+                />
+                Skip App Probes
+              </label>
+            </div>
+            <div className="launcher-field-group" {...focus("skip_store_dashboard_probes")}>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.skip_store_dashboard_probes || false}
+                  onChange={(event) => {
+                    touch("skip_store_dashboard_probes");
+                    onFormChange((prev) => ({ ...prev, skip_store_dashboard_probes: event.target.checked }));
+                  }}
+                />
+                Skip Store Dashboard Probes
+              </label>
+            </div>
+            <div className="launcher-field-group" {...focus("no_auto_provision")}>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.no_auto_provision}
+                  onChange={(event) => {
+                    touch("no_auto_provision");
+                    onFormChange((prev) => ({ ...prev, no_auto_provision: event.target.checked }));
+                  }}
+                />
+                No Auto Provision
+              </label>
+            </div>
+            <div className="launcher-field-group" {...focus("post_order_actions")}>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.post_order_actions || false}
+                  onChange={(event) => {
+                    touch("post_order_actions");
+                    onFormChange((prev) => ({ ...prev, post_order_actions: event.target.checked }));
+                  }}
+                />
+                Post-Order Actions
+              </label>
+            </div>
+            {isLoadMode ? (
+              <div className="launcher-field-group" {...focus("continuous")}>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={form.continuous || false}
+                    onChange={(event) => {
+                      touch("continuous");
+                      onFormChange((prev) => ({ ...prev, continuous: event.target.checked }));
+                    }}
+                  />
+                  Continuous
+                </label>
+              </div>
             ) : null}
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={form.enforce_websocket_gates || false}
-                onChange={(event) => onFormChange((prev) => ({ ...prev, enforce_websocket_gates: event.target.checked }))}
-              />
-              Enforce Websocket Gates
-            </label>
+            <div className="launcher-field-group" {...focus("enforce_websocket_gates")}>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.enforce_websocket_gates || false}
+                  onChange={(event) => {
+                    touch("enforce_websocket_gates");
+                    onFormChange((prev) => ({ ...prev, enforce_websocket_gates: event.target.checked }));
+                  }}
+                />
+                Enforce Websocket Gates
+              </label>
+            </div>
           </div>
           {modeValidationError ? (
             <div className="muted" style={{ color: "var(--danger)" }}>

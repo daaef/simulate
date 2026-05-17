@@ -1745,6 +1745,20 @@ async def _worker(
 ) -> None:
     async with httpx.AsyncClient() as client:
         while True:
+            if (
+                config.SIM_BOUNDED_LOAD_POLICY
+                and not config.bounded_load_baseline_met()
+                and config.bounded_load_summary().get("attempts", 0) >= config.SIM_BOUNDED_BASELINE_MAX_ATTEMPTS
+            ):
+                recorder.record_event(
+                    actor="user",
+                    action="bounded_load_attempt_guard_reached",
+                    category="decision",
+                    scenario="load",
+                    step="bounded_load_attempt_guard_reached",
+                    details=config.bounded_load_summary(),
+                )
+                return
             if work_queue is not None:
                 try:
                     work_queue.get_nowait()
@@ -1769,6 +1783,7 @@ async def _worker(
                         "falling back to bootstrap fixtures."
                     )
 
+            config.bounded_load_mark_order_attempt()
             order = await place_order(
                 client,
                 user_token=user_token,
@@ -1782,6 +1797,28 @@ async def _worker(
             if order is not None:
                 status_queue = watcher.subscribe(order["order_db_id"])
                 try:
+                    if config.bounded_load_should_cancel_in_tail() and random.random() < config.SIM_BOUNDED_TAIL_CANCEL_RATE:
+                        recorder.record_event(
+                            actor="user",
+                            action="bounded_load_tail_cancel_attempt",
+                            category="decision",
+                            scenario="load",
+                            step="bounded_load_tail_cancel_attempt",
+                            order_db_id=int(order["order_db_id"]),
+                            order_ref=str(order["order_ref"]),
+                            details={"tail_cancel_rate": config.SIM_BOUNDED_TAIL_CANCEL_RATE},
+                        )
+                        await cancel_order(
+                            client,
+                            user_token=user_token,
+                            token_source=token_source,
+                            order_db_id=int(order["order_db_id"]),
+                            order_ref=str(order["order_ref"]),
+                            recorder=recorder,
+                            scenario="load",
+                            step="cancel_order",
+                        )
+                        continue
                     completed = await handle_order_payment(
                         client,
                         user_token=user_token,
@@ -1790,6 +1827,17 @@ async def _worker(
                         recorder=recorder,
                         status_queue=status_queue,
                     )
+                    if completed:
+                        baseline_just_met = config.bounded_load_mark_completed()
+                        if baseline_just_met:
+                            recorder.record_event(
+                                actor="main",
+                                action="bounded_load_phase_tail",
+                                category="decision",
+                                scenario="load",
+                                step="bounded_load_phase_transition",
+                                details=config.bounded_load_summary(),
+                            )
                     if completed and config.SIM_RUN_POST_ORDER_ACTIONS:
                         import post_order_actions
 

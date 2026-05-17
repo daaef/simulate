@@ -126,6 +126,17 @@ REJECT_RATE: float = _float("REJECT_RATE", 0.1)
 SIM_ORDERS: int = _int("SIM_ORDERS", 1)
 SIM_CONTINUOUS: bool = _bool("SIM_CONTINUOUS", False)
 
+# Optional bounded-load policy (catalog profile helper). Defaults off.
+SIM_BOUNDED_LOAD_POLICY: bool = False
+SIM_BOUNDED_BASELINE_MIN_COMPLETED: int = 1
+SIM_BOUNDED_BASELINE_MAX_ATTEMPTS: int = 3
+SIM_BOUNDED_TAIL_REJECT_RATE: float | None = None
+SIM_BOUNDED_TAIL_CANCEL_RATE: float = 0.0
+
+_SIM_BOUNDED_BASELINE_COMPLETED: int = 0
+_SIM_BOUNDED_ATTEMPTS: int = 0
+_SIM_BOUNDED_BASELINE_MET: bool = False
+
 USER_DECISION_POLL_INTERVAL_SECONDS: float = _float(
     "USER_DECISION_POLL_INTERVAL_SECONDS", 5.0
 )
@@ -145,6 +156,78 @@ SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS: float = _float(
 ALL_USERS: bool = False
 SIM_STORE_EXPLICIT: bool = False
 SIM_ACTORS: dict[str, Any] = {"defaults": {}, "users": [], "stores": []}
+
+
+def configure_bounded_load_policy(
+    *,
+    enabled: bool,
+    baseline_min_completed: int = 1,
+    baseline_max_attempts: int = 3,
+    tail_reject_rate: float | None = None,
+    tail_cancel_rate: float = 0.0,
+) -> None:
+    global SIM_BOUNDED_LOAD_POLICY, REJECT_RATE
+    global SIM_BOUNDED_BASELINE_MIN_COMPLETED, SIM_BOUNDED_BASELINE_MAX_ATTEMPTS
+    global SIM_BOUNDED_TAIL_REJECT_RATE, SIM_BOUNDED_TAIL_CANCEL_RATE
+    global _SIM_BOUNDED_BASELINE_COMPLETED, _SIM_BOUNDED_ATTEMPTS, _SIM_BOUNDED_BASELINE_MET
+
+    SIM_BOUNDED_LOAD_POLICY = bool(enabled)
+    SIM_BOUNDED_BASELINE_MIN_COMPLETED = max(1, int(baseline_min_completed))
+    SIM_BOUNDED_BASELINE_MAX_ATTEMPTS = max(1, int(baseline_max_attempts))
+    SIM_BOUNDED_TAIL_REJECT_RATE = (
+        float(REJECT_RATE) if (enabled and tail_reject_rate is None) else (None if tail_reject_rate is None else float(tail_reject_rate))
+    )
+    SIM_BOUNDED_TAIL_CANCEL_RATE = max(0.0, min(1.0, float(tail_cancel_rate)))
+
+    _SIM_BOUNDED_BASELINE_COMPLETED = 0
+    _SIM_BOUNDED_ATTEMPTS = 0
+    _SIM_BOUNDED_BASELINE_MET = False
+    if SIM_BOUNDED_LOAD_POLICY:
+        REJECT_RATE = 0.0
+
+
+def bounded_load_mark_order_attempt() -> None:
+    global _SIM_BOUNDED_ATTEMPTS
+    if SIM_BOUNDED_LOAD_POLICY:
+        _SIM_BOUNDED_ATTEMPTS += 1
+
+
+def bounded_load_mark_completed() -> bool:
+    global _SIM_BOUNDED_BASELINE_COMPLETED, _SIM_BOUNDED_BASELINE_MET, REJECT_RATE
+    if not SIM_BOUNDED_LOAD_POLICY:
+        return False
+    _SIM_BOUNDED_BASELINE_COMPLETED += 1
+    if (not _SIM_BOUNDED_BASELINE_MET) and _SIM_BOUNDED_BASELINE_COMPLETED >= SIM_BOUNDED_BASELINE_MIN_COMPLETED:
+        _SIM_BOUNDED_BASELINE_MET = True
+        if SIM_BOUNDED_TAIL_REJECT_RATE is not None:
+            REJECT_RATE = SIM_BOUNDED_TAIL_REJECT_RATE
+        return True
+    return False
+
+
+def bounded_load_baseline_met() -> bool:
+    return bool(_SIM_BOUNDED_BASELINE_MET)
+
+
+def bounded_load_summary() -> dict[str, Any]:
+    return {
+        "enabled": bool(SIM_BOUNDED_LOAD_POLICY),
+        "baseline_min_completed": int(SIM_BOUNDED_BASELINE_MIN_COMPLETED),
+        "baseline_max_attempts": int(SIM_BOUNDED_BASELINE_MAX_ATTEMPTS),
+        "baseline_completed": int(_SIM_BOUNDED_BASELINE_COMPLETED),
+        "attempts": int(_SIM_BOUNDED_ATTEMPTS),
+        "baseline_met": bool(_SIM_BOUNDED_BASELINE_MET),
+        "tail_reject_rate": SIM_BOUNDED_TAIL_REJECT_RATE,
+        "tail_cancel_rate": float(SIM_BOUNDED_TAIL_CANCEL_RATE),
+    }
+
+
+def bounded_load_should_cancel_in_tail() -> bool:
+    return bool(
+        SIM_BOUNDED_LOAD_POLICY
+        and _SIM_BOUNDED_BASELINE_MET
+        and SIM_BOUNDED_TAIL_CANCEL_RATE > 0.0
+    )
 
 # ---------------------------------------------------------------------------
 # sim_actors.json loader

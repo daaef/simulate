@@ -11,6 +11,8 @@ import AdminDashboard from "../../../components/AdminDashboard";
 import DeleteRunModal from "../../../components/runs/DeleteRunModal";
 import FlowPlannerGuide from "../../../components/runs/FlowPlannerGuide";
 import RecentRunsTable from "../../../components/runs/RecentRunsTable";
+import ActiveRunsStrip from "../../../components/runs/ActiveRunsStrip";
+import RunLaunchHelpSidebar from "../../../components/runs/RunLaunchHelpSidebar";
 import RunLaunchPanel from "../../../components/runs/RunLaunchPanel";
 import RunLiveConsole from "../../../components/runs/RunLiveConsole";
 import RunProfilesPanel from "../../../components/runs/RunProfilesPanel";
@@ -39,6 +41,7 @@ import {
   type RunRow,
   type SimulationPlan
 } from "../../../lib/api";
+import type { LauncherFieldId } from "../../../lib/run-launcher-config";
 
 // Architecture content (from ARCHITECTURE.md)
 const ARCHITECTURE_CONTENT = `# Complete Order Flow Simulator
@@ -407,7 +410,8 @@ export default function App() {
   const [deleteConfirmRun, setDeleteConfirmRun] = useState<RunRow | null>(null);
 
   const [isStartRunExpanded, setIsStartRunExpanded] = useState(true);
-  const [isLiveConsoleExpanded, setIsLiveConsoleExpanded] = useState(true);
+  const [isLiveConsoleExpanded, setIsLiveConsoleExpanded] = useState(false);
+  const [focusedFieldId, setFocusedFieldId] = useState<LauncherFieldId | null>(null);
   const profilesSectionRef = useRef<HTMLDivElement | null>(null);
   const profileNameInputRef = useRef<HTMLInputElement | null>(null);
   const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
@@ -540,6 +544,7 @@ export default function App() {
       setLogText("");
       return;
     }
+    setLogText("");
     const status = (runs.find((run) => run.id === selectedRunId)?.status || "").toLowerCase();
     const shouldPoll = isActiveStatus(status);
     const refreshLog = () => {
@@ -559,6 +564,39 @@ export default function App() {
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? null,
     [runs, selectedRunId]
+  );
+
+  const activeRuns = useMemo(
+    () => runs.filter((run) => isActiveStatus(run.status)),
+    [runs]
+  );
+
+  useEffect(() => {
+    if (activeRuns.length === 0) {
+      setIsLiveConsoleExpanded(false);
+    }
+  }, [activeRuns.length]);
+
+  function onSelectActiveRun(runId: number) {
+    setSelectedRunId(runId);
+    setIsLiveConsoleExpanded(true);
+  }
+
+  const selectedPlanContent = useMemo(
+    () => simulationPlans.find((plan) => plan.path === form.plan)?.content ?? null,
+    [simulationPlans, form.plan]
+  );
+
+  const launcherHelpContext = useMemo(
+    () => ({
+      flows,
+      flowCapabilities,
+      form,
+      resolvedMode,
+      planOptions: simulationPlans,
+      planContent: selectedPlanContent,
+    }),
+    [flows, flowCapabilities, form, resolvedMode, simulationPlans, selectedPlanContent]
   );
 
   const commandPreview = useMemo(() => {
@@ -613,6 +651,7 @@ export default function App() {
         phone: form.phone || undefined,
       });
       setSelectedRunId(created.id);
+      setIsLiveConsoleExpanded(true);
       const [runsPayload, summaryPayload] = await Promise.all([
         fetchRuns(RUNS_PER_PAGE, runsOffset),
         fetchDashboardSummary()
@@ -812,8 +851,6 @@ export default function App() {
     }
   }
 
-  const logLines = logText.split("\n").filter((line) => line.length > 0);
-
   function onSaveAsProfileShortcut() {
     profilesSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     window.setTimeout(() => {
@@ -938,37 +975,50 @@ export default function App() {
 
         {canCreateRuns ? (
             <CollapsibleSection title="Start Run" defaultExpanded={true}>
-              <div className="grid two" style={{ alignItems: "start" }}>
-                <RunLaunchPanel
-                  flows={flows}
-                  flowCapabilities={flowCapabilities}
-                  resolvedMode={resolvedMode}
-                  modeValidationError={modeValidationError}
-                  form={form}
-                  isSubmitting={isSubmitting}
-                  selectedRun={selectedRun}
-                  isExpanded={isStartRunExpanded}
-                  onToggleExpanded={() => setIsStartRunExpanded(!isStartRunExpanded)}
-                  onFormChange={(updater) => setForm(updater)}
-                  onStartRun={onStartRun}
-                  onCancelSelectedRun={() => selectedRun && onCancelRun(selectedRun.id)}
-                  onSaveAsProfileShortcut={onSaveAsProfileShortcut}
-                  commandPreview={commandPreview}
-                  hasAdvancedOverrides={
-                    Boolean(form.mode) ||
-                    Boolean(form.suite) ||
-                    Boolean(form.scenarios && form.scenarios.length > 0)
-                  }
-                  canCancelSelectedRun={Boolean(selectedRun && isActiveStatus(selectedRun.status))}
-                  planOptions={simulationPlans}
+              <div className="grid start-run-stack" style={{ gap: 16 }}>
+                <ActiveRunsStrip
+                  runs={activeRuns}
+                  selectedRunId={selectedRunId}
+                  onSelectRun={onSelectActiveRun}
                 />
                 <RunLiveConsole
                   selectedRun={selectedRun}
-                  logLines={logLines}
+                  log={logText}
                   isExpanded={isLiveConsoleExpanded}
                   onToggleExpanded={() => setIsLiveConsoleExpanded(!isLiveConsoleExpanded)}
                   logClassForLine={logClassForLine}
                 />
+                <div className="launch-config-row">
+                  <RunLaunchPanel
+                    flows={flows}
+                    flowCapabilities={flowCapabilities}
+                    resolvedMode={resolvedMode}
+                    modeValidationError={modeValidationError}
+                    form={form}
+                    isSubmitting={isSubmitting}
+                    selectedRun={selectedRun}
+                    isExpanded={isStartRunExpanded}
+                    onToggleExpanded={() => setIsStartRunExpanded(!isStartRunExpanded)}
+                    onFormChange={(updater) => setForm(updater)}
+                    onStartRun={onStartRun}
+                    onCancelSelectedRun={() => selectedRun && onCancelRun(selectedRun.id)}
+                    onSaveAsProfileShortcut={onSaveAsProfileShortcut}
+                    onFocusField={setFocusedFieldId}
+                    commandPreview={commandPreview}
+                    hasAdvancedOverrides={
+                      Boolean(form.mode) ||
+                      Boolean(form.suite) ||
+                      Boolean(form.scenarios && form.scenarios.length > 0)
+                    }
+                    canCancelSelectedRun={Boolean(selectedRun && isActiveStatus(selectedRun.status))}
+                    planOptions={simulationPlans}
+                    planContent={selectedPlanContent}
+                  />
+                  <RunLaunchHelpSidebar
+                    focusedFieldId={focusedFieldId}
+                    helpContext={launcherHelpContext}
+                  />
+                </div>
               </div>
             </CollapsibleSection>
         ) : (
@@ -1007,6 +1057,7 @@ export default function App() {
         ) : null}
 
 
+        <div id="flow-planner-guide">
         <CollapsibleSection title="Flow Planner & Command Guide" defaultExpanded={false}>
           <FlowPlannerGuide
             guideTab={guideTab}
@@ -1015,6 +1066,7 @@ export default function App() {
             simulatorGuideContent={SIMULATOR_GUIDE_CONTENT}
           />
         </CollapsibleSection>
+        </div>
 
         <CollapsibleSection title="Recent Runs" defaultExpanded={true}>
           <RecentRunsTable
@@ -1024,6 +1076,7 @@ export default function App() {
             runsPerPage={RUNS_PER_PAGE}
             onPageChange={setRunsOffset}
             onViewRun={(runId) => router.push(`/runs/${runId}`)}
+            onWatchRun={(runId) => setSelectedRunId(runId)}
             onCancelRun={onCancelRun}
             onDeleteRunRequest={setDeleteConfirmRun}
             isActiveStatus={isActiveStatus}

@@ -10,6 +10,7 @@ import time
 from typing import Any, TYPE_CHECKING
 
 import config
+from decision_reasons import is_informational_decision_reason
 from rich.console import Console
 from health import ascii_bar, build_health_summary
 from interaction_catalog import catalogue_payload
@@ -873,10 +874,14 @@ class RunRecorder:
         )
 
         for item in important:
+            status = str(item.get("status", ""))
+            reason_code = item.get("reason_code") or item.get("reason")
+            if is_informational_decision_reason(status=status, reason_code=reason_code):
+                status = f"info ({status})"
             lines.append(
                 _table_row(
                     [
-                        item.get("status", ""),
+                        status,
                         item.get("action", ""),
                         item.get("reason", ""),
                         item.get("message", ""),

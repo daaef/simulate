@@ -50,7 +50,7 @@ PROFILE_SPECS: list[dict[str, Any]] = [
     {
         "catalog_slug": "bounded-load-smoke",
         "name": "Bounded load smoke",
-        "description": "Low-volume load smoke (2 users, 3 orders, 2s interval). Short runtime; still hits load-mode paths.",
+        "description": "Low-volume load smoke with guaranteed accepted baseline (>=1 completed) before reject/cancel tail checks.",
         "flow": "load",
         "plan": "sim_actors.json",
         "timing": "fast",
@@ -60,7 +60,18 @@ PROFILE_SPECS: list[dict[str, Any]] = [
         "users": 2,
         "orders": 3,
         "interval": 2.0,
-        "reject": 0.1,
+        "reject": 0.35,
+        "extra_args": [
+            "--bounded-load-smoke-policy",
+            "--bounded-baseline-min-completed",
+            "1",
+            "--bounded-baseline-max-attempts",
+            "3",
+            "--bounded-tail-reject-rate",
+            "0.35",
+            "--bounded-tail-cancel-rate",
+            "0.15",
+        ],
         "enforce_websocket_gates": False,
     },
     {

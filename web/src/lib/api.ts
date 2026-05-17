@@ -430,6 +430,11 @@ export type LatestRunIssue = {
   route?: string | null;
 };
 
+export type RunFindings = {
+  critical: LatestRunIssue[];
+  operational: LatestRunIssue[];
+};
+
 export type LatestRunOverview = {
   run: (RunRow & { duration_seconds?: number | null }) | null;
   metrics: RunMetrics | null;
@@ -439,6 +444,7 @@ export type LatestRunOverview = {
     websocket: Partial<WebSocketProtocolSummary>;
   };
   lifecycle: LifecycleStep[];
+  findings?: RunFindings;
   issues: LatestRunIssue[];
   run_meta?: Record<string, unknown>;
 };

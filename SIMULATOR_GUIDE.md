@@ -6,9 +6,12 @@ Docker note: this stack runs the Next.js web app with `next start` from the buil
 
 **Capability catalog:** For an exhaustive reference to flows, suites, scenarios, CLI flags, run-plan JSON keys, environment variables, and web/API launch parity, see [docs/SIMULATOR_CAPABILITIES.md](docs/SIMULATOR_CAPABILITIES.md).
 
+**Simulation test guide (run efficiency):** For a practical operator playbook focused on choosing the right run quickly and using suites/scenarios/flags efficiently, see [docs/SIMULATION_TEST_GUIDE.md](docs/SIMULATION_TEST_GUIDE.md).
+
 **GUI manual testing:** For a from-the-ground-up checklist of the web UI (every Start Run control, client-side validation, profiles, run detail, and role expectations), see [docs/GUI_TESTING.md](docs/GUI_TESTING.md).
 
 **Ideas backlog:** For GUI and functional improvement ideas (not roadmap commitments), see [docs/IDEAS_GUI_AND_FUNCTIONAL.md](docs/IDEAS_GUI_AND_FUNCTIONAL.md).
+**Bounded load fix deep-dive:** For root cause and before/after examples of the bounded load smoke redesign plus precedence fix, see [docs/BOUNDED_LOAD_SMOKE_FIX_EXPLAINER.md](docs/BOUNDED_LOAD_SMOKE_FIX_EXPLAINER.md).
 
 ## Operator observability (read first)
 
@@ -117,11 +120,57 @@ Redirects to `/overview` when a session cookie exists, otherwise `/auth/login`.
 
 **Refresh:** Health poll ~10s; runs + summary poll ~5s while page is open.
 
+### Start Run: Execution Impact assistant
+
+The Runs launcher now shows an **Execution Impact** panel directly under command preview.
+
+- **Default view:** concise summary (2–4 lines) of what the selected command will execute.
+- **Expanded view:** scenario/suite behavior, mode mechanics, gate/probe policy, prerequisites, expected artifacts, and likely failure signatures.
+- **Blocking warnings:** invalid combinations (for example trace + continuous, load + suite/scenarios, reject out of range) appear in the panel before launch and align with launcher submit validation.
+
+How to interpret messages:
+
+- **Informational context:** expected non-failure behavior (for example `unsupported_profile_fetch_contract`) is context, not outage.
+- **Warning context:** strict toggles (for example websocket gate enforcement) may intentionally increase fail-fast behavior.
+- **Blocking context:** configuration conflicts that must be corrected before run start.
+
+### Start Run: load vs trace meaning (operator shorthand)
+
+- `load` answers: "does the system hold up under many users/orders over time?" qualifier: use for throughput, race conditions, intermittent failures, and resilience under concurrency.
+- `trace` suites/scenarios answer: "did each specific workflow/API behavior pass deterministically?" qualifier: use for branch-level verification and targeted reproduction.
+- Trace overlap guidance: broad suites (`doctor`, `full`) cover many targeted flows; use targeted flows mainly to isolate failures after a broad run.
+
+### Start Run: input example placeholders
+
+Each launcher control now includes an example hint. Typical examples:
+
+| Control | Example |
+| --- | --- |
+| Flow | `doctor` |
+| Timing | `fast` |
+| Plan | `sim_actors.json` |
+| Mode override | `trace` |
+| Suite | `doctor` |
+| Scenarios | `completed`, `store_reject` |
+| Store ID | `FZY_926025` |
+| Phone | `+2348166675609` |
+| Users | `5` |
+| Orders | `50` |
+| Interval | `3` |
+| Reject rate | `0.10` |
+| Continuous | on for soak tests |
+| Strict plan | on when you require strict plan validation |
+| Skip probes | on only when intentionally reducing diagnostic coverage |
+| No auto provision | on for pure environment-readiness checks |
+| Post-order actions | on when receipt/review/reorder verification is required |
+| Enforce websocket gates | on when missing realtime events should hard-fail the run |
+
 ### Route: `/runs/{id}`
 
 Run detail: summary, log download, artifacts (`report.md`, `story.md`, `events.json`), metrics—deep dive after a failure.
+Run detail data is strictly scoped to the requested run id: active runs do not backfill artifact paths from historical logs, and `/runs/{id}` reads only `run-{id}.log` metadata plus that run row paths.
 
-**Overview tab:** Shows aggregate metrics plus a **metrics-first dashboard** (Business default view, segmented Operations/Engineering views, and collapsed technical action drill-down with action-key search). It also renders side-by-side findings cards: **Critical Findings** (server/API availability failures) and **Operational Findings** (non-critical warnings/info from the same run). `GET /api/v1/runs/{id}/metrics` returns `action_counts` as `{ action, count }[]` (every distinct `action` in `events.json`, sorted by count then name), and the dashboard derives KPI cards from these counts and existing totals/actors. `top_actions` remains a capped top-10 map for older consumers. Findings for a specific run are available through `GET /api/v1/overview/runs/{run_id}` (latest-run summary remains `GET /api/v1/overview/latest-run`). Misleading placeholder charts were removed; use **Traffic** for the raw event stream and **Console** for process output.
+**Overview tab:** Shows aggregate metrics plus a **metrics-first dashboard** (Business default view, segmented Operations/Engineering views, and collapsed technical action drill-down with action-key search). It also renders side-by-side findings cards from `findings.critical` and `findings.operational` on `GET /api/v1/overview/runs/{run_id}` (flat `issues` is critical-only). Critical includes server/API/websocket availability and websocket event gaps; operational covers missing tokens, probes, coupons, and non-enforced gate bypass warnings. `GET /api/v1/runs/{id}/metrics` returns `action_counts` as `{ action, count }[]` (every distinct `action` in `events.json`, sorted by count then name). Process output is stored per run in `run-{id}.log`; the **Console** tab polls while the run is active. Use **Traffic** for the raw event stream.
 
 ### Route: `/config`
 
@@ -130,6 +179,7 @@ Edit GUI-owned plans, integration mappings, **Email notifications** panel (non-s
 ### Route: `/schedules`
 
 Campaign-first schedules, previews, manual trigger, pause/resume, disable/enable, soft delete/restore. Auto-refresh ~15s and on window focus. **Semantics are protected**—observability work only clarifies labels/errors.
+The page also supports editing existing schedules through an **Edit** action that loads the selected schedule into the form, then saves with `PUT /api/v1/schedules/{id}`.
 
 ### Route: `/archives` and `/retention`
 
@@ -161,6 +211,7 @@ Generated artifacts per run:
 - `runs/<timestamp>/story.md`: narrative scenario summary.
 - `events.json` includes decision records (`called`, `blocked`, `skipped`, `recovered`, `failed`) with reason code/message, next action, and whether the run continued.
 - Overview page behavior: Latest Run `Critical Findings` is filtered to server/API availability failures (`5xx`, transport/network, websocket connection availability). Missing-information or business-availability conditions (for example missing token, no saved card, no coupon) stay in `events.json`/`report.md`/`story.md` but are intentionally excluded from Overview.
+- Decision-category skips/recoveries for expected reasons (for example `unsupported_profile_fetch_contract`, `no_customer_id`, `missing_*`, `missing_auth_token`) are treated as informational context, not failures, in overview counters/findings and report decision summaries.
 - Overview `Critical Findings` rows include failed route/endpoint when available, and the Latest Run hero surfaces context chips such as `profile:<name>`, `schedule:<name>`, and integration `route:<project/environment>`.
 
 Configuration precedence:
@@ -798,6 +849,8 @@ Scheduling procedure:
 #### Catalog presets (paused templates)
 
 On database init, the API seeds six **catalog** run profiles (`daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and one **paused** daily schedule per profile (08:00 UTC). They appear in **Runs** (profiles may show a **Catalog** label) and **Schedules**; resume a schedule when you want that preset to run automatically. Catalog profiles and catalog-backed schedules are not deletable via the API (403). To disable this seed entirely, set env `SIM_SKIP_CATALOG_SEED` to `1`, `true`, or `yes` before starting the API.
+
+`bounded-load-smoke` is now a **phased bounded load** profile: it enforces a completed-order baseline first (`>=1`) before applying reject/cancel tail pressure. If baseline cannot be met within the configured bound, the run fails with `accepted_baseline_not_met`.
 
 Key endpoints:
 

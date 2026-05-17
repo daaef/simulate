@@ -318,6 +318,27 @@ Review unrelated existing auth-session worktree changes before starting the next
   - Completion evidence: `web/package.json` (`react-markdown`, `remark-gfm`), `web/src/app/page.tsx` markdown + API-call/event-stream views, `web/src/app/globals.css` markdown/method badge styles, `api/app/main.py` metrics/events normalization.
 
 - [x] Fix long-document freeze in report/events inspector
+
+### Phase 17: Run-ID Data Isolation + Schedule Editing
+
+- [x] Enforce strict run artifact/log ownership by run id
+  - Dependency: Reproduce stale artifact bleed in `/runs/:id` and inspect hydration + log append behavior.
+  - Notes: Ensure in-progress runs cannot hydrate artifact metadata from old run logs; ensure metadata hydration only reads `run-{id}.log`.
+  - Completion evidence: `api/app/main.py` now truncates `run-{id}.log` at launch and skips artifact hydration for active statuses; hydration uses `_run_log_path_for_run` guard. Added `test_running_run_does_not_hydrate_artifacts_from_old_log_content`.
+
+- [x] Add edit capability for existing schedules in web UI
+  - Dependency: Existing `PUT /api/v1/schedules/{id}` API.
+  - Notes: Allow loading an existing schedule into the form, updating fields, and saving changes.
+  - Completion evidence: `web/src/app/(app)/schedules/page.tsx` adds `Edit` action, form hydration from selected schedule, save via `updateSchedule`, and cancel-edit reset flow.
+
+- [x] Update docs + tracker + verification
+  - Dependency: Implementation complete.
+  - Notes: Update `README.md` and `SIMULATOR_GUIDE.md` for schedule edit flow and run-data binding behavior; run backend/frontend tests.
+  - Completion evidence: Docs updated in both files; backend tests pass (`RunDeletionSafetyTests` target + `SchedulesApiTests`). Frontend build blocked locally (`next: command not found`).
+
+## Next Immediate Task
+
+Run full frontend verification in the intended container/runtime where Next.js is installed, then manually smoke-test `/runs/{id}` and `/schedules` edit flow.
   - Dependency: Phase 15 monitoring UI.
   - Notes: Removed heavy all-tab polling, added lazy tab loading, paginated compact events API payloads, and chunked markdown rendering for very long reports.
   - Completion evidence: `web/src/app/page.tsx` lazy-load effects + pagination/chunk controls, `api/app/main.py` paginated `events` artifact endpoint with compact rows, container verification shows `metrics_total=336` and events page `120/336`.

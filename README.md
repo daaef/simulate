@@ -62,21 +62,25 @@ The authenticated app shell includes active route highlighting for `Overview`, `
 - `Overview`: status cards, run status and success charts, flow distribution, failure trend, archive/purge backlog, schedule health, and alerts.
   - **Latest run metrics dashboard:** Under the latest-run hero, an expandable metrics dashboard shows Business KPIs by default with a segmented switch for Business, Operations, and Engineering views. The technical action list remains available as a collapsed drill-down with action-key search. Run metrics from `GET /api/v1/runs/{id}/metrics` still include `action_counts` (complete list) plus `top_actions` (top 10 only, unchanged for compatibility).
   - Latest Run Overview `Critical Findings` is intentionally server-focused: it shows server/API availability failures (`5xx`, transport/network, websocket availability) and excludes expected missing-information/business-availability states (for example missing token, no saved card, no coupon). Full raw findings still remain in `events.json`, `report.md`, and `story.md`.
+  - Decision events with expected non-failure reasons (for example `unsupported_profile_fetch_contract`, `no_customer_id`, and `missing_*`/`missing_auth_token` preflight skips) are classified as informational context and do not count toward failure badges/counters.
   - `Critical Findings` now includes the failed API route/endpoint when available.
   - Latest Run hero now shows run-context chips when present: `profile:<name>`, `schedule:<name>`, and integration route context (`route:<project/environment>`).
 - `Runs`: launch, cancel, replay, delete completed runs, and inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles.
   - Run detail **Overview** tab: summary counts plus a metrics dashboard (Business default, Operations/Engineering switch, collapsed technical drill-down with action-key search).
-  - Run detail Overview now includes side-by-side findings panels: **Critical Findings** (server/API availability failures) and **Operational Findings** (non-critical warnings/info from the same run).
-  - Run detail findings are loaded from `GET /api/v1/overview/runs/{run_id}`; latest-run overview remains available at `GET /api/v1/overview/latest-run`.
+  - Run detail Overview includes side-by-side **Critical Findings** (server/API/websocket availability) and **Operational Findings** (business preconditions, probes, gate bypass warnings). Both buckets come from `findings` on `GET /api/v1/overview/runs/{run_id}` (`issues` remains critical-only for compatibility).
+  - Each web run writes stdout to its own `run-{id}.log`. **Live Console** on `/runs` follows the selected or launched run (use **Console** on a table row to watch without leaving the page). Run detail **Console** polls while the run is active.
+  - Run detail artifacts are run-id scoped: `/runs/{id}` now reads only that run's own log/artifact metadata and active runs do not hydrate event/report/story paths until artifacts are produced for that same run.
   - Per-endpoint charts are still not shown until wired from real traffic data; use **Traffic** and **Console** tabs for depth.
   - Runs now show launch attribution (`trigger_source`, `trigger_label`, optional `profile_id`) in list/console/detail views.
   - Start Run now includes a `Save as profile` shortcut under command preview that scrolls/focuses the Saved Profiles name input.
   - Plan selection is dropdown-only in Start Run: `sim_actors.json` is always available and GUI plans are appended when present; free-text plan entry has been removed.
   - Start Run now uses flow capability metadata from `/api/v1/flows` and renders only the inputs valid for the resolved `Flow -> Mode -> Suite/Scenarios` context.
   - Advanced Mode Overrides can explicitly set `mode`, `suite`, and multi-scenario selections. The command preview reflects these typed fields directly (not hidden `extra_args`).
+  - Start Run now includes an inline **Execution Impact** assistant under command preview: concise default summary, expandable detailed behavior, and blocking warnings aligned with launcher validation.
+  - Every Start Run control now shows example placeholder/help values (flow, suite/scenarios, load knobs, toggles) to speed up correct run setup.
   - Trace-context inputs: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, websocket gate toggle.
   - Load-context inputs: `users`, `orders`, `interval`, `reject`, `continuous`, `all_users`, plus shared identity/provision toggles.
-- `Schedules`: creates campaign-first schedules (simple requests are normalized to campaign execution), supports period-specific run slots, all-day mode, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, pause/resume, disable/enable, and soft delete/restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
+- `Schedules`: creates campaign-first schedules (simple requests are normalized to campaign execution), supports period-specific run slots, all-day mode, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, edit, pause/resume, disable/enable, and soft delete/restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
 - `Archives`: searchable archive/raw-purge candidate browsing with retained run summaries.
 - `Retention`: policy windows, archive/purge queues, retained-summary fields, and purge-safety state.
 - `Admin`: manage users under `/admin/users` and configure system policies (including allowed scheduling timezones) under `/admin/system`.
@@ -121,7 +125,7 @@ Daily recommended run:
 python3 -m simulate doctor --plan sim_actors.json --timing fast
 ```
 
-See `SIMULATOR_GUIDE.md` for the full command matrix, scenarios, flags, artifacts, and common failure signatures.
+See `SIMULATOR_GUIDE.md` for the full command matrix, scenarios, flags, artifacts, and common failure signatures. For an operator-first run-efficiency playbook (what to run, when, and why), see `docs/SIMULATION_TEST_GUIDE.md`.
 
 If doctor/trace runs fail with websocket gate errors and websocket coverage shows `HTTP 502` on `wss://lastmile.../ws/soc/...`, the fix is on the upstream `lastmile` reverse proxy/gateway (not this repo's nginx). Use:
 
@@ -158,6 +162,8 @@ Admins can edit GUI-owned plans from `Config`. Use the saved plan path, for exam
 ### Catalog run profiles and paused schedules
 
 When the API starts and initializes its database, it **idempotently** upserts six built-in run profiles (stable `catalog_slug` values: `daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and a matching **paused** daily schedule for each (08:00 UTC, one slot). Use **Resume** in `/schedules` when you want automatic triggers. Catalog profiles and their catalog schedules cannot be deleted from the API (HTTP 403); adjust copies in user-owned profiles/schedules instead.
+
+`bounded-load-smoke` now runs with a phased bounded policy: it guarantees at least one accepted/completed order before reject/cancel tail behavior, and fails with `accepted_baseline_not_met` when the baseline cannot be achieved within configured attempts. See `docs/BOUNDED_LOAD_SMOKE_FIX_EXPLAINER.md`.
 
 - **Skip seeding:** set `SIM_SKIP_CATALOG_SEED` to `1`, `true`, or `yes` if you must avoid touching catalog rows (for example some tests or air-gapped installs).
 
@@ -202,9 +208,11 @@ Run/schedule failure emails now start with launch context in fixed order: `Profi
 ## Docs
 
 - `SIMULATOR_GUIDE.md`: Operator guide (CLI + web UI + auth/roles). Start with **Operator observability** and **Operator GUI (web)** for health vocabulary, flow ladder, and screen-by-screen UI semantics.
+- `docs/SIMULATION_TEST_GUIDE.md`: Run-efficiency guide focused on selecting suites/scenarios/flags quickly and executing simulations with minimal wasted runs.
 - `docs/SIMULATOR_CAPABILITIES.md`: Capability catalog (every flow, mode, suite, scenario, CLI flag, run-plan key, environment variable, and web/API run-field mapping).
 - `docs/GUI_TESTING.md`: Manual test guide for the operator web UI (Runs launcher, profiles, validation, roles, other routes).
 - `docs/IDEAS_GUI_AND_FUNCTIONAL.md`: Brainstorm backlog for GUI and simulator/product improvements (not committed work).
+- `docs/BOUNDED_LOAD_SMOKE_FIX_EXPLAINER.md`: Deep-dive on bounded-load smoke redesign, precedence fix, before/after behavior, and troubleshooting.
 - `ARCHITECTURE.md`: System architecture and component responsibilities.
 - `docs/deployment.md`: Production deployment runbook (SSH + GitHub Actions + Docker Compose).
 

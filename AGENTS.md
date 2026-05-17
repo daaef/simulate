@@ -14,3 +14,6 @@ Session-start habit for non-trivial work:
 
 Context hygiene:
 - If a user prompt is clearly unrelated to this repo/problem context, advise moving to a new chat immediately and do not proceed.
+
+Question style:
+- Ask questions using simple wording and a short concrete example so intent is immediately clear.

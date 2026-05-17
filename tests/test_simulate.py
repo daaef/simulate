@@ -313,6 +313,85 @@ class RunPlanTests(unittest.TestCase):
                 for name, value in previous.items():
                     setattr(config, name, value)
 
+    def test_bounded_load_policy_transitions_to_tail_after_baseline(self) -> None:
+        import config
+
+        previous = (
+            config.REJECT_RATE,
+            config.SIM_BOUNDED_LOAD_POLICY,
+            config.SIM_BOUNDED_BASELINE_MIN_COMPLETED,
+            config.SIM_BOUNDED_BASELINE_MAX_ATTEMPTS,
+            config.SIM_BOUNDED_TAIL_REJECT_RATE,
+            config.SIM_BOUNDED_TAIL_CANCEL_RATE,
+        )
+        try:
+            config.REJECT_RATE = 0.35
+            config.configure_bounded_load_policy(
+                enabled=True,
+                baseline_min_completed=1,
+                baseline_max_attempts=3,
+                tail_reject_rate=0.35,
+                tail_cancel_rate=0.15,
+            )
+            self.assertEqual(config.REJECT_RATE, 0.0)
+            self.assertFalse(config.bounded_load_baseline_met())
+            config.bounded_load_mark_order_attempt()
+            transitioned = config.bounded_load_mark_completed()
+            self.assertTrue(transitioned)
+            self.assertTrue(config.bounded_load_baseline_met())
+            self.assertEqual(config.REJECT_RATE, 0.35)
+            summary = config.bounded_load_summary()
+            self.assertTrue(summary["baseline_met"])
+            self.assertEqual(summary["baseline_completed"], 1)
+            self.assertEqual(summary["attempts"], 1)
+        finally:
+            (
+                config.REJECT_RATE,
+                config.SIM_BOUNDED_LOAD_POLICY,
+                config.SIM_BOUNDED_BASELINE_MIN_COMPLETED,
+                config.SIM_BOUNDED_BASELINE_MAX_ATTEMPTS,
+                config.SIM_BOUNDED_TAIL_REJECT_RATE,
+                config.SIM_BOUNDED_TAIL_CANCEL_RATE,
+            ) = previous
+            config.configure_bounded_load_policy(enabled=False)
+
+    def test_bounded_load_baseline_guard_summary_when_not_met(self) -> None:
+        import config
+
+        previous = (
+            config.REJECT_RATE,
+            config.SIM_BOUNDED_LOAD_POLICY,
+            config.SIM_BOUNDED_BASELINE_MIN_COMPLETED,
+            config.SIM_BOUNDED_BASELINE_MAX_ATTEMPTS,
+            config.SIM_BOUNDED_TAIL_REJECT_RATE,
+            config.SIM_BOUNDED_TAIL_CANCEL_RATE,
+        )
+        try:
+            config.REJECT_RATE = 0.2
+            config.configure_bounded_load_policy(
+                enabled=True,
+                baseline_min_completed=1,
+                baseline_max_attempts=2,
+                tail_reject_rate=0.2,
+                tail_cancel_rate=0.0,
+            )
+            config.bounded_load_mark_order_attempt()
+            config.bounded_load_mark_order_attempt()
+            summary = config.bounded_load_summary()
+            self.assertFalse(summary["baseline_met"])
+            self.assertEqual(summary["attempts"], 2)
+            self.assertEqual(summary["baseline_max_attempts"], 2)
+        finally:
+            (
+                config.REJECT_RATE,
+                config.SIM_BOUNDED_LOAD_POLICY,
+                config.SIM_BOUNDED_BASELINE_MIN_COMPLETED,
+                config.SIM_BOUNDED_BASELINE_MAX_ATTEMPTS,
+                config.SIM_BOUNDED_TAIL_REJECT_RATE,
+                config.SIM_BOUNDED_TAIL_CANCEL_RATE,
+            ) = previous
+            config.configure_bounded_load_policy(enabled=False)
+
     def test_config_plan_path_prefers_existing_cwd_relative_path(self) -> None:
         import config
 
@@ -1668,6 +1747,36 @@ class RecorderTests(unittest.TestCase):
         validate_websocket_events(recorder)
         codes = [issue["code"] for issue in recorder.issues]
         self.assertIn("websocket_event_missing", codes)
+
+    def test_decision_section_labels_informational_reasons_as_info(self) -> None:
+        recorder = RunRecorder.bootstrap()
+        recorder.record_decision(
+            actor="user",
+            action="probe_saved_cards",
+            status="skipped",
+            reason="no_customer_id",
+            message="Saved cards were skipped because this user has no Stripe/customer ID.",
+            reason_code="no_customer_id",
+            reason_message="Saved cards were skipped because this user has no Stripe/customer ID.",
+            next_action="skip_api_call",
+            run_continued=True,
+        )
+        recorder.record_decision(
+            actor="store",
+            action="websocket_gate",
+            status="failed",
+            reason="websocket_gate_timeout",
+            message="Websocket gate timed out.",
+            reason_code="websocket_gate_timeout",
+            reason_message="Websocket gate timed out.",
+            next_action="abort_scenario",
+            run_continued=False,
+        )
+
+        report = recorder._render_markdown()
+
+        self.assertIn("info (skipped)", report)
+        self.assertIn("| failed | websocket_gate |", report)
 
     def test_write_outputs_all_artifacts(self) -> None:
         recorder = RunRecorder.bootstrap()

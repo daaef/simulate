@@ -10,6 +10,7 @@ interface RecentRunsTableProps {
   runsPerPage: number;
   onPageChange: (newOffset: number) => void;
   onViewRun: (runId: number) => void;
+  onWatchRun?: (runId: number) => void;
   onCancelRun: (runId: number) => void;
   onDeleteRunRequest: (run: RunRow) => void;
   isActiveStatus: (status: string) => boolean;
@@ -22,6 +23,7 @@ export default function RecentRunsTable({
   runsPerPage,
   onPageChange,
   onViewRun,
+  onWatchRun,
   onCancelRun,
   onDeleteRunRequest,
   isActiveStatus,
@@ -86,6 +88,17 @@ export default function RecentRunsTable({
                   <button className="secondary small" onClick={(event) => { event.stopPropagation(); onViewRun(run.id); }}>
                     View
                   </button>
+                  {onWatchRun ? (
+                    <button
+                      className="secondary small"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onWatchRun(run.id);
+                      }}
+                    >
+                      Console
+                    </button>
+                  ) : null}
                   <button
                     className="small"
                     disabled={!isActiveStatus(run.status)}

@@ -42,7 +42,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "doctor",
     resolved_mode: "trace",
     suite_or_scenarios: "suite=doctor",
-    what_it_tests: "Daily operator health flow with bootstrap, store setup, menu states, paid order, accept/reject, robot completion, receipt/review/reorder.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: daily broad trace baseline for bootstrap, menu gates, paid order path, store actions, robot completion, and post-order checks.",
     prerequisites: "Plan with at least one user and one store; auth credentials in .env.",
     optional_flags: "--timing, --store, --phone, --all-users, --no-auto-provision",
     artifacts: "events.json, report.md, story.md"
@@ -51,7 +51,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "full",
     resolved_mode: "trace",
     suite_or_scenarios: "suite=full",
-    what_it_tests: "Most complete app-like trace including new user, coupon flows (paid/free), and full post-order checks.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: deepest broad trace, adding new-user and all coupon/payment branches plus full post-order checks.",
     prerequisites: "Coupon source enabled (SIM_AUTO_SELECT_COUPON=true or SIM_COUPON_ID set) for coupon scenarios.",
     optional_flags: "--timing, --store, --phone, --post-order-actions, --no-auto-provision",
     artifacts: "events.json, report.md, story.md"
@@ -60,7 +60,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "audit",
     resolved_mode: "trace",
     suite_or_scenarios: "suite=audit",
-    what_it_tests: "Deep environment/system audit with broad scenario coverage and dashboard probes.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: broad trace overlap with full, useful when you want an audit-labeled suite with similar depth.",
     prerequisites: "Stable test backend and a plan with valid user/store records.",
     optional_flags: "--timing, --skip-app-probes, --skip-store-dashboard-probes",
     artifacts: "events.json, report.md, story.md"
@@ -69,7 +69,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "payments",
     resolved_mode: "trace",
     suite_or_scenarios: "suite=payments",
-    what_it_tests: "Paid-no-coupon, paid-with-coupon, and free-with-coupon payment branches.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: isolates payment branch parity (paid-no-coupon, paid-with-coupon, free-with-coupon).",
     prerequisites: "Stripe test secret for paid branches and coupon availability for coupon branches.",
     optional_flags: "--timing, --post-order-actions",
     artifacts: "events.json, report.md, story.md"
@@ -78,7 +78,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "menus",
     resolved_mode: "trace",
     suite_or_scenarios: "suite=menus",
-    what_it_tests: "Menu availability states (available, unavailable, sold out, store closed).",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: isolates menu gate assertions across available/unavailable/sold-out/store-closed states.",
     prerequisites: "Store selected in plan or --store.",
     optional_flags: "--timing, --store, --no-auto-provision",
     artifacts: "events.json, report.md, story.md"
@@ -87,7 +87,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "new-user",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[new_user_setup]",
-    what_it_tests: "New user OTP/signup path and first-order readiness checks.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: targets only first-time onboarding and OTP/signup readiness.",
     prerequisites: "Phone should not already be fully onboarded for strict new-user branch behavior.",
     optional_flags: "--phone, --store, --timing",
     artifacts: "events.json, report.md, story.md"
@@ -96,7 +96,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "paid-no-coupon",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[returning_paid_no_coupon]",
-    what_it_tests: "Returning user paid order without coupon.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: targeted paid checkout without coupon; subset of payments/full.",
     prerequisites: "Stripe test secret configured.",
     optional_flags: "--store, --phone, --timing, --post-order-actions",
     artifacts: "events.json, report.md, story.md"
@@ -105,7 +105,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "paid-coupon",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[returning_paid_with_coupon]",
-    what_it_tests: "Returning user paid order with coupon discount.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: targeted paid checkout with coupon; subset of payments/full.",
     prerequisites: "Coupon source available and Stripe test secret configured.",
     optional_flags: "--store, --phone, --timing, --post-order-actions",
     artifacts: "events.json, report.md, story.md"
@@ -114,7 +114,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "free-coupon",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[returning_free_with_coupon]",
-    what_it_tests: "Returning user coupon order that resolves to zero amount and uses free-order branch.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: targeted zero-payable coupon checkout through free-order branch; subset of payments/full.",
     prerequisites: "Coupon source available; coupon must reduce payable amount to zero.",
     optional_flags: "--store, --phone, --timing, --post-order-actions",
     artifacts: "events.json, report.md, story.md"
@@ -123,7 +123,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "store-setup",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[store_first_setup]",
-    what_it_tests: "Store setup flow and profile/menu preflight behavior.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: isolates store setup/profile/menu preflight behavior.",
     prerequisites: "Store login available; mutation enabled unless --no-auto-provision.",
     optional_flags: "--store, --timing, --no-auto-provision",
     artifacts: "events.json, report.md, story.md"
@@ -132,7 +132,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "store-dashboard",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[store_dashboard]",
-    what_it_tests: "Store dashboard APIs (stats, revenue, top customers/orders).",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: isolates store dashboard API surfaces (orders/stats/top customers).",
     prerequisites: "Store login token and valid store profile.",
     optional_flags: "--store, --timing, --skip-store-dashboard-probes",
     artifacts: "events.json, report.md, story.md"
@@ -141,7 +141,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "store-accept",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[store_accept]",
-    what_it_tests: "Order accepted by store then processed to completion path.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: targets store-accept branch only; overlaps with broader doctor/full completion coverage.",
     prerequisites: "Menu item available for selected store.",
     optional_flags: "--store, --phone, --timing",
     artifacts: "events.json, report.md, story.md"
@@ -150,7 +150,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "store-reject",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[store_reject]",
-    what_it_tests: "Order rejected by store branch and rejection assertions.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: targets store-reject branch only for focused rejection debugging.",
     prerequisites: "Menu item available for selected store.",
     optional_flags: "--store, --phone, --timing",
     artifacts: "events.json, report.md, story.md"
@@ -159,7 +159,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "robot-complete",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[robot_complete]",
-    what_it_tests: "Robot progression states through completed delivery lifecycle.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: targets robot lifecycle progression only; overlaps with broader doctor/full completion coverage.",
     prerequisites: "Store accept branch reachable and robot simulation enabled.",
     optional_flags: "--store, --phone, --timing",
     artifacts: "events.json, report.md, story.md"
@@ -168,7 +168,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "receipt-review",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[receipt_review_reorder]",
-    what_it_tests: "Post-order actions: receipt fetch, review/rating, and reorder call.",
+    what_it_tests: "It answers the question: \"did each specific workflow/API behavior pass deterministically?\" Qualifier: isolates post-order receipt/review/reorder assertions.",
     prerequisites: "At least one completed order in the scenario branch.",
     optional_flags: "--store, --phone, --timing, --post-order-actions",
     artifacts: "events.json, report.md, story.md"
@@ -177,7 +177,7 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     flow: "load",
     resolved_mode: "load",
     suite_or_scenarios: "mode=load (multi-user workers)",
-    what_it_tests: "Concurrent long-running order traffic with configurable users/orders/rejection rate.",
+    what_it_tests: "It answers the question: \"does the system hold up under many users/orders over time?\" Qualifier: focuses on throughput, race conditions, intermittent failures, and resilience under concurrent pressure, not exhaustive deterministic branch coverage.",
     prerequisites: "Plan with users/stores; backend can handle concurrent auth/orders/websockets.",
     optional_flags: "--users, --orders, --interval, --reject, --continuous, --all-users",
     artifacts: "events.json, report.md, story.md"

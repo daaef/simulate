@@ -62,6 +62,8 @@
   --error-bg: #fef2f2;
   --error-text: #991b1b;
   --error-border: #fca5a5;
+  --link-color: #4b5563;
+  --link-color-hover: #111827;
 }
 
 /* Dark Theme Variables */
@@ -124,6 +126,8 @@
   --error-bg: #450a0a;
   --error-text: #fecaca;
   --error-border: #dc2626;
+  --link-color: #cbd5e1;
+  --link-color-hover: #f8fafc;
 }
 
 body {
@@ -132,6 +136,23 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+a {
+  color: var(--link-color);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--link-color) 55%, transparent);
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+a:hover {
+  color: var(--link-color-hover);
+  text-decoration-color: color-mix(in srgb, var(--link-color-hover) 70%, transparent);
+}
+
+a:visited {
+  color: var(--link-color);
 }
 
 main {
@@ -1613,5 +1634,248 @@ pre.log {
 
   .hero-link {
     width: 100%;
+  }
+}
+
+.start-run-stack {
+  grid-template-columns: 1fr;
+}
+
+.launch-config-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.launcher-help-sidebar {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+}
+
+.launcher-help-sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.launcher-help-mobile-toggle {
+  display: none;
+  width: auto;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.launcher-help-options-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.launcher-help-options-table th,
+.launcher-help-options-table td {
+  border: 1px solid var(--border-primary);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.launcher-help-options-table th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}
+
+.launcher-help-options-table code {
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.launcher-help-constraints li {
+  margin-bottom: 4px;
+}
+
+.active-runs-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.active-runs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.active-runs-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.active-runs-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.active-runs-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.active-runs-count-badge.active {
+  border-color: var(--status-warning-border, var(--border-secondary));
+  color: var(--status-warning-text, var(--text-primary));
+}
+
+.active-runs-empty {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px dashed var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+.active-runs-empty-body {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.active-runs-empty-cta {
+  width: fit-content;
+}
+
+.live-console-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.active-runs-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.active-run-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+  font-size: 13px;
+  cursor: pointer;
+  width: auto;
+}
+
+.active-run-chip:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-secondary);
+}
+
+.active-run-chip.selected {
+  border-color: var(--accent-primary, var(--border-secondary));
+  background: var(--surface-hover);
+}
+
+.launcher-help-links a {
+  color: var(--link-color);
+}
+
+.launcher-help-links a:hover {
+  color: var(--link-color-hover);
+}
+
+.launcher-help-links {
+  margin: 14px 0 0;
+  padding-left: 18px;
+  font-size: 14px;
+}
+
+.launcher-help-constraints {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.launcher-selected-value {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+}
+
+.launcher-all-options {
+  margin-top: 14px;
+}
+
+.launcher-all-options-toggle,
+.launcher-run-summary-toggle {
+  width: auto;
+  padding: 4px 10px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.launcher-help-options-table .launcher-option-selected td {
+  background: var(--surface-active);
+}
+
+.launcher-run-summary {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-primary);
+}
+
+.launcher-run-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.launcher-field-group:focus-within {
+  outline: 2px solid var(--border-secondary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (max-width: 1024px) {
+  .launch-config-row {
+    grid-template-columns: 1fr;
+  }
+
+  .launcher-help-sidebar {
+    position: static;
+    max-height: none;
+  }
+
+  .launcher-help-mobile-toggle {
+    display: inline-flex;
+  }
+
+  .launcher-help-sidebar-body:not(.expanded) {
+    display: none;
   }
 }

@@ -2,12 +2,21 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
+from decision_reasons import is_informational_decision_reason
 from ..runs import service as runs_service
 
 
+FindingBucket = Literal["critical", "operational"]
+
 ACTOR_KEYS = ("user", "store", "robot")
+CRITICAL_ISSUE_CODES = frozenset(
+    {
+        "websocket_event_missing",
+        "websocket_event_late",
+    }
+)
 NON_SERVER_FAILURE_CODE_PARTS = (
     "missing_",
     "coupon",
@@ -54,6 +63,12 @@ def _lower(value: Any) -> str:
 
 
 def _is_failed_event(event: dict[str, Any]) -> bool:
+    if _lower(event.get("category")) == "decision" and is_informational_decision_reason(
+        status=event.get("status"),
+        reason_code=event.get("reason_code"),
+    ):
+        return False
+
     if event.get("ok") is False:
         return True
 
@@ -72,6 +87,12 @@ def _is_failed_event(event: dict[str, Any]) -> bool:
 
 
 def _is_server_api_failure_event(event: dict[str, Any]) -> bool:
+    if _lower(event.get("category")) == "decision" and is_informational_decision_reason(
+        status=event.get("status"),
+        reason_code=event.get("reason_code"),
+    ):
+        return False
+
     try:
         http_status = event.get("http_status") or event.get("status_code")
         if http_status is not None and int(http_status) >= 500:
@@ -123,6 +144,51 @@ def _is_server_api_failure_issue(issue: dict[str, Any]) -> bool:
     if "timeout" in message or "timed out" in message or "connection" in message:
         return True
     return False
+
+
+def _finding_bucket_issue(issue: dict[str, Any]) -> FindingBucket:
+    code = _lower(issue.get("code"))
+
+    if code in CRITICAL_ISSUE_CODES:
+        return "critical"
+
+    details = issue.get("details")
+    if isinstance(details, dict) and code.startswith("websocket_gate_"):
+        enforced = details.get("enforced")
+        if enforced is False:
+            return "operational"
+        if enforced is True:
+            return "critical"
+
+    if _is_server_api_failure_issue(issue):
+        return "critical"
+
+    return "operational"
+
+
+def _issue_row_from_artifact(
+    issue: dict[str, Any],
+    event_by_id: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    related_event = None
+    try:
+        related_event = event_by_id.get(int(issue.get("related_event_id")))
+    except (TypeError, ValueError):
+        related_event = None
+    details = issue.get("details") if isinstance(issue.get("details"), dict) else {}
+    route = (
+        _event_endpoint(related_event or {})
+        or _str(details.get("endpoint") or details.get("path") or details.get("url") or details.get("full_url"))
+        or None
+    )
+    return {
+        "severity": issue.get("severity") or "warning",
+        "code": issue.get("code") or "issue",
+        "message": issue.get("message") or "Recorded issue",
+        "actor": issue.get("actor"),
+        "at": issue.get("ts"),
+        "route": route,
+    }
 
 
 def _event_timestamp(event: dict[str, Any]) -> str:
@@ -469,8 +535,13 @@ def _build_lifecycle(events: list[dict[str, Any]], run: dict[str, Any]) -> list[
     return lifecycle
 
 
-def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]], run: dict[str, Any]) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
+def _build_findings(
+    events: list[dict[str, Any]],
+    artifact_issues: list[dict[str, Any]],
+    run: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    critical: list[dict[str, Any]] = []
+    operational: list[dict[str, Any]] = []
     event_by_id: dict[int, dict[str, Any]] = {}
 
     for event in events:
@@ -480,41 +551,23 @@ def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]],
         except (TypeError, ValueError):
             continue
 
-    for issue in artifact_issues[:8]:
+    for issue in artifact_issues[:24]:
         try:
-            if not _is_server_api_failure_issue(issue):
-                continue
-            related_event = None
-            try:
-                related_event = event_by_id.get(int(issue.get("related_event_id")))
-            except (TypeError, ValueError):
-                related_event = None
-            details = issue.get("details") if isinstance(issue.get("details"), dict) else {}
-            route = (
-                _event_endpoint(related_event or {})
-                or _str(details.get("endpoint") or details.get("path") or details.get("url") or details.get("full_url"))
-                or None
-            )
-            items.append(
-                {
-                    "severity": issue.get("severity") or "warning",
-                    "code": issue.get("code") or "issue",
-                    "message": issue.get("message") or "Recorded issue",
-                    "actor": issue.get("actor"),
-                    "at": issue.get("ts"),
-                    "route": route,
-                }
-            )
+            row = _issue_row_from_artifact(issue, event_by_id)
+            if _finding_bucket_issue(issue) == "critical":
+                critical.append(row)
+            else:
+                operational.append(row)
         except Exception:
             continue
 
     for event in events:
-        if len(items) >= 10:
+        if len(critical) >= 10:
             break
         try:
             if not _is_server_api_failure_event(event):
                 continue
-            items.append(
+            critical.append(
                 {
                     "severity": "error",
                     "code": event.get("action") or event.get("category") or "failed_event",
@@ -528,7 +581,7 @@ def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]],
             continue
 
     if run.get("error") and _is_server_api_failure_issue({"code": "run_error", "message": _str(run.get("error"))}):
-        items.insert(
+        critical.insert(
             0,
             {
                 "severity": "error",
@@ -540,7 +593,15 @@ def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]],
             },
         )
 
-    return items[:10]
+    return {
+        "critical": critical[:10],
+        "operational": operational[:12],
+    }
+
+
+def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]], run: dict[str, Any]) -> list[dict[str, Any]]:
+    """Backward-compatible alias: critical findings only."""
+    return _build_findings(events, artifact_issues, run)["critical"]
 
 
 def _derived_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -590,6 +651,7 @@ def latest_run_overview() -> dict[str, Any]:
             },
             "lifecycle": [],
             "issues": [],
+            "findings": {"critical": [], "operational": []},
             "run_meta": {},
         }
 
@@ -606,6 +668,8 @@ def _build_overview_payload(run: dict[str, Any]) -> dict[str, Any]:
     events, artifact_issues, run_meta = _load_events(run_id)
     metrics = _load_metrics(run_id) or _derived_metrics(events)
 
+    findings = _build_findings(events, artifact_issues, run)
+
     return {
         "run": {
             **run,
@@ -621,6 +685,7 @@ def _build_overview_payload(run: dict[str, Any]) -> dict[str, Any]:
             "websocket": _websocket_summary(events),
         },
         "lifecycle": _build_lifecycle(events, run),
-        "issues": _issues(events, artifact_issues, run),
+        "findings": findings,
+        "issues": findings["critical"],
         "run_meta": run_meta,
     }

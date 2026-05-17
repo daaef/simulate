@@ -2,7 +2,9 @@
 
 Exhaustive catalog of **flows**, **modes**, **suites**, **scenarios**, **CLI flags**, **run-plan JSON**, **environment variables**, and **web/API run fields** for the Fainzy order simulator. For narrative operations, health vocabulary, and screen-by-screen UI semantics, use [SIMULATOR_GUIDE.md](../SIMULATOR_GUIDE.md). For component responsibilities and architecture, use [ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**Configuration precedence:** explicit CLI flags → selected plan JSON → `.env` → built-in defaults (see [SIMULATOR_GUIDE.md](../SIMULATOR_GUIDE.md) §1 Inputs and Outputs).
+For an operator-first run-efficiency playbook (how to choose runs and flags quickly), use [SIMULATION_TEST_GUIDE.md](./SIMULATION_TEST_GUIDE.md).
+
+**Configuration precedence:** explicit CLI flags → selected plan JSON → `.env` → built-in defaults (see [SIMULATOR_GUIDE.md](../SIMULATOR_GUIDE.md) §1 Inputs and Outputs). In load mode, effective worker settings now keep this precedence through runtime bootstrap (no second plan-default override pass).
 
 **Maintenance:** When adding flows, scenarios, flags, or plan keys, update this file from the modules listed in [§ Source of truth](#source-of-truth). Last verified against repository sources: `flow_presets.py`, `scenarios.py`, `__main__.py`, `config.py` (`apply_plan_defaults`), `run_plan.py`, `interaction_catalog.py`, `api/app/runs/models.py`, `api/app/main.py` (`_build_command`, `_flows_payload`).
 
@@ -71,6 +73,16 @@ flowchart TD
 | `load` | Multi-actor load; uses `--users`, `--orders`, `--interval`, `--reject`, `--continuous` |
 
 Constraints: `--continuous` only in `load`. Trace cannot combine with load-only numeric knobs; load cannot use trace `suite` / `scenarios` (enforced in API `_build_command` validation).
+
+### Bounded load policy (catalog profile contract)
+
+Catalog profile `bounded-load-smoke` uses an internal phased policy:
+
+1. Baseline phase enforces accepted/completed baseline (`>=1`).
+2. Tail phase then allows reject/cancel pressure.
+3. If baseline is not met within bounded attempts, run fails with `accepted_baseline_not_met`.
+
+This policy is injected via profile `extra_args` and is intended for catalog smoke reliability checks.
 
 ---
 

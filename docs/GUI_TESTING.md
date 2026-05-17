@@ -47,11 +47,31 @@ The **Recent Runs** table always renders **Stop** and **Delete** actions; permis
 
 ---
 
-## 3) Start Run — core controls (every user with `runs` create)
+## 3) Start Run — layout and field help
+
+| Step | Action | Pass criteria |
+|------|--------|----------------|
+| 3.0.1 | Open **Start Run** (operator/admin) | **Active runs** strip is at the top; **Live Console** is full width below it; **Launch settings** form and **Field help** sidebar are below the console. |
+| 3.0.2 | With no active runs | **Active runs** panel shows eyebrow, title “No runs in progress”, helper text, and **Go to launch settings** button (not a bare muted line). |
+| 3.0.13 | With no active runs | **Live Console** is collapsed by default; header shows “No run selected”. Expand to view log area. |
+| 3.0.3 | Start or select an active run | Active run chip appears; clicking a chip selects that run for the console (same as **Console** in Recent Runs). |
+| 3.0.4 | Focus **Flow** and select `doctor` | Sidebar shows **Selected** with `doctor` and doctor-specific copy immediately; **All options** is collapsed by default. |
+| 3.0.5 | Expand **All options** | Full options table appears; the `doctor` row is highlighted. |
+| 3.0.6 | Change any launch field, then wait ~1s | **Run summary** appears in the sidebar (severity badge, summary lines, warnings). Brief “Updating run summary…” while debouncing. |
+| 3.0.7 | Check below command preview | There is **no** Execution Impact panel under **Resolved command preview** (run summary lives in the sidebar only). |
+| 3.0.8 | Blur away from the form | Field help returns to idle intro links; **Run summary** remains visible after debounce. |
+| 3.0.9 | Narrow viewport (&lt; ~1024px) | Field help can collapse behind **Show** / **Hide**; focusing a field auto-expands help. |
+| 3.0.10 | Leave **Store** empty with `sim_actors.json`, wait ~1s | **Resolved scope** shows plan default store `FZY_926025` with source “plan default”. |
+| 3.0.11 | Type store `FZY_999` in **Store**, wait ~1s | **Resolved scope** shows `FZY_999` with source “form override” (scope is not duplicated inside **Run summary** details). |
+| 3.0.12 | Clear **Phone** (plan default), wait ~1s | **Resolved scope** shows default phone from plan with “plan default” or “first user in plan” source tag. |
+
+---
+
+## 4) Start Run — core controls (every user with `runs` create)
 
 These map to `RunCreateRequest` in `web/src/lib/api.ts`.
 
-### 3.1 Flow and derived mode
+### 4.1 Flow and derived mode
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
@@ -61,20 +81,20 @@ These map to `RunCreateRequest` in `web/src/lib/api.ts`.
 
 **Exhaustive flow list:** Use the Flow dropdown as the source of truth (same as `FLOW_PRESETS` keys). Minimum smoke: run **`doctor`** once and **`load`** once; full matrix: one launched run per flow (or dry-run via command preview only where runs are expensive).
 
-### 3.2 Timing
+### 4.2 Timing
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
 | 3.2.1 | Toggle **Timing** `fast` / `realistic` | **Resolved command preview** includes `--timing fast` or `--timing realistic`. |
 
-### 3.3 Plan
+### 4.3 Plan
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
 | 3.3.1 | **Plan** dropdown | `sim_actors.json` plus every `SimulationPlan` from Config (`fetchSimulationPlans`). |
 | 3.3.2 | Remove a plan from server then refresh | If current plan invalid, form resets to `sim_actors.json` (`allowedPlanPaths` effect on `runs/page.tsx`). |
 
-### 3.4 Store ID and Phone
+### 4.4 Store ID and Phone
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
@@ -84,7 +104,7 @@ These map to `RunCreateRequest` in `web/src/lib/api.ts`.
 
 ---
 
-## 4) Advanced Mode Overrides
+## 5) Advanced Mode Overrides
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
@@ -97,7 +117,7 @@ These map to `RunCreateRequest` in `web/src/lib/api.ts`.
 
 ---
 
-## 5) Load-only numeric fields
+## 6) Load-only numeric fields
 
 When **resolved mode** is `load`:
 
@@ -113,7 +133,7 @@ When **resolved mode** is `load`:
 
 ---
 
-## 6) Checkboxes (shared + mode-gated)
+## 7) Checkboxes (shared + mode-gated)
 
 Toggle each and confirm **Resolved command preview** (`commandPreview` on `runs/page.tsx`):
 
@@ -132,7 +152,7 @@ Toggle each and confirm **Resolved command preview** (`commandPreview` on `runs/
 
 ---
 
-## 7) Client-side validation matrix (`modeValidationError`)
+## 8) Client-side validation matrix (`modeValidationError`)
 
 These block **Start Simulation** (button disabled) on `runs/page.tsx`:
 
@@ -148,7 +168,7 @@ Clear fields and confirm button re-enables.
 
 ---
 
-## 8) Start Simulation, live console, cancel
+## 9) Start Simulation, live console, cancel
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
@@ -159,7 +179,7 @@ Clear fields and confirm button re-enables.
 
 ---
 
-## 9) Saved Profiles
+## 10) Saved Profiles
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
@@ -172,7 +192,7 @@ Clear fields and confirm button re-enables.
 
 ---
 
-## 10) Recent Runs table
+## 11) Recent Runs table
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
@@ -184,7 +204,7 @@ Clear fields and confirm button re-enables.
 
 ---
 
-## 11) Run detail `/runs/[id]`
+## 12) Run detail `/runs/[id]`
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
@@ -197,7 +217,7 @@ Clear fields and confirm button re-enables.
 
 ---
 
-## 12) Flow Planner & Command Guide
+## 13) Flow Planner & Command Guide
 
 | Step | Action | Pass criteria |
 |------|--------|----------------|
@@ -206,7 +226,7 @@ Clear fields and confirm button re-enables.
 
 ---
 
-## 13) Other routes (smoke per role)
+## 14) Other routes (smoke per role)
 
 Use [SIMULATOR_GUIDE.md](../SIMULATOR_GUIDE.md) **Operator GUI** for screen semantics.
 
@@ -222,7 +242,7 @@ Use [SIMULATOR_GUIDE.md](../SIMULATOR_GUIDE.md) **Operator GUI** for screen sema
 
 ---
 
-## 14) Trace scenarios — how to cover “all” from the GUI
+## 15) Trace scenarios — how to cover “all” from the GUI
 
 The GUI does not run “all scenarios” as one click; it sends `suite` and/or repeated `--scenario` values.
 
@@ -236,14 +256,14 @@ Cross-check preview against [SIMULATOR_CAPABILITIES.md](SIMULATOR_CAPABILITIES.m
 
 ---
 
-## 15) Automated / API regression (optional)
+## 16) Automated / API regression (optional)
 
 - `tests/test_web_api.py` — API-level regression for run create, flows, etc.
 - Playwright or Cypress is **not** required by this repo for the checklist above; add separately if you want full browser automation.
 
 ---
 
-## 16) Gaps (GUI vs backend)
+## 17) Gaps (GUI vs backend)
 
 | Backend capability | In GUI? |
 |--------------------|---------|

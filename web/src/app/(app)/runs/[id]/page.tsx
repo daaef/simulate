@@ -11,9 +11,9 @@ import {
   fetchRunLog,
   fetchRunMetrics,
   replayRun,
+  type RunFindings,
   type RunMetrics,
   type RunRow,
-  type LatestRunIssue,
 } from "../../../../lib/api";
 import RunArtifactMarkdown from "../../../../components/runs/detail/RunArtifactMarkdown";
 import RunDetailHeader from "../../../../components/runs/detail/RunDetailHeader";
@@ -28,6 +28,13 @@ type TabType = "overview" | "story" | "report" | "traffic" | "console" | "execut
 type EventRow = Record<string, unknown>;
 
 const EVENTS_PAGE_SIZE = 100;
+
+const EMPTY_FINDINGS: RunFindings = { critical: [], operational: [] };
+
+function isActiveRunStatus(status: string): boolean {
+  const normalized = status.toLowerCase();
+  return normalized === "running" || normalized === "pending" || normalized === "queued";
+}
 
 function logClassForLine(line: string): string {
   const lowered = line.toLowerCase();
@@ -54,7 +61,7 @@ export default function RunDetailPage() {
 
   const [run, setRun] = useState<RunRow | null>(null);
   const [metrics, setMetrics] = useState<RunMetrics | null>(null);
-  const [issues, setIssues] = useState<LatestRunIssue[]>([]);
+  const [findings, setFindings] = useState<RunFindings>(EMPTY_FINDINGS);
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +94,16 @@ export default function RunDetailPage() {
     };
   }, [runId]);
 
+  useEffect(() => {
+    setFindings(EMPTY_FINDINGS);
+    setReport(null);
+    setStory(null);
+    setEvents([]);
+    setEventsTotal(0);
+    setEventsOffset(0);
+    setLog(null);
+  }, [runId]);
+
   // Fetch metrics
   useEffect(() => {
     fetchRunMetrics(runId).then((res) => {
@@ -105,12 +122,35 @@ export default function RunDetailPage() {
       });
     fetchRunOverview(runId)
       .then((payload) => {
-        setIssues(payload.issues || []);
+        setFindings(
+          payload.findings ?? {
+            critical: payload.issues || [],
+            operational: [],
+          }
+        );
       })
       .catch(() => {
-        setIssues([]);
+        setFindings(EMPTY_FINDINGS);
       });
   }, [runId]);
+
+  useEffect(() => {
+    if (activeTab !== "console" || !run) return;
+    const shouldPoll = isActiveRunStatus(run.status);
+    const refreshLog = () => {
+      fetchRunLog(runId, 5000)
+        .then((res) => {
+          if (res.available) setLog(res.log);
+        })
+        .catch(() => {
+          // ignore
+        });
+    };
+    refreshLog();
+    if (!shouldPoll) return;
+    const timer = window.setInterval(refreshLog, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeTab, run, runId]);
 
   // Fetch artifacts based on active tab
   useEffect(() => {
@@ -140,10 +180,6 @@ export default function RunDetailPage() {
           }
           break;
         case "console":
-          if (log === null) {
-            const res = await fetchRunLog(runId, 5000);
-            if (res.available) setLog(res.log);
-          }
           break;
       }
     };
@@ -200,7 +236,7 @@ export default function RunDetailPage() {
 
         <div>
           {activeTab === "overview" && (
-            <RunDetailOverview metrics={metrics} runStatus={run.status} runError={run.error} issues={issues} />
+            <RunDetailOverview metrics={metrics} runStatus={run.status} runError={run.error} findings={findings} />
           )}
 
           {activeTab === "execution" && <RunExecutionSnapshotPanel run={run} onReplay={handleReplay} replaying={isReplaying} />}

@@ -11,6 +11,8 @@ import {
   fetchSystemTimezones,
   setScheduleStatus,
   triggerSchedule,
+  updateSchedule,
+  type ScheduleUpsertRequest,
   type CampaignStep,
   type RunProfile,
   type Schedule,
@@ -115,6 +117,18 @@ function toScheduleDateTime(value: string): string | undefined {
   return date.toISOString();
 }
 
+function toDateTimeLocalInput(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
 function formatActiveRange(schedule: Schedule): string {
   if (!schedule.active_from && !schedule.active_until) return "No active date range";
   const start = schedule.active_from
@@ -160,6 +174,7 @@ export default function SchedulesPage() {
   const [stepSpacingSeconds, setStepSpacingSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
   const loadInFlightRef = useRef(false);
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
@@ -349,7 +364,7 @@ export default function SchedulesPage() {
         setError("Add at least one campaign step before creating the schedule.");
         return;
       }
-      await createSchedule({
+      const payload: ScheduleUpsertRequest = {
         name,
         description,
         schedule_type: scheduleType,
@@ -373,7 +388,12 @@ export default function SchedulesPage() {
         blackout_dates: blackoutDates,
         failure_policy: "continue",
         campaign_steps: campaignSteps,
-      });
+      };
+      if (editingScheduleId) {
+        await updateSchedule(editingScheduleId, payload);
+      } else {
+        await createSchedule(payload);
+      }
       setName("");
       setDescription("");
       setAnchorStartAt("");
@@ -383,13 +403,98 @@ export default function SchedulesPage() {
       setBlackoutDates([]);
       setBlackoutDateInput("");
       setCampaignSteps([]);
+      setEditingScheduleId(null);
       await load();
       setError(null);
     } catch (caughtError) {
-      setError(toMessage(caughtError, "Failed to create schedule"));
+      setError(toMessage(caughtError, editingScheduleId ? "Failed to update schedule" : "Failed to create schedule"));
     } finally {
       setBusy(false);
     }
+  };
+
+  const startEditSchedule = (schedule: Schedule) => {
+    setEditingScheduleId(schedule.id);
+    setName(schedule.name || "");
+    setDescription(schedule.description || "");
+    setProfileId(String(schedule.profile_id || profiles[0]?.id || ""));
+    setAnchorStartAt(toDateTimeLocalInput(schedule.anchor_start_at));
+    setStopRule(schedule.stop_rule || "never");
+    setEndAt(toDateTimeLocalInput(schedule.end_at));
+    setDurationHours(Math.max(1, Math.round((schedule.duration_seconds || 3600) / 3600)));
+    setRunsPerPeriod(Math.max(1, schedule.runs_per_period || 1));
+    setRepeat(schedule.repeat || "daily");
+    setAllDay(Boolean(schedule.all_day));
+    setTimezone(schedule.timezone || defaultScheduleTimezone());
+    setBlackoutDates([...(schedule.blackout_dates || [])]);
+    setCampaignSteps([...(schedule.campaign_steps || [])]);
+    const recurrenceWeekdays = Array.isArray(schedule.recurrence_config?.weekdays)
+      ? (schedule.recurrence_config?.weekdays as string[])
+      : ["monday", "wednesday", "friday"];
+    setCustomWeekdays(recurrenceWeekdays);
+
+    const slots = Array.isArray(schedule.run_slots) ? schedule.run_slots : [];
+    const periodValue: SchedulePeriod = (schedule.period || "daily") as SchedulePeriod;
+    setPeriod(periodValue);
+    if (periodValue === "weekly") {
+      const nextWeekly = slots
+        .map((slot) => ({
+          weekday: String(slot.weekday || "monday"),
+          time: String(slot.time || "09:00"),
+        }))
+        .filter((slot) => slot.time);
+      setWeeklySlots(nextWeekly.length ? nextWeekly : [{ weekday: "monday", time: "09:00" }]);
+    } else if (periodValue === "monthly") {
+      const daySlots = slots
+        .filter((slot) => String(slot.kind || "day_of_month") === "day_of_month")
+        .map((slot) => ({
+          day: Math.max(1, Math.min(31, Number(slot.day || 1))),
+          time: String(slot.time || "09:00"),
+        }));
+      const ordinalSlots = slots
+        .filter((slot) => String(slot.kind || "") === "weekday_ordinal")
+        .map((slot) => ({
+          ordinal: Math.max(1, Math.min(5, Number(slot.ordinal || 1))),
+          weekday: String(slot.weekday || "monday"),
+          time: String(slot.time || "09:00"),
+        }));
+      if (ordinalSlots.length && !daySlots.length) {
+        setMonthlyMode("weekday_ordinal");
+      } else {
+        setMonthlyMode("day_of_month");
+      }
+      setMonthlyDaySlots(daySlots.length ? daySlots : [{ day: 1, time: "09:00" }]);
+      setMonthlyOrdinalSlots(
+        ordinalSlots.length ? ordinalSlots : [{ ordinal: 1, weekday: "monday", time: "09:00" }]
+      );
+    } else {
+      const nextDaily = slots
+        .map((slot) => String(slot.time || "09:00"))
+        .filter((time) => Boolean(time));
+      setDailyTimes(nextDaily.length ? nextDaily : ["09:00"]);
+    }
+    setError(null);
+  };
+
+  const cancelEditSchedule = () => {
+    setEditingScheduleId(null);
+    setName("");
+    setDescription("");
+    setAnchorStartAt("");
+    setEndAt("");
+    setRunsPerPeriod(1);
+    setStopRule("never");
+    setRepeat("daily");
+    setAllDay(false);
+    setDailyTimes(["09:00"]);
+    setWeeklySlots([{ weekday: "monday", time: "09:00" }]);
+    setMonthlyMode("day_of_month");
+    setMonthlyDaySlots([{ day: 1, time: "09:00" }]);
+    setMonthlyOrdinalSlots([{ ordinal: 1, weekday: "monday", time: "09:00" }]);
+    setBlackoutDates([]);
+    setBlackoutDateInput("");
+    setCampaignSteps([]);
+    setError(null);
   };
 
   const runAction = async (label: string, action: () => Promise<unknown>) => {
@@ -438,7 +543,7 @@ export default function SchedulesPage() {
 
       <section className="grid two">
         <form className="panel grid" onSubmit={submit}>
-          <h2 className="section-title">Create Schedule</h2>
+          <h2 className="section-title">{editingScheduleId ? `Edit Schedule #${editingScheduleId}` : "Create Schedule"}</h2>
           <label className="grid">
             <span className="muted">Name</span>
             <input value={name} onChange={(event) => setName(event.target.value)} required />
@@ -682,7 +787,14 @@ export default function SchedulesPage() {
             ) : null}
           </div>
 
-          <button disabled={busy || !profiles.length}>{busy ? "Working..." : "Create Schedule"}</button>
+          <div className="row-actions">
+            <button disabled={busy || !profiles.length}>{busy ? "Working..." : editingScheduleId ? "Save Changes" : "Create Schedule"}</button>
+            {editingScheduleId ? (
+              <button className="secondary" type="button" disabled={busy} onClick={cancelEditSchedule}>
+                Cancel Edit
+              </button>
+            ) : null}
+          </div>
         </form>
 
         <section className="panel">
@@ -810,6 +922,9 @@ export default function SchedulesPage() {
                         <div className="row-actions">
                           <button className="small" disabled={busy || !canTrigger} onClick={() => runAction("trigger schedule", () => triggerSchedule(schedule.id))}>
                             Trigger
+                          </button>
+                          <button className="secondary small" disabled={busy || isDeleted} onClick={() => startEditSchedule(schedule)}>
+                            Edit
                           </button>
                           {isPaused ? (
                             <button className="secondary small" disabled={busy} onClick={() => runAction("resume schedule", () => setScheduleStatus(schedule.id, "resume"))}>Resume</button>

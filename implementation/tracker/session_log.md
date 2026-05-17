@@ -2458,3 +2458,49 @@ sed -n '1,220p' docs/deployment.md
 1. Run backend tests covering integration webhook flow and DB migrations.
 2. Execute a manual webhook payload test (valid signature + mapping) and confirm queued -> launched -> completed/failed trigger transitions.
 3. Validate GitHub deployment status callback with real token and repository.
+
+## 2026-05-15 14:03
+
+### Summary
+
+Fixed run-detail stale-data leakage and added schedule edit support. Root cause was run log reuse with append-mode writes plus hydration of artifacts for active runs, which could surface previous run artifact paths on `/runs/{id}` before the current run finished.
+
+### Files Created / Modified
+
+- `api/app/main.py`
+- `tests/test_web_api.py`
+- `web/src/app/(app)/schedules/page.tsx`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `AGENTS.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+python3 -m unittest tests.test_web_api.RunDeletionSafetyTests.test_running_run_does_not_hydrate_artifacts_from_old_log_content -v
+python3 -m unittest tests.test_web_api.SchedulesApiTests -v
+npm run build   # from web/ (failed: next not found in current shell)
+git diff --check
+git status --short
+```
+
+### Results
+
+- Added run-id ownership guard for hydration (`_run_log_path_for_run`) and disabled artifact hydration for active statuses (`queued`, `pending`, `running`, `cancelling`).
+- Added log truncation at run start so reused run ids cannot inherit old metadata.
+- Added regression test confirming active runs do not backfill stale `events_path`.
+- Added schedule edit UI flow: `Edit` action loads selected schedule into form, save uses `PUT /api/v1/schedules/{id}`, and cancel restores create mode.
+- Updated docs to reflect run-id scoped detail behavior and schedule editing support.
+
+### Issues / Blockers
+
+- Frontend build cannot run in this host shell because `next` binary is unavailable (`next: command not found`).
+- Worktree contains unrelated pre-existing modified files; untouched.
+
+### Next Steps
+
+1. Run frontend build/tests inside the standard container/runtime where Next.js dependencies are installed.
+2. Manually verify `/runs/{id}` while a new run is active to confirm no stale event/report/story artifact carryover.
+3. Manually verify `/schedules` edit flow (edit existing schedule, save, refresh, trigger).

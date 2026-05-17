@@ -173,6 +173,36 @@ def _parse_args() -> argparse.Namespace:
         default=False,
         help="Do not auto-create missing store setup/category/menu prerequisites.",
     )
+    parser.add_argument(
+        "--bounded-load-smoke-policy",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--bounded-baseline-min-completed",
+        type=int,
+        default=1,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--bounded-baseline-max-attempts",
+        type=int,
+        default=3,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--bounded-tail-reject-rate",
+        type=float,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--bounded-tail-cancel-rate",
+        type=float,
+        default=0.0,
+        help=argparse.SUPPRESS,
+    )
     return parser.parse_args()
 
 
@@ -260,6 +290,13 @@ def _apply_args(args: argparse.Namespace) -> None:
         config.SIM_ENFORCE_WEBSOCKET_GATES = bool(args.enforce_websocket_gates)
     if _has_cli_flag(argv, "--no-auto-provision") and args.no_auto_provision:
         config.SIM_AUTO_PROVISION_FIXTURES = False
+    config.configure_bounded_load_policy(
+        enabled=bool(args.bounded_load_smoke_policy),
+        baseline_min_completed=args.bounded_baseline_min_completed,
+        baseline_max_attempts=args.bounded_baseline_max_attempts,
+        tail_reject_rate=args.bounded_tail_reject_rate,
+        tail_cancel_rate=args.bounded_tail_cancel_rate,
+    )
 
     flow_name = args.flow
     if not flow_name:
@@ -362,8 +399,10 @@ def _validate_config() -> None:
 
 
 async def _run_load_mode(*, recorder: RunRecorder) -> None:
-    # Phase 0: Load actors from sim_actors.json (applies defaults to config).
-    actors = config.load_sim_actors()
+    # Phase 0: Use already-loaded actors from argument/application bootstrap.
+    actors = getattr(config, "SIM_ACTORS", {}) or {}
+    if not actors:
+        actors = config.load_sim_actors()
     actor_stores = actors.get("stores", [])
     actor_users = actors.get("users", [])
 
@@ -554,6 +593,15 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
         f"{len(store_sessions)} store listener(s), "
         f"{len(robot_sessions)} robot listener(s) ..."
     )
+    if config.SIM_BOUNDED_LOAD_POLICY:
+        recorder.record_event(
+            actor="main",
+            action="bounded_load_phase_baseline",
+            category="decision",
+            scenario="load",
+            step="bounded_load_phase_start",
+            details=config.bounded_load_summary(),
+        )
 
     all_tasks: list[asyncio.Task] = []
 
@@ -601,6 +649,22 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
         # In bounded mode, wait for all user tasks to finish, then drain.
         await asyncio.gather(*user_tasks)
         console.print("[bold green]main:[/] All user sim(s) finished.")
+        if config.SIM_BOUNDED_LOAD_POLICY:
+            summary = config.bounded_load_summary()
+            recorder.record_event(
+                actor="main",
+                action="bounded_load_phase_summary",
+                category="decision",
+                scenario="load",
+                step="bounded_load_phase_summary",
+                details=summary,
+            )
+            if not summary.get("baseline_met"):
+                raise RuntimeError(
+                    "accepted_baseline_not_met: bounded load smoke did not produce a completed order "
+                    f"within {summary.get('attempts')} attempts "
+                    f"(target={summary.get('baseline_min_completed')}, max_attempts={summary.get('baseline_max_attempts')})."
+                )
         if config.SIM_WEBSOCKET_DRAIN_SECONDS > 0:
             await asyncio.sleep(config.SIM_WEBSOCKET_DRAIN_SECONDS)
     finally:
