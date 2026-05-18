@@ -90,6 +90,8 @@ Set repository variables:
      ```
    - `GITHUB_STATUS_TOKEN` (GitHub token with deployment status write permissions)
    - Optional: `GITHUB_STATUS_API_BASE`, `GITHUB_STATUS_CONTEXT`
+   - `SIMULATOR_WEBHOOK_ROUTE_BY` — repository Actions **variable** on **this simulator repo** (not upstream app repos): `environment` (default) or `branch` to match integration mappings by git branch (`workflow_run.head_branch` / `deployment.ref`). Passed through [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) into host `.env` and the `api` container.
+   - Optional: `SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT` — fallback route key for `workflow_run` when `SIMULATOR_WEBHOOK_ROUTE_BY=environment` (default `production`).
 
 ## 5) Production Compose Behavior
 
