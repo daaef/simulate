@@ -9,12 +9,48 @@ import {
   fetchRunProfiles,
   upsertGitHubIntegrationMapping,
   type GitHubIntegrationTrigger,
+  type GitHubWebhookRouteBy,
   type IntegrationMapping,
   type RunProfile,
 } from "../../lib/api";
 
 const PROJECT_OPTIONS = ["backend", "mobile", "store", "robot", "dashboard", "website"];
-const ENVIRONMENT_OPTIONS = ["production", "staging", "development", "preview"];
+const DEPLOYMENT_ENVIRONMENT_OPTIONS = ["production", "staging", "development", "preview"];
+const BRANCH_OPTIONS = ["main", "master", "dev", "develop", "staging"];
+
+function routingCopy(routeBy: GitHubWebhookRouteBy) {
+  if (routeBy === "branch") {
+    return {
+      routeKeyLabel: "Branch",
+      routeKeyPlaceholder: "dev",
+      routeKeyOptions: BRANCH_OPTIONS,
+      routeKeyHelp:
+        "Git branch that completed the workflow (workflow_run head_branch or deployment ref). Must match SIMULATOR_WEBHOOK_ROUTE_BY=branch on the API.",
+      formIntro:
+        "Match the GitHub webhook project and git branch, then choose the simulator profile to run when that branch deploys.",
+      listIntro: "Configured project/branch pairs and their target run profiles.",
+      routeChipPrefix: "branch",
+      defaultRouteKey: "dev",
+      validationError: "Project, branch, and run profile are required.",
+      triggerRouteSubLabel: "branch",
+    };
+  }
+
+  return {
+    routeKeyLabel: "Deployment environment",
+    routeKeyPlaceholder: "production",
+    routeKeyOptions: DEPLOYMENT_ENVIRONMENT_OPTIONS,
+    routeKeyHelp:
+      "GitHub deployment environment name from deployment_status (for example dev or production). Default API routing uses environment, not branch.",
+    formIntro:
+      "Match the GitHub webhook project and deployment environment, then choose the simulator profile to run.",
+    listIntro: "Configured project/environment pairs and their target run profiles.",
+    routeChipPrefix: "env",
+    defaultRouteKey: "production",
+    validationError: "Project, deployment environment, and run profile are required.",
+    triggerRouteSubLabel: "environment",
+  };
+}
 
 function formatError(error: unknown): string {
   if (error instanceof ApiRequestError) return error.message;
@@ -83,10 +119,13 @@ export default function IntegrationMappingsPanel() {
   const [profiles, setProfiles] = useState<RunProfile[]>([]);
   const [triggers, setTriggers] = useState<GitHubIntegrationTrigger[]>([]);
 
+  const [routeBy, setRouteBy] = useState<GitHubWebhookRouteBy>("environment");
   const [project, setProject] = useState("backend");
   const [environment, setEnvironment] = useState("production");
   const [profileId, setProfileId] = useState("");
   const [enabled, setEnabled] = useState(true);
+
+  const copy = useMemo(() => routingCopy(routeBy), [routeBy]);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -109,13 +148,14 @@ export default function IntegrationMappingsPanel() {
     setError(null);
 
     try {
-      const [nextMappings, nextProfiles, triggerPayload] = await Promise.all([
+      const [mappingPayload, nextProfiles, triggerPayload] = await Promise.all([
         fetchGitHubIntegrationMappings(),
         fetchRunProfiles(),
         fetchGitHubIntegrationTriggers(25, 0),
       ]);
 
-      setMappings(nextMappings);
+      setRouteBy(mappingPayload.route_by);
+      setMappings(mappingPayload.mappings);
       setProfiles(nextProfiles);
       setTriggers(triggerPayload.triggers);
 
@@ -133,10 +173,11 @@ export default function IntegrationMappingsPanel() {
     void loadAll();
   }, []);
 
-  function resetForm() {
+  function resetForm(nextRouteBy: GitHubWebhookRouteBy = routeBy) {
+    const nextCopy = routingCopy(nextRouteBy);
     setEditingId(null);
     setProject("backend");
-    setEnvironment("production");
+    setEnvironment(nextCopy.defaultRouteKey);
     setProfileId(profiles[0] ? String(profiles[0].id) : "");
     setEnabled(true);
     setMessage(null);
@@ -159,7 +200,7 @@ export default function IntegrationMappingsPanel() {
     const parsedProfileId = Number(profileId);
 
     if (!normalizedProject || !normalizedEnvironment || !Number.isInteger(parsedProfileId) || parsedProfileId < 1) {
-      setError("Project, environment, and run profile are required.");
+      setError(copy.validationError);
       return;
     }
 
@@ -178,12 +219,13 @@ export default function IntegrationMappingsPanel() {
       setMessage(editingId ? "Mapping updated." : "Mapping saved.");
       setEditingId(null);
 
-      const [nextMappings, triggerPayload] = await Promise.all([
+      const [mappingPayload, triggerPayload] = await Promise.all([
         fetchGitHubIntegrationMappings(),
         fetchGitHubIntegrationTriggers(25, 0),
       ]);
 
-      setMappings(nextMappings);
+      setRouteBy(mappingPayload.route_by);
+      setMappings(mappingPayload.mappings);
       setTriggers(triggerPayload.triggers);
     } catch (caught) {
       setError(formatError(caught));
@@ -203,8 +245,9 @@ export default function IntegrationMappingsPanel() {
 
       if (editingId === mappingId) resetForm();
 
-      const nextMappings = await fetchGitHubIntegrationMappings();
-      setMappings(nextMappings);
+      const mappingPayload = await fetchGitHubIntegrationMappings();
+      setRouteBy(mappingPayload.route_by);
+      setMappings(mappingPayload.mappings);
     } catch (caught) {
       setError(formatError(caught));
     } finally {
@@ -227,8 +270,10 @@ export default function IntegrationMappingsPanel() {
           <div className="status-pill status-info">GitHub deployment automation</div>
           <h2 style={{ margin: 0, fontSize: 28 }}>Integration Mappings</h2>
           <p className="muted" style={{ margin: 0, lineHeight: 1.6, maxWidth: 780 }}>
-            Route successful GitHub deployments to saved simulator run profiles. Secrets, repository allowlists,
-            and webhook signing remain in the server environment file.
+            Route successful GitHub webhooks to saved simulator run profiles. Routing mode on this server:{" "}
+            <strong>{routeBy === "branch" ? "git branch" : "deployment environment"}</strong> (set{" "}
+            <code>SIMULATOR_WEBHOOK_ROUTE_BY</code> in the API environment). Secrets, repository allowlists, and
+            webhook signing remain in the server environment file.
           </p>
         </div>
 
@@ -279,9 +324,7 @@ export default function IntegrationMappingsPanel() {
             <h3 className="section-title" style={{ marginBottom: 4 }}>
               {editingId ? "Edit deployment route" : "Create deployment route"}
             </h3>
-            <p className="form-help">
-              Match the GitHub webhook project and deployment environment, then choose the simulator profile to run.
-            </p>
+            <p className="form-help">{copy.formIntro}</p>
           </div>
 
           <div className="grid two">
@@ -302,19 +345,23 @@ export default function IntegrationMappingsPanel() {
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
-              <span className="muted">Environment</span>
+              <span className="muted">{copy.routeKeyLabel}</span>
               <input
-                list="github-environment-options"
+                list="github-route-key-options"
                 value={environment}
                 onChange={(event) => setEnvironment(event.target.value)}
-                placeholder="production"
+                placeholder={copy.routeKeyPlaceholder}
                 disabled={busy}
+                aria-describedby="github-route-key-help"
               />
-              <datalist id="github-environment-options">
-                {ENVIRONMENT_OPTIONS.map((option) => (
+              <datalist id="github-route-key-options">
+                {copy.routeKeyOptions.map((option) => (
                   <option key={option} value={option} />
                 ))}
               </datalist>
+              <span id="github-route-key-help" className="form-help" style={{ margin: 0 }}>
+                {copy.routeKeyHelp}
+              </span>
             </label>
           </div>
 
@@ -368,7 +415,13 @@ export default function IntegrationMappingsPanel() {
               {busy ? "Saving..." : editingId ? "Update Mapping" : "Save Mapping"}
             </button>
 
-            <button type="button" className="secondary" onClick={resetForm} disabled={busy} style={{ width: "auto" }}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => resetForm()}
+              disabled={busy}
+              style={{ width: "auto" }}
+            >
               Reset
             </button>
           </div>
@@ -377,7 +430,7 @@ export default function IntegrationMappingsPanel() {
         <section className="panel grid" style={{ gap: 14, borderRadius: 12 }}>
           <div>
             <h3 className="section-title" style={{ marginBottom: 4 }}>Active Routes</h3>
-            <p className="form-help">Configured project/environment pairs and their target run profiles.</p>
+            <p className="form-help">{copy.listIntro}</p>
           </div>
 
           {loading ? (
@@ -411,7 +464,9 @@ export default function IntegrationMappingsPanel() {
 
                     <div className="pill-list">
                       <span className="chip">project: {mapping.project}</span>
-                      <span className="chip">env: {mapping.environment}</span>
+                      <span className="chip">
+                        {copy.routeChipPrefix}: {mapping.environment}
+                      </span>
                       <span className="chip">profile: #{mapping.profile_id}</span>
                     </div>
 
@@ -472,7 +527,7 @@ export default function IntegrationMappingsPanel() {
                 <tr>
                   <th>Time</th>
                   <th>Repository</th>
-                  <th>Route</th>
+                  <th>Route ({copy.triggerRouteSubLabel})</th>
                   <th>Status</th>
                   <th>Run</th>
                   <th>Payload</th>

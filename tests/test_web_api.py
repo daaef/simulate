@@ -1812,6 +1812,19 @@ class IntegrationsApiTests(unittest.TestCase):
         digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
         return f"sha256={digest}"
 
+    def test_list_integration_mappings_includes_route_by(self) -> None:
+        response = self.client.get("/api/v1/integrations/github/mappings")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("mappings", body)
+        self.assertIn(body.get("route_by"), {"environment", "branch"})
+
+    def test_list_integration_mappings_reports_branch_mode(self) -> None:
+        with mock.patch.dict(os.environ, {"SIMULATOR_WEBHOOK_ROUTE_BY": "branch"}, clear=False):
+            response = self.client.get("/api/v1/integrations/github/mappings")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("route_by"), "branch")
+
     def test_deployment_webhook_rejects_non_allowlisted_repository(self) -> None:
         web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST = {"backend": ["org/backend"]}
         web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS = {"backend": "backend-secret"}
@@ -1963,6 +1976,77 @@ class IntegrationsApiTests(unittest.TestCase):
         self.assertEqual(ctx.get("profile_id"), profile_id)
         self.assertEqual(ctx.get("profile_name"), "WF Webhook Profile")
         self.assertEqual(ctx.get("workflow_summary", {}).get("workflow_run_id"), workflow_run_id)
+
+    def test_workflow_run_webhook_routes_by_branch_when_configured(self) -> None:
+        wf_secret = "wf-secret-branch"
+        env_overlay = {
+            "SIMULATOR_WEBHOOK_PROJECT_SECRETS": json.dumps({"wfbackend": wf_secret}),
+            "SIMULATOR_WEBHOOK_REPO_ALLOWLIST": json.dumps({"wfbackend": ["org/wf-backend"]}),
+            "SIMULATOR_WEBHOOK_ROUTE_BY": "branch",
+        }
+        workflow_run_id = time.time_ns() + 1
+        with mock.patch.dict(os.environ, env_overlay, clear=False):
+            with mock.patch.object(web_api, "_run_simulation", return_value=None):
+                create_profile = self.client.post(
+                    "/api/v1/run-profiles",
+                    json={
+                        "name": "WF Dev Branch Profile",
+                        "flow": "doctor",
+                        "plan": "sim_actors.json",
+                        "timing": "fast",
+                    },
+                )
+                self.assertEqual(create_profile.status_code, 200)
+                profile_id = int(create_profile.json()["profile"]["id"])
+
+                mapping_response = self.client.post(
+                    "/api/v1/integrations/github/mappings",
+                    json={
+                        "project": "wfbackend",
+                        "environment": "dev",
+                        "profile_id": profile_id,
+                        "enabled": True,
+                    },
+                )
+                self.assertEqual(mapping_response.status_code, 200)
+
+                payload = {
+                    "action": "completed",
+                    "repository": {"full_name": "org/wf-backend"},
+                    "workflow_run": {
+                        "id": workflow_run_id,
+                        "run_attempt": 1,
+                        "conclusion": "success",
+                        "status": "completed",
+                        "head_sha": "cafebabe",
+                        "head_branch": "dev",
+                        "name": "CI",
+                    },
+                }
+                body = json.dumps(payload).encode("utf-8")
+                response = self.client.post(
+                    "/api/v1/integrations/github/deployment-complete",
+                    data=body,
+                    headers={
+                        "X-GitHub-Event": "workflow_run",
+                        "X-Hub-Signature-256": self._signature(wf_secret, body),
+                        "Content-Type": "application/json",
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        hook = response.json()
+        self.assertTrue(hook.get("accepted"))
+        self.assertEqual(hook.get("environment"), "dev")
+        run_id = hook.get("run_id")
+        self.assertIsNotNone(run_id)
+
+        run_resp = self.client.get(f"/api/v1/runs/{run_id}")
+        self.assertEqual(run_resp.status_code, 200)
+        body = run_resp.json()
+        run = body["run"] if isinstance(body.get("run"), dict) else body
+        self.assertEqual(run["trigger_label"], "GitHub integration: wfbackend/dev")
+        self.assertEqual((run.get("trigger_context") or {}).get("environment"), "dev")
 
 
 class CatalogSeedTests(unittest.TestCase):

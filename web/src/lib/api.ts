@@ -517,6 +517,13 @@ export type IntegrationMappingUpsertRequest = {
   enabled: boolean;
 };
 
+export type GitHubWebhookRouteBy = "branch" | "environment";
+
+export type GitHubIntegrationMappingsPayload = {
+  mappings: IntegrationMapping[];
+  route_by: GitHubWebhookRouteBy;
+};
+
 export type GitHubIntegrationTrigger = {
   id: number;
   project?: string | null;
@@ -1035,12 +1042,15 @@ export async function deleteSimulationPlan(planId: string): Promise<{ plan_id: s
   );
 }
 
-export async function fetchGitHubIntegrationMappings(): Promise<IntegrationMapping[]> {
-  const payload = await unwrap<{ mappings: IntegrationMapping[] }>(
+export async function fetchGitHubIntegrationMappings(): Promise<GitHubIntegrationMappingsPayload> {
+  const payload = await unwrap<GitHubIntegrationMappingsPayload>(
     await fetch("/api/v1/integrations/github/mappings", withSession()),
     "github-integration-mappings"
   );
-  return payload.mappings;
+  return {
+    mappings: payload.mappings ?? [],
+    route_by: payload.route_by === "branch" ? "branch" : "environment",
+  };
 }
 
 export async function upsertGitHubIntegrationMapping(

@@ -10,17 +10,13 @@ from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from ..runs import service as runs_service
+from .routing import route_key_from_workflow_run
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 USE_POSTGRES = bool(DATABASE_URL)
 
 DB_PATH = os.getenv("RUN_DB_PATH", "/workspace/simulate/runs/web-gui.sqlite")
-DEFAULT_WORKFLOW_ENVIRONMENT = (
-    os.getenv("SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT")
-    or os.getenv("SIM_ENV")
-    or "production"
-).strip()
 
 
 def _utc_now() -> str:
@@ -387,7 +383,7 @@ def process_github_workflow_run_webhook(
     workflow_run_id = str(workflow_run.get("id") or "")
     run_attempt = str(workflow_run.get("run_attempt") or "")
     sha = str(workflow_run.get("head_sha") or repository_payload.get("pushed_at") or "")
-    environment = DEFAULT_WORKFLOW_ENVIRONMENT or "production"
+    environment = route_key_from_workflow_run(workflow_run)
 
     dedupe_key = f"workflow_run:{repository}:{workflow_run_id}:{run_attempt}:{conclusion or workflow_status}"
     summary = _workflow_payload_summary(payload)

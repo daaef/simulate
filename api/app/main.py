@@ -2275,7 +2275,12 @@ def _list_integration_mappings() -> dict[str, Any]:
             rows = conn.execute(
                 "SELECT * FROM integration_profile_mappings ORDER BY project ASC, environment ASC, id ASC"
             ).fetchall()
-    return {"mappings": [_integration_mapping_row_to_dict_any(row) for row in rows]}
+    from .integrations.routing import webhook_routing_mode
+
+    return {
+        "mappings": [_integration_mapping_row_to_dict_any(row) for row in rows],
+        "route_by": webhook_routing_mode(),
+    }
 
 
 def _upsert_integration_mapping(request: IntegrationMappingUpsertRequest, user_id: Optional[int] = None) -> dict[str, Any]:
@@ -2591,11 +2596,13 @@ def _enqueue_integration_profile_launch(
 
 
 def _normalize_deployment_webhook_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    from .integrations.routing import route_key_from_deployment
+
     deployment = payload.get("deployment") if isinstance(payload.get("deployment"), dict) else {}
     deployment_status = payload.get("deployment_status") if isinstance(payload.get("deployment_status"), dict) else {}
     repository = payload.get("repository") if isinstance(payload.get("repository"), dict) else {}
     repository_full_name = str(repository.get("full_name") or "").strip().lower()
-    environment = str(deployment.get("environment") or "").strip().lower()
+    environment = route_key_from_deployment(deployment)
     sha = str(deployment.get("sha") or "").strip()
     deployment_id = str(deployment.get("id") or "").strip()
     deployment_status_id = str(deployment_status.get("id") or "").strip() or None
