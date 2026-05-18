@@ -164,6 +164,12 @@ Use when:
 Use when:
 - You need non-core API readiness checks or post-order action verification.
 
+**Saved-cards probe triage (`GET /v1/core/cards/`):**
+- Compare the probe decision in `report.md` to session walkthroughs: empty list shape in `app-20260428.full-session-user.md` / `app-20260430.full-session-user.md`; non-empty Stripe list shape in `app-20260517.full-session-user.md`.
+- HTTP 4xx/5xx or transport errors → probe **failed** (API/system issue).
+- HTTP 200 with `data.data: []` or missing/invalid envelope → **inconclusive** with sanitized `raw_payload` in decision details (valid “no cards on file”, not a simulator failure).
+- HTTP 200 with non-empty `data.data` → shape-checked against 20260517; mismatch → **failed**.
+
 ---
 
 ## 5) Full flag guide (operator effect + pitfalls)
@@ -319,8 +325,9 @@ Every run writes:
 
 Fastest triage route:
 1. `report.md` scenario verdicts + findings
-2. run detail Overview findings split (critical vs operational)
-3. `events.json` for exact action/endpoint/status evidence
+2. run detail Overview findings split (critical vs operational) — each row should show API route, flow/step, and preceding steps when `related_event_id` is present
+3. `events.json` for exact action/endpoint/status evidence (Traffic tab marks HTTP 4xx/5xx rows as errors)
+4. For `receipt_review_reorder`: confirm second order events (`reorder_cart_built`, `reorder_place_order`, second lifecycle) after Phase 24 reorder fetch
 
 ---
 
@@ -358,6 +365,8 @@ Backend serializes request into exact CLI argv using API `_build_command`.
 Important distinction:
 - Live capability truth comes from `/api/v1/flows`.
 - Flow planner guide tables in UI are static guidance content.
+
+**Live Console on `/runs`:** Log tail polling is tied to the selected run id, not the 5s runs-table refresh, so the console should not blank or reset while the table updates. During active runs, new log lines append in place and auto-scroll only when you are already at the bottom.
 
 ### 10.1 Execution Impact panel (how to use it)
 

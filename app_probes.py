@@ -9,7 +9,12 @@ import httpx
 
 import config
 from reporting import RunRecorder
-from transport import HttpResult, RequestError, api_data, request_json
+from session_probe_reference import (
+    ALLOWED_SESSION_DOCS,
+    probe_contract,
+    session_reference_details,
+)
+from transport import HttpResult, RequestError, api_data, request_json, sanitize_payload
 
 
 RequestFunc = Callable[..., Awaitable[HttpResult]]
@@ -150,6 +155,7 @@ def _auth_headers(
         return headers, spec.auth_header_name, token, spec.auth_scheme
     return headers, None, None, None
 
+
 def _present(value: Any) -> bool:
     if value is None:
         return False
@@ -228,9 +234,18 @@ def _record_probe_decision(
     next_action = "continue_run"
     run_continued = True
     if status == "skipped":
-        next_action = "skip_api_call"
-    if status == "failed":
+        next_action = (
+            "request_sample_from_user"
+            if reason == "missing_reference_sample"
+            else "skip_api_call"
+        )
+    elif status == "failed":
         next_action = "record_warning_and_continue"
+    elif status == "inconclusive":
+        next_action = "continue_run"
+
+    merged_details = {**session_reference_details(spec.name), **(details or {})}
+
     if hasattr(recorder, "record_decision"):
         recorder.record_decision(
             actor=spec.actor,
@@ -244,7 +259,7 @@ def _record_probe_decision(
             reason_message=message,
             next_action=next_action,
             run_continued=run_continued,
-            details=details or {},
+            details=merged_details,
         )
         return
 
@@ -258,10 +273,11 @@ def _record_probe_decision(
         details={
             "reason": reason,
             "message": message,
-            **(details or {}),
+            **merged_details,
         },
         track_order=False,
     )
+
 
 def _probe_preflight(
     *,
@@ -270,43 +286,212 @@ def _probe_preflight(
     token: str | None,
     customer_id: str | None = None,
 ) -> tuple[bool, str, str]:
-    if spec.name == "pricing":
-        if not _present(context.get("currency")):
-            return False, "missing_currency", "Pricing was skipped because currency is missing."
-        if not _present(token):
-            return False, "missing_product_auth", "Pricing was skipped because product authentication was not available."
-        return True, "preflight_passed", "Pricing has product authentication and currency."
+    contract = probe_contract(spec.name) or {}
+    variants = tuple(contract.get("variants") or ())
+    if not variants:
+        return (
+            False,
+            "missing_reference_sample",
+            f"{spec.name} was skipped because no reference sample exists in the allowed session docs.",
+        )
 
-    if spec.name == "saved_cards":
-        if not _present(token):
-            return False, "missing_user_token", "Saved cards were skipped because user authentication is missing."
-        if not _present(customer_id):
-            return False, "no_customer_id", "Saved cards were skipped because this user has no Stripe/customer ID."
-        return True, "preflight_passed", "Saved cards can be checked."
+    def _requirement_value(field: str) -> Any:
+        if field == "auth_token":
+            return token
+        if field == "user_id":
+            return context.get("user_id")
+        if field == "subentity_id":
+            return context.get("subentity_id")
+        if field == "currency":
+            return context.get("currency")
+        if field == "customer_id":
+            return customer_id
+        return context.get(field)
 
-    if spec.name == "coupons":
-        if not _present(token):
-            return False, "missing_user_token", "Coupons were skipped because user authentication is missing."
-        return True, "preflight_passed", "Coupons can be checked."
-
-    if spec.name == "user_active_orders":
-        if not _present(token):
-            return False, "missing_user_token", "Active orders were skipped because user authentication is missing."
-        if not _present(context.get("user_id")):
-            return False, "missing_user_id", "Active orders were skipped because user_id is missing."
-        return True, "preflight_passed", "Active orders can be checked."
-
-    if spec.name in {"store_orders", "store_statistics", "top_customers"}:
-        if not _present(token):
-            return False, "missing_store_token", f"{spec.name} was skipped because store token is missing."
-        if not _present(context.get("subentity_id")):
-            return False, "missing_subentity_id", f"{spec.name} was skipped because subentity_id is missing."
-        return True, "preflight_passed", f"{spec.name} can be checked."
+    for requirement in tuple(contract.get("preflight") or ()):
+        field = str(requirement.get("field") or "").strip()
+        if not field:
+            continue
+        if _present(_requirement_value(field)):
+            continue
+        reason = str(requirement.get("reason_code") or "missing_required_probe_data")
+        message = str(requirement.get("message") or f"{spec.name} was skipped because {field} is missing.")
+        return False, reason, message
 
     if spec.auth_header_name and not _present(token):
         return False, "missing_auth_token", f"{spec.name} was skipped because required auth token is missing."
 
-    return True, "preflight_passed", f"{spec.name} can be checked."
+    return True, "preflight_passed", f"{spec.name} preflight passed with documented contract requirements."
+
+
+def _path_value(payload: Any, path: tuple[str, ...] | None) -> tuple[bool, Any]:
+    if path is None:
+        return True, payload
+    current = payload
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            return False, None
+        current = current[key]
+    return True, current
+
+
+def _scalar_matches(value: Any, expected_kind: str | None) -> bool:
+    if expected_kind is None:
+        return True
+    if expected_kind == "string":
+        return isinstance(value, str) and bool(value.strip())
+    if expected_kind == "number":
+        return isinstance(value, (int, float))
+    if expected_kind == "boolean":
+        return isinstance(value, bool)
+    return False
+
+
+def _matches_variant(payload: Any, variant: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+
+    envelope_keys = tuple(variant.get("envelope_keys") or ())
+    if any(key not in payload for key in envelope_keys):
+        return False
+
+    container_path = variant.get("container_path")
+    if container_path is not None:
+        found, container = _path_value(payload, tuple(container_path))
+        if not found or not isinstance(container, dict):
+            return False
+        required_keys = tuple(variant.get("container_required_keys") or ())
+        if any(key not in container for key in required_keys):
+            return False
+
+    list_path = variant.get("list_path")
+    if list_path is not None:
+        found, list_value = _path_value(payload, tuple(list_path))
+        if not found or not isinstance(list_value, list):
+            return False
+        list_state = str(variant.get("list_state") or "any").strip().lower()
+        if list_state == "empty" and list_value:
+            return False
+        if list_state == "nonempty" and not list_value:
+            return False
+        if not list_value:
+            return bool(variant.get("list_allow_empty", True))
+        item_keys = tuple(variant.get("list_item_required_keys") or ())
+        if not item_keys:
+            return True
+        for item in list_value:
+            if not isinstance(item, dict):
+                return False
+            if any(key not in item for key in item_keys):
+                return False
+
+    scalar_path = variant.get("scalar_path")
+    if scalar_path is not None:
+        found, scalar = _path_value(payload, tuple(scalar_path))
+        scalar_kind = variant.get("scalar_kind")
+        expected_kind = str(scalar_kind) if scalar_kind is not None else None
+        if not found or not _scalar_matches(scalar, expected_kind):
+            return False
+
+    return True
+
+
+def _variant_label(variant: dict[str, Any]) -> str:
+    source_doc = str(variant.get("source_doc") or "unknown-doc")
+    source_phase = str(variant.get("source_phase") or "unknown-phase")
+    return f"{source_doc} ({source_phase})"
+
+
+def _validate_probe_response(spec: ProbeSpec, result: HttpResult) -> tuple[str, str, str, dict[str, Any]]:
+    contract = probe_contract(spec.name) or {}
+    variants = tuple(contract.get("variants") or ())
+    details: dict[str, Any] = {
+        "raw_payload": sanitize_payload(result.payload),
+        "http_status": result.response.status_code,
+    }
+    if not variants:
+        return (
+            "skipped",
+            "missing_reference_sample",
+            f"{spec.name} has no documented sample variant in allowed session docs.",
+            {
+                **details,
+                "next_action": "request_sample_from_user",
+                "allowed_source_docs": list(ALLOWED_SESSION_DOCS),
+            },
+        )
+
+    status_code = result.response.status_code
+    status_variants = [
+        variant
+        for variant in variants
+        if status_code in tuple(variant.get("allowed_http_statuses") or ())
+    ]
+    if not status_variants:
+        documented_statuses = sorted(
+            {
+                int(code)
+                for variant in variants
+                for code in tuple(variant.get("allowed_http_statuses") or ())
+            }
+        )
+        return (
+            "inconclusive",
+            "probe_status_undocumented",
+            f"Probe {spec.name} returned HTTP {status_code}; documented statuses are {documented_statuses}.",
+            {**details, "documented_http_statuses": documented_statuses},
+        )
+
+    matched_variant = next(
+        (variant for variant in status_variants if _matches_variant(result.payload, variant)),
+        None,
+    )
+    if matched_variant is None:
+        return (
+            "inconclusive",
+            "probe_schema_undocumented",
+            f"Probe {spec.name} returned HTTP {status_code}, but payload shape is not documented.",
+            {
+                **details,
+                "status_matched_variants": [_variant_label(variant) for variant in status_variants],
+            },
+        )
+
+    return (
+        "passed",
+        "probe_response_ok",
+        f"Probe {spec.name} matches documented sample variant from {_variant_label(matched_variant)}.",
+        {**details, "matched_variant": _variant_label(matched_variant)},
+    )
+
+
+def _record_probe_outcome(
+    recorder: RunRecorder,
+    *,
+    spec: ProbeSpec,
+    result: HttpResult,
+    scenario: str | None,
+    step: str | None,
+) -> None:
+    status, reason, message, details = _validate_probe_response(spec, result)
+
+    if result.event:
+        details["related_event_id"] = result.event.get("id")
+        preview = result.event.get("response_preview")
+        if preview:
+            details["response_preview"] = preview
+
+    _record_probe_decision(
+        recorder,
+        spec=spec,
+        status=status,
+        reason=reason,
+        message=message,
+        scenario=scenario,
+        step=step,
+        details=details,
+    )
+
 
 async def run_probe(
     client: httpx.AsyncClient,
@@ -346,6 +531,23 @@ async def run_probe(
                 "token_present": bool(token),
             },
         )
+        if reason == "missing_reference_sample":
+            recorder.record_issue(
+                severity="warning",
+                code="probe_sample_needed",
+                actor=spec.actor,
+                scenario=scenario,
+                step=step or spec.name,
+                message=(
+                    f"Probe {spec.name} skipped because no sample exists in approved session docs; "
+                    "please provide a sample payload."
+                ),
+                details={
+                    "reason_code": reason,
+                    "next_action": "request_sample_from_user",
+                    "allowed_source_docs": list(ALLOWED_SESSION_DOCS),
+                },
+            )
         return None
 
     endpoint = spec.endpoint.format(**context)
@@ -372,7 +574,7 @@ async def run_probe(
     )
 
     try:
-        return await request_func(
+        result = await request_func(
             client,
             recorder=recorder,
             actor=spec.actor,
@@ -392,6 +594,38 @@ async def run_probe(
             track_order=False,
         )
     except RequestError as exc:
+        status_code: int | None = None
+        if exc.result is not None:
+            status_code = exc.result.response.status_code
+
+        if status_code is not None and status_code < 500 and exc.result is not None:
+            _record_probe_outcome(
+                recorder,
+                spec=spec,
+                result=exc.result,
+                scenario=scenario,
+                step=step,
+            )
+            return exc.result
+
+        reason = "probe_http_error"
+        if status_code is not None and status_code >= 500:
+            reason = "probe_http_server_error"
+        _record_probe_decision(
+            recorder,
+            spec=spec,
+            status="failed",
+            reason=reason,
+            message=f"Probe {spec.name} failed after preflight passed: {exc}",
+            scenario=scenario,
+            step=step,
+            details={
+                "related_event_id": exc.event["id"] if exc.event else None,
+                "raw_payload": sanitize_payload(
+                    exc.result.payload if exc.result else exc.event
+                ),
+            },
+        )
         recorder.record_issue(
             severity="warning",
             code="probe_failed",
@@ -401,7 +635,17 @@ async def run_probe(
             related_event_id=exc.event["id"] if exc.event else None,
             message=f"Probe {spec.name} failed after preflight passed: {exc}",
         )
+        return None
     except Exception as exc:
+        _record_probe_decision(
+            recorder,
+            spec=spec,
+            status="failed",
+            reason="probe_unexpected_error",
+            message=f"Probe {spec.name} failed after preflight passed: {exc}",
+            scenario=scenario,
+            step=step,
+        )
         recorder.record_issue(
             severity="warning",
             code="probe_failed",
@@ -410,8 +654,17 @@ async def run_probe(
             step=step or spec.name,
             message=f"Probe {spec.name} failed after preflight passed: {exc}",
         )
+        return None
 
-    return None
+    _record_probe_outcome(
+        recorder,
+        spec=spec,
+        result=result,
+        scenario=scenario,
+        step=step,
+    )
+    return result
+
 
 def probe_spec(name: str) -> ProbeSpec:
     for spec in PROBE_SPECS:
@@ -564,6 +817,7 @@ async def run_user_app_probes(
         token_source=token_source,
         scenario=scenario,
     )
+
 
 async def run_store_dashboard_probes(
     client: httpx.AsyncClient,

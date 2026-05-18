@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from decision_reasons import is_informational_decision_reason
+from session_flow_labels import flow_label_for
 from ..runs import service as runs_service
 
 
@@ -166,9 +167,102 @@ def _finding_bucket_issue(issue: dict[str, Any]) -> FindingBucket:
     return "operational"
 
 
+def _http_status_value(event: dict[str, Any] | None, details: dict[str, Any]) -> int | None:
+    for source in (event or {}, details):
+        raw = source.get("http_status") or source.get("status_code")
+        try:
+            if raw is not None:
+                return int(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _preceding_steps(
+    events: list[dict[str, Any]],
+    *,
+    related_event: dict[str, Any] | None,
+    actor: str | None,
+    flow: str | None,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    if related_event is None:
+        return []
+
+    related_id = related_event.get("id")
+    actor_key = _lower(actor or related_event.get("actor"))
+    flow_key = _lower(flow or related_event.get("scenario"))
+    preceding: list[dict[str, Any]] = []
+
+    for event in events:
+        try:
+            event_id = int(event.get("id"))
+        except (TypeError, ValueError):
+            continue
+        try:
+            if related_id is not None and event_id >= int(related_id):
+                continue
+        except (TypeError, ValueError):
+            continue
+        if actor_key and _event_actor(event) != actor_key:
+            continue
+        if flow_key and _lower(event.get("scenario")) != flow_key:
+            continue
+        endpoint = _event_endpoint(event) or None
+        action = _event_action(event)
+        if not endpoint and not action:
+            continue
+        preceding.append(
+            {
+                "at": _event_timestamp(event) or None,
+                "action": action,
+                "step": _str(event.get("step")) or None,
+                "endpoint": endpoint,
+                "ok": event.get("ok") if event.get("ok") is not None else not _is_failed_event(event),
+            }
+        )
+
+    return preceding[-limit:]
+
+
+def _issue_context_fields(
+    *,
+    issue: dict[str, Any] | None,
+    related_event: dict[str, Any] | None,
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    details = issue.get("details") if issue and isinstance(issue.get("details"), dict) else {}
+    flow = _str(issue.get("scenario") if issue else None) or _str((related_event or {}).get("scenario")) or None
+    step = _str(issue.get("step") if issue else None) or _str((related_event or {}).get("step")) or None
+    action = _str((related_event or {}).get("action")) or None
+    flow_label = flow_label_for(step=step, action=action or step)
+    order_ref = issue.get("order_ref") if issue else None
+    if order_ref is None and related_event is not None:
+        order_ref = related_event.get("order_ref")
+    http_status = _http_status_value(related_event, details)
+    preceding = _preceding_steps(
+        events,
+        related_event=related_event,
+        actor=issue.get("actor") if issue else (related_event or {}).get("actor"),
+        flow=flow,
+    )
+    fields: dict[str, Any] = {
+        "flow": flow or None,
+        "step": step or None,
+        "method": (related_event or {}).get("method"),
+        "http_status": http_status,
+        "order_ref": order_ref,
+        "preceding_steps": preceding,
+    }
+    if flow_label:
+        fields["flow_label"] = flow_label
+    return fields
+
+
 def _issue_row_from_artifact(
     issue: dict[str, Any],
     event_by_id: dict[int, dict[str, Any]],
+    events: list[dict[str, Any]],
 ) -> dict[str, Any]:
     related_event = None
     try:
@@ -181,7 +275,7 @@ def _issue_row_from_artifact(
         or _str(details.get("endpoint") or details.get("path") or details.get("url") or details.get("full_url"))
         or None
     )
-    return {
+    row = {
         "severity": issue.get("severity") or "warning",
         "code": issue.get("code") or "issue",
         "message": issue.get("message") or "Recorded issue",
@@ -189,6 +283,37 @@ def _issue_row_from_artifact(
         "at": issue.get("ts"),
         "route": route,
     }
+    row.update(_issue_context_fields(issue=issue, related_event=related_event, events=events))
+    return row
+
+
+def _issue_row_from_event(event: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
+    action = _str(event.get("action") or event.get("category") or "failed_event")
+    step = _str(event.get("step")) or None
+    flow = _str(event.get("scenario")) or None
+    flow_label = flow_label_for(step=step, action=action)
+    row = {
+        "severity": "error",
+        "code": action,
+        "message": _event_message(event) or _event_endpoint(event) or "Failed event",
+        "actor": event.get("actor"),
+        "at": _event_timestamp(event),
+        "route": _event_endpoint(event) or None,
+        "flow": flow,
+        "step": step,
+        "method": event.get("method"),
+        "http_status": _http_status_value(event, {}),
+        "order_ref": event.get("order_ref"),
+        "preceding_steps": _preceding_steps(
+            events,
+            related_event=event,
+            actor=_str(event.get("actor")) or None,
+            flow=flow,
+        ),
+    }
+    if flow_label:
+        row["flow_label"] = flow_label
+    return row
 
 
 def _event_timestamp(event: dict[str, Any]) -> str:
@@ -553,7 +678,7 @@ def _build_findings(
 
     for issue in artifact_issues[:24]:
         try:
-            row = _issue_row_from_artifact(issue, event_by_id)
+            row = _issue_row_from_artifact(issue, event_by_id, events)
             if _finding_bucket_issue(issue) == "critical":
                 critical.append(row)
             else:
@@ -567,16 +692,7 @@ def _build_findings(
         try:
             if not _is_server_api_failure_event(event):
                 continue
-            critical.append(
-                {
-                    "severity": "error",
-                    "code": event.get("action") or event.get("category") or "failed_event",
-                    "message": _event_message(event) or _event_endpoint(event) or "Failed event",
-                    "actor": event.get("actor"),
-                    "at": _event_timestamp(event),
-                    "route": _event_endpoint(event) or None,
-                }
-            )
+            critical.append(_issue_row_from_event(event, events))
         except Exception:
             continue
 
@@ -590,6 +706,12 @@ def _build_findings(
                 "actor": "system",
                 "at": run.get("finished_at") or run.get("created_at"),
                 "route": None,
+                "flow": None,
+                "step": None,
+                "method": None,
+                "http_status": None,
+                "order_ref": None,
+                "preceding_steps": [],
             },
         )
 

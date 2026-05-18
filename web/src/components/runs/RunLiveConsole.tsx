@@ -6,6 +6,7 @@ import RunLogViewer from "./RunLogViewer";
 interface RunLiveConsoleProps {
   selectedRun: RunRow | null;
   log: string;
+  logRef?: (node: HTMLPreElement | null) => void;
   isExpanded: boolean;
   onToggleExpanded: () => void;
   logClassForLine: (line: string) => string;
@@ -57,6 +58,7 @@ function collapsedSummary(selectedRun: RunRow | null): string {
 export default function RunLiveConsole({
   selectedRun,
   log,
+  logRef,
   isExpanded,
   onToggleExpanded,
   logClassForLine,
@@ -86,7 +88,7 @@ export default function RunLiveConsole({
           ) : (
             <div className="muted">No run selected.</div>
           )}
-          <RunLogViewer log={log || null} logClassForLine={logClassForLine} />
+          <RunLogViewer ref={logRef} log={log || null} logClassForLine={logClassForLine} />
         </>
       ) : null}
     </div>

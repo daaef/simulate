@@ -113,12 +113,12 @@ Redirects to `/overview` when a session cookie exists, otherwise `/auth/login`.
 
 - **Header strip** — Title, theme, profile, **API health** note (healthz scope), link to Overview flow ladder.
 - **Run statistics** — Status + flow distribution bars; optional **Last succeeded / Last failed** panels when API returns highlights.
-- **Start Run** (`CollapsibleSection`) — `RunLaunchPanel` + `RunLiveConsole`. Plan dropdown (`sim_actors.json` + `runs/gui-plans/*`), flow/mode/suite/scenario controls gated by `/api/v1/flows`, command preview, websocket gate checkbox, advanced overrides.
+- **Start Run** (`CollapsibleSection`) — `RunLaunchPanel` + `RunLiveConsole`. Plan dropdown (`sim_actors.json` + `runs/gui-plans/*`), flow/mode/suite/scenario controls gated by `/api/v1/flows`, command preview, websocket gate checkbox, advanced overrides. In Advanced Mode Overrides, `Scenarios (trace only)` is a searchable chips multiselect (typeahead + keyboard nav) limited to supported flow scenarios.
 - **Saved profiles** — CRUD and launch saved configurations (behavior preserved; labels improved only under observability work).
 - **Recent runs table** — Select run, open detail, actions.
 - **Admin dashboard embed** — Role-gated operator tools when permitted.
 
-**Refresh:** Health poll ~10s; runs + summary poll ~5s while page is open.
+**Refresh:** Health poll ~10s; runs + summary poll ~5s while page is open. The **Live Console** log tail polls on the selected run id only (not when the runs table refreshes), so the console does not flash empty during active runs; new lines auto-scroll only when you are already at the bottom.
 
 ### Start Run: Execution Impact assistant
 
@@ -170,7 +170,7 @@ Each launcher control now includes an example hint. Typical examples:
 Run detail: summary, log download, artifacts (`report.md`, `story.md`, `events.json`), metrics—deep dive after a failure.
 Run detail data is strictly scoped to the requested run id: active runs do not backfill artifact paths from historical logs, and `/runs/{id}` reads only `run-{id}.log` metadata plus that run row paths.
 
-**Overview tab:** Shows aggregate metrics plus a **metrics-first dashboard** (Business default view, segmented Operations/Engineering views, and collapsed technical action drill-down with action-key search). It also renders side-by-side findings cards from `findings.critical` and `findings.operational` on `GET /api/v1/overview/runs/{run_id}` (flat `issues` is critical-only). Critical includes server/API/websocket availability and websocket event gaps; operational covers missing tokens, probes, coupons, and non-enforced gate bypass warnings. `GET /api/v1/runs/{id}/metrics` returns `action_counts` as `{ action, count }[]` (every distinct `action` in `events.json`, sorted by count then name). Process output is stored per run in `run-{id}.log`; the **Console** tab polls while the run is active. Use **Traffic** for the raw event stream.
+**Overview tab:** Shows aggregate metrics plus a **metrics-first dashboard** (Business default view, segmented Operations/Engineering views, and collapsed technical action drill-down with action-key search). It also renders side-by-side findings cards from `findings.critical` and `findings.operational` on `GET /api/v1/overview/runs/{run_id}` (flat `issues` is critical-only). Critical includes server/API/websocket availability and websocket event gaps; operational covers missing tokens, probes, coupons, and non-enforced gate bypass warnings. `GET /api/v1/runs/{id}/metrics` returns `action_counts` as `{ action, count }[]` (every distinct `action` in `events.json`, sorted by count then name). Process output is stored per run in `run-{id}.log`; the **Console** tab polls while the run is active and preserves scroll position (append-only updates, stick-to-bottom only when already at the bottom). Use **Traffic** for the raw event stream.
 
 ### Route: `/config`
 
@@ -209,10 +209,14 @@ Generated artifacts per run:
 - `runs/<timestamp>/events.json`: complete event ledger.
 - `runs/<timestamp>/report.md`: summary + bottlenecks + tabled findings + technical trace.
 - `runs/<timestamp>/story.md`: narrative scenario summary.
-- `events.json` includes decision records (`called`, `blocked`, `skipped`, `recovered`, `failed`) with reason code/message, next action, and whether the run continued.
+- `events.json` includes decision records (`called`, `blocked`, `passed`, `inconclusive`, `skipped`, `recovered`, `failed`) with reason code/message, next action, and whether the run continued.
+- Probe decisions use strict semantics: `failed` only for transport/timeout/connection/HTTP `5xx`; documented response variants are `passed`; undocumented but successful responses are `inconclusive`; and missing data/sample contracts are `skipped`.
+- Missing-sample probes are recorded as `reason_code=missing_reference_sample`, `next_action=request_sample_from_user`, and a `probe_sample_needed` operator finding.
 - Overview page behavior: Latest Run `Critical Findings` is filtered to server/API availability failures (`5xx`, transport/network, websocket connection availability). Missing-information or business-availability conditions (for example missing token, no saved card, no coupon) stay in `events.json`/`report.md`/`story.md` but are intentionally excluded from Overview.
 - Decision-category skips/recoveries for expected reasons (for example `unsupported_profile_fetch_contract`, `no_customer_id`, `missing_*`, `missing_auth_token`) are treated as informational context, not failures, in overview counters/findings and report decision summaries.
-- Overview `Critical Findings` rows include failed route/endpoint when available, and the Latest Run hero surfaces context chips such as `profile:<name>`, `schedule:<name>`, and integration `route:<project/environment>`.
+- Overview `Critical Findings` rows include failed route/endpoint, HTTP method/status, simulator flow/step, optional session phase label (`flow_label`), preceding steps from artifacts, and the Latest Run hero surfaces context chips such as `profile:<name>`, `schedule:<name>`, and integration `route:<project/environment>`.
+- Latest Run Overview also renders **Operational Findings** next to critical (missing token, probes, gate bypass with `enforced: false`, etc.).
+- `receipt_review_reorder` with post-order actions enabled: after receipt/review/reorder fetch, the simulator builds the cart from `GET /v1/core/reorder/?order_id=` response data and runs a **full second order** lifecycle (place → accept → payment → robot → completed).
 
 Configuration precedence:
 
@@ -225,6 +229,7 @@ The GUI stores admin-created plans in `runs/gui-plans/` and launches them throug
 On the Runs page, Start Run plan selection is dropdown-only: `sim_actors.json` is always shown, then GUI plans from `runs/gui-plans/`; manual text entry is not supported.
 Start Run now reads flow capabilities from `GET /api/v1/flows` and conditionally renders only flags valid for the selected `Flow`, resolved `Mode`, and selected `Suite/Scenarios`.
 Advanced Mode Overrides are optional and let operators explicitly set `--mode`, `--suite`, and repeated `--scenario` flags; command preview mirrors typed fields exactly.
+The `Scenarios (trace only)` control in Advanced Mode Overrides is a searchable chips multiselect. It only allows scenarios returned by the selected flow capability (no free-text custom scenario values).
 Trace-context fields in the launcher: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, `enforce_websocket_gates`.
 Load-context fields in the launcher: `users`, `orders`, `interval`, `reject`, `continuous`, `all_users`, plus shared store/phone/provision controls.
 
@@ -567,10 +572,19 @@ Common failure signatures:
 
 ### User-app probes (`app_probes.py`)
 
+Preflight and post-call validation are grounded in session walkthrough docs via `session_probe_reference.py`, and only these five docs are allowed as contract sources:
+- `app-20260428.full-session-user.md`
+- `app-20260430.full-session-user.md`
+- `app-20260517.full-session-user.md`
+- `app-20260429.full-session-store.md`
+- `app-20260430.full-session-store.md`
+
+Contracts are variant-based (documented status + envelope/schema-key signatures), not exact payload-value matching. Probe decisions in `report.md` include source-doc attribution and sanitized payload preview where available.
+
 - `GET /v1/entities/configs/`
 - `POST /v1/biz/product/authentication/?product=rds`
 - `GET /v1/biz/pricing/0/?product_name=lastmile&currency=<currency>`
-- `GET /v1/core/cards/`
+- `GET /v1/core/cards/` — empty and non-empty variants are both documented and can pass when schema keys match.
 - `GET /v1/core/coupon/`
 - `GET /v1/core/orders/?user=<user_id>`
 
@@ -579,6 +593,13 @@ Common failure signatures:
 - `GET /v1/core/orders/?subentity_id=<id>`
 - `GET /v1/statistics/subentities/<id>/`
 - `GET /v1/statistics/subentities/<id>/top-customers/`
+
+Probe status policy:
+- `failed`: request exception, timeout/connection error, or HTTP `5xx`.
+- `passed`: endpoint called and response matches a documented contract variant.
+- `inconclusive`: endpoint called, but status/shape variant is undocumented.
+- `skipped`: required preflight data is missing, or no contract sample exists.
+- `failed_events` metrics and run-event rendering use these statuses directly and do not infer failure from `decision.ok=false`.
 
 ### Core order lifecycle
 
@@ -601,7 +622,7 @@ Common failure signatures:
 
 - Receipt: `GET /v1/core/generate-receipt/<order_id>/`
 - Review: `POST /v1/core/reviews/`
-- Reorder: `GET /v1/core/reorder/?order_id=<id>`
+- Reorder fetch: `GET /v1/core/reorder/?order_id=<id>` (returns cart lines; simulator may place a second order from that payload when post-order + `receipt_review_reorder` run)
 
 ### Websocket channels
 
@@ -846,9 +867,14 @@ Scheduling procedure:
 6. Save the schedule, then confirm the `Next Automatic Trigger` panel and table metadata.
 7. Use `Pause`, `Resume`, `Disable`, `Delete`, and `Restore` for lifecycle control. `pause`, `disable`, and `delete` clear `next_run_at`; `resume` and `restore` recalculate it.
 
-#### Catalog presets (paused templates)
+#### Catalog presets
 
-On database init, the API seeds six **catalog** run profiles (`daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and one **paused** daily schedule per profile (08:00 UTC). They appear in **Runs** (profiles may show a **Catalog** label) and **Schedules**; resume a schedule when you want that preset to run automatically. Catalog profiles and catalog-backed schedules are not deletable via the API (403). To disable this seed entirely, set env `SIM_SKIP_CATALOG_SEED` to `1`, `true`, or `yes` before starting the API.
+On database init, the API seeds seven **catalog** run profiles (`api-sweep-max`, `daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and one catalog schedule per profile. They appear in **Runs** (profiles may show a **Catalog** label) and **Schedules**.
+
+- `api-sweep-max` is the top-pinned profile in list ordering and is paired with an **active** UTC schedule that runs at `06:00`, `14:00`, and `20:00` daily.
+- All other catalog schedules remain **paused** daily templates at `08:00 UTC`; resume them when you want automatic triggers.
+
+Catalog profiles and catalog-backed schedules are not deletable via the API (403). To disable this seed entirely, set env `SIM_SKIP_CATALOG_SEED` to `1`, `true`, or `yes` before starting the API.
 
 `bounded-load-smoke` is now a **phased bounded load** profile: it enforces a completed-order baseline first (`>=1`) before applying reject/cancel tail pressure. If baseline cannot be met within the configured bound, the run fails with `accepted_baseline_not_met`.
 

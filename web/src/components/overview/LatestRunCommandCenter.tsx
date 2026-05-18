@@ -4,6 +4,7 @@ import type { LatestRunOverview } from "../../lib/api";
 import RunActionCountsPanel from "../runs/RunActionCountsPanel";
 import ActorStrip from "./ActorStrip";
 import CriticalFindings from "./CriticalFindings";
+import OperationalFindings from "./OperationalFindings";
 import LatestRunHero from "./LatestRunHero";
 import LifecycleTimeline from "./LifecycleTimeline";
 import ProtocolHealthBoard from "./ProtocolHealthBoard";
@@ -47,7 +48,10 @@ export default function LatestRunCommandCenter({
       />
       <section className="grid two">
         <LifecycleTimeline steps={overview.lifecycle || []} />
-        <CriticalFindings issues={overview.issues || []} />
+        <div className="grid" style={{ gap: 12 }}>
+          <CriticalFindings issues={overview.findings?.critical ?? overview.issues ?? []} />
+          <OperationalFindings issues={overview.findings?.operational ?? []} />
+        </div>
       </section>
       <TopTrafficPanel
         http={overview.protocols?.http || {}}

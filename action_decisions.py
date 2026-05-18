@@ -3,7 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-DecisionStatus = Literal["called", "blocked", "skipped", "recovered", "failed"]
+DecisionStatus = Literal[
+    "called",
+    "blocked",
+    "skipped",
+    "recovered",
+    "failed",
+    "passed",
+    "inconclusive",
+]
 
 
 @dataclass(frozen=True)

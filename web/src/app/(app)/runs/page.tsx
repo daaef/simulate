@@ -15,6 +15,7 @@ import ActiveRunsStrip from "../../../components/runs/ActiveRunsStrip";
 import RunLaunchHelpSidebar from "../../../components/runs/RunLaunchHelpSidebar";
 import RunLaunchPanel from "../../../components/runs/RunLaunchPanel";
 import RunLiveConsole from "../../../components/runs/RunLiveConsole";
+import { useRunLogTail } from "../../../lib/useRunLogTail";
 import RunProfilesPanel from "../../../components/runs/RunProfilesPanel";
 import RunStatistics from "../../../components/runs/RunStatistics";
 import {
@@ -27,7 +28,6 @@ import {
   fetchDashboardSummary,
   fetchFlows,
   fetchHealth,
-  fetchRunLog,
   fetchRunProfiles,
   fetchRuns,
   fetchSimulationPlans,
@@ -396,7 +396,6 @@ export default function App() {
   const router = useRouter();
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [guideTab, setGuideTab] = useState<GuideTab>("flows");
-  const [logText, setLogText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isProfileSubmitting, setIsProfileSubmitting] = useState(false);
   const [isProfileLaunching, setIsProfileLaunching] = useState(false);
@@ -539,32 +538,16 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [selectedRunId, runsOffset]);
 
-  useEffect(() => {
-    if (!selectedRunId) {
-      setLogText("");
-      return;
-    }
-    setLogText("");
-    const status = (runs.find((run) => run.id === selectedRunId)?.status || "").toLowerCase();
-    const shouldPoll = isActiveStatus(status);
-    const refreshLog = () => {
-      fetchRunLog(selectedRunId)
-        .then((payload) => {
-          setLogText(payload.log);
-          clearErrorForSource("run-log");
-        })
-        .catch((err: unknown) => setErrorForSource("run-log", err, "Failed to load run log."));
-    };
-    refreshLog();
-    if (!shouldPoll) return;
-    const timer = window.setInterval(refreshLog, 1000);
-    return () => window.clearInterval(timer);
-  }, [selectedRunId, runs]);
-
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? null,
     [runs, selectedRunId]
   );
+
+  const shouldPollLog = Boolean(selectedRunId && selectedRun && isActiveStatus(selectedRun.status));
+  const { log: logText, setLogRef } = useRunLogTail(selectedRunId, {
+    enabled: shouldPollLog,
+    pollMs: 1000,
+  });
 
   const activeRuns = useMemo(
     () => runs.filter((run) => isActiveStatus(run.status)),
@@ -984,6 +967,7 @@ export default function App() {
                 <RunLiveConsole
                   selectedRun={selectedRun}
                   log={logText}
+                  logRef={setLogRef}
                   isExpanded={isLiveConsoleExpanded}
                   onToggleExpanded={() => setIsLiveConsoleExpanded(!isLiveConsoleExpanded)}
                   logClassForLine={logClassForLine}

@@ -25,8 +25,18 @@ export default function ProtocolHealthBoard({
             <p className="eyebrow">HTTP</p>
             <h3>{percentage(successHttp, totalHttp)} healthy</h3>
           </div>
-          <span className={`status-pill ${(http.failed || 0) > 0 ? "status-danger" : "status-success"}`}>
-            {http.failed || 0} failed
+          <span
+            className={`status-pill ${
+              (http.failed || 0) > 0
+                ? "status-danger"
+                : (http.status_groups?.["4xx"] || 0) > 0
+                  ? "status-warning"
+                  : "status-success"
+            }`}
+          >
+            {(http.failed || 0) > 0
+              ? `${http.failed} server failed`
+              : `${http.status_groups?.["4xx"] || 0} client errors`}
           </span>
         </div>
 
@@ -34,7 +44,8 @@ export default function ProtocolHealthBoard({
           <div><span>Total</span><strong>{http.total || 0}</strong></div>
           <div><span>Avg latency</span><strong>{http.avg_latency_ms ? `${http.avg_latency_ms}ms` : "—"}</strong></div>
           <div><span>2xx</span><strong>{http.status_groups?.["2xx"] || 0}</strong></div>
-          <div><span>4xx/5xx</span><strong>{(http.status_groups?.["4xx"] || 0) + (http.status_groups?.["5xx"] || 0)}</strong></div>
+          <div><span>4xx</span><strong>{http.status_groups?.["4xx"] || 0}</strong></div>
+          <div><span>5xx+</span><strong>{http.status_groups?.["5xx"] || 0}</strong></div>
         </div>
 
         {http.slowest ? (

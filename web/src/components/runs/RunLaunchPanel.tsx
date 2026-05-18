@@ -11,6 +11,7 @@ import type {
 import type { LauncherFieldId } from "../../lib/run-launcher-config";
 import LaunchActorSelect from "./LaunchActorSelect";
 import { launcherFieldFocusHandlers, notifyLauncherField } from "./RunLaunchHelpSidebar";
+import ScenarioChipsMultiSelect from "./ScenarioChipsMultiSelect";
 
 interface RunLaunchPanelProps {
   flows: string[];
@@ -225,25 +226,15 @@ export default function RunLaunchPanel({
               </label>
               <label style={{ gridColumn: "1 / -1" }} {...focus("scenarios")}>
                 <div>Scenarios (trace only)</div>
-                <select
-                  multiple
+                <ScenarioChipsMultiSelect
+                  options={scenarioOptions}
                   value={form.scenarios || []}
                   disabled={!isTraceMode}
-                  onChange={(event) => {
-                    touch("scenarios");
-                    onFormChange((prev) => ({
-                      ...prev,
-                      scenarios: Array.from(event.target.selectedOptions).map((option) => option.value),
-                    }));
+                  onTouch={() => touch("scenarios")}
+                  onChange={(scenarios) => {
+                    onFormChange((prev) => ({ ...prev, scenarios }));
                   }}
-                  style={{ minHeight: 120 }}
-                >
-                  {scenarioOptions.map((scenario) => (
-                    <option key={scenario} value={scenario}>
-                      {scenario}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
             </div>
           ) : null}

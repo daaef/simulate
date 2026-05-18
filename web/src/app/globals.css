@@ -18,9 +18,14 @@
   --focus-ring: #2563eb;
   --button-primary: #111827;
   --button-primary-text: #ffffff;
+  --button-primary-hover: #1f2937;
   --button-secondary: #ffffff;
   --button-secondary-text: #111827;
-  --button-border: #9ca3af;
+  --button-secondary-hover: #f3f4f6;
+  --button-border: #6b7280;
+  --button-secondary-border: #6b7280;
+  --button-disabled-bg: #e5e7eb;
+  --button-disabled-text: #4b5563;
   --code-bg: #f8fafc;
   --method-get-bg: #dcfce7;
   --method-get-text: #166534;
@@ -82,9 +87,14 @@
   --focus-ring: #38bdf8;
   --button-primary: #f8fafc;
   --button-primary-text: #0f172a;
-  --button-secondary: #1e293b;
-  --button-secondary-text: #f8fafc;
-  --button-border: #475569;
+  --button-primary-hover: #e2e8f0;
+  --button-secondary: #334155;
+  --button-secondary-text: #e2e8f0;
+  --button-secondary-hover: #475569;
+  --button-border: #64748b;
+  --button-secondary-border: #94a3b8;
+  --button-disabled-bg: #1e293b;
+  --button-disabled-text: #94a3b8;
   --code-bg: #334155;
   --method-get-bg: #064e3b;
   --method-get-text: #6ee7b7;
@@ -221,6 +231,12 @@ h1, h2 {
   text-transform: capitalize;
 }
 
+.tabs button.secondary {
+  background: var(--button-secondary);
+  color: var(--button-secondary-text);
+  border-color: var(--button-secondary-border);
+}
+
 .tab-link {
   display: inline-flex;
   align-items: center;
@@ -352,12 +368,18 @@ button {
 button.secondary {
   background: var(--button-secondary);
   color: var(--button-secondary-text);
-  border-color: var(--button-border);
+  border-color: var(--button-secondary-border);
 }
 
-button:hover,
-button.secondary:hover {
-  filter: brightness(0.97);
+button:hover:not(:disabled) {
+  background: var(--button-primary-hover);
+  border-color: var(--button-primary-hover);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--button-secondary-hover);
+  border-color: var(--button-secondary-border);
+  color: var(--button-secondary-text);
 }
 
 button:focus-visible,
@@ -370,8 +392,11 @@ textarea:focus-visible {
 }
 
 button:disabled {
-  opacity: 0.6;
+  opacity: 1;
   cursor: not-allowed;
+  background: var(--button-disabled-bg);
+  color: var(--button-disabled-text);
+  border-color: var(--button-border);
 }
 
 .app-nav {
@@ -788,12 +813,27 @@ pre.log {
   padding: 8px 12px;
   font-size: 13px;
   font-weight: 700;
+  background: var(--button-secondary);
+  color: var(--button-secondary-text);
+  border-color: var(--button-secondary-border);
+}
+
+.metrics-view-button:hover:not(:disabled) {
+  background: var(--button-secondary-hover);
+  border-color: var(--button-secondary-border);
+  color: var(--button-secondary-text);
 }
 
 .metrics-view-button.active {
   background: var(--button-primary);
   color: var(--button-primary-text);
   border-color: var(--button-primary);
+}
+
+.metrics-view-button.active:hover:not(:disabled) {
+  background: var(--button-primary-hover);
+  border-color: var(--button-primary-hover);
+  color: var(--button-primary-text);
 }
 
 .metrics-kpi-grid {
@@ -942,6 +982,105 @@ pre.log {
   padding: 0 2px;
   font-size: 13px;
   line-height: 1;
+}
+
+.scenario-chip-combobox {
+  position: relative;
+}
+
+.scenario-chip-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 44px;
+  border: 1px solid var(--button-border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  padding: 6px 8px;
+}
+
+.scenario-chip-input:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.scenario-chip-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.scenario-chip-remove {
+  width: auto;
+  min-width: auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0;
+  line-height: 1;
+  font-size: 14px;
+}
+
+.scenario-chip-remove:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: transparent;
+  border-color: transparent;
+}
+
+.scenario-chip-input-field {
+  flex: 1 1 180px;
+  min-width: 160px;
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+}
+
+.scenario-chip-input-field:focus-visible {
+  outline: none;
+}
+
+.scenario-chip-dropdown {
+  margin: 6px 0 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 2px;
+}
+
+.scenario-chip-option {
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.scenario-chip-option:hover,
+.scenario-chip-option.active {
+  background: var(--surface-hover);
+}
+
+.scenario-chip-empty {
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.scenario-chip-combobox.is-disabled .scenario-chip-input {
+  background: var(--bg-tertiary);
 }
 
 .field-group {

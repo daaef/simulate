@@ -1,4 +1,4 @@
-"""Idempotent catalog run profiles and paused schedule templates.
+"""Idempotent catalog run profiles and schedule templates.
 
 Set SIM_SKIP_CATALOG_SEED=1 to disable seeding (tests or air-gapped installs).
 """
@@ -98,40 +98,136 @@ PROFILE_SPECS: list[dict[str, Any]] = [
         "scenarios": [],
         "enforce_websocket_gates": False,
     },
+    {
+        "catalog_slug": "api-sweep-max",
+        "name": "API sweep max",
+        "description": "Maximum single-run trace/API sweep: full suite plus explicit completed/rejected/cancelled/auto-cancel scenarios with websocket gates enforced.",
+        "flow": "full",
+        "plan": "sim_actors.json",
+        "timing": "fast",
+        "mode": "trace",
+        "suite": "full",
+        "scenarios": [
+            "completed",
+            "rejected",
+            "cancelled",
+            "auto_cancel",
+        ],
+        "post_order_actions": True,
+        "enforce_websocket_gates": True,
+        "strict_plan": False,
+        "skip_app_probes": False,
+        "skip_store_dashboard_probes": False,
+        "no_auto_provision": False,
+    },
 ]
 
-# schedule_catalog_slug -> profile_catalog_slug, schedule title
-SCHEDULE_SPECS: list[tuple[str, str, str]] = [
-    (
-        "catalog-daily-doctor-utc-0800",
-        "daily-doctor",
-        "Catalog: Daily doctor (08:00 UTC daily, paused)",
-    ),
-    (
-        "catalog-gates-on-doctor-utc-0800",
-        "gates-on-doctor",
-        "Catalog: Gates-on doctor (08:00 UTC daily, paused)",
-    ),
-    (
-        "catalog-core-trace-utc-0800",
-        "core-trace",
-        "Catalog: Core trace (08:00 UTC daily, paused)",
-    ),
-    (
-        "catalog-bounded-load-smoke-utc-0800",
-        "bounded-load-smoke",
-        "Catalog: Bounded load smoke (08:00 UTC daily, paused)",
-    ),
-    (
-        "catalog-menu-gates-utc-0800",
-        "menu-gates",
-        "Catalog: Menu gates (08:00 UTC daily, paused)",
-    ),
-    (
-        "catalog-weekly-full-utc-0800",
-        "weekly-full",
-        "Catalog: Weekly full (08:00 UTC daily, paused)",
-    ),
+# schedule spec keys:
+# - catalog_slug
+# - profile_catalog_slug
+# - title
+# - description
+# - period / repeat / stop_rule / runs_per_period / all_day / run_slots / timezone
+# - status
+SCHEDULE_SPECS: list[dict[str, Any]] = [
+    {
+        "catalog_slug": "catalog-daily-doctor-utc-0800",
+        "profile_catalog_slug": "daily-doctor",
+        "title": "Catalog: Daily doctor (08:00 UTC daily, paused)",
+        "description": "Paused template — resume in Schedules to enable automatic runs.",
+        "period": "daily",
+        "repeat": "daily",
+        "stop_rule": "never",
+        "runs_per_period": 1,
+        "all_day": False,
+        "run_slots": [{"time": "08:00"}],
+        "timezone": "UTC",
+        "status": "paused",
+    },
+    {
+        "catalog_slug": "catalog-gates-on-doctor-utc-0800",
+        "profile_catalog_slug": "gates-on-doctor",
+        "title": "Catalog: Gates-on doctor (08:00 UTC daily, paused)",
+        "description": "Paused template — resume in Schedules to enable automatic runs.",
+        "period": "daily",
+        "repeat": "daily",
+        "stop_rule": "never",
+        "runs_per_period": 1,
+        "all_day": False,
+        "run_slots": [{"time": "08:00"}],
+        "timezone": "UTC",
+        "status": "paused",
+    },
+    {
+        "catalog_slug": "catalog-core-trace-utc-0800",
+        "profile_catalog_slug": "core-trace",
+        "title": "Catalog: Core trace (08:00 UTC daily, paused)",
+        "description": "Paused template — resume in Schedules to enable automatic runs.",
+        "period": "daily",
+        "repeat": "daily",
+        "stop_rule": "never",
+        "runs_per_period": 1,
+        "all_day": False,
+        "run_slots": [{"time": "08:00"}],
+        "timezone": "UTC",
+        "status": "paused",
+    },
+    {
+        "catalog_slug": "catalog-bounded-load-smoke-utc-0800",
+        "profile_catalog_slug": "bounded-load-smoke",
+        "title": "Catalog: Bounded load smoke (08:00 UTC daily, paused)",
+        "description": "Paused template — resume in Schedules to enable automatic runs.",
+        "period": "daily",
+        "repeat": "daily",
+        "stop_rule": "never",
+        "runs_per_period": 1,
+        "all_day": False,
+        "run_slots": [{"time": "08:00"}],
+        "timezone": "UTC",
+        "status": "paused",
+    },
+    {
+        "catalog_slug": "catalog-menu-gates-utc-0800",
+        "profile_catalog_slug": "menu-gates",
+        "title": "Catalog: Menu gates (08:00 UTC daily, paused)",
+        "description": "Paused template — resume in Schedules to enable automatic runs.",
+        "period": "daily",
+        "repeat": "daily",
+        "stop_rule": "never",
+        "runs_per_period": 1,
+        "all_day": False,
+        "run_slots": [{"time": "08:00"}],
+        "timezone": "UTC",
+        "status": "paused",
+    },
+    {
+        "catalog_slug": "catalog-weekly-full-utc-0800",
+        "profile_catalog_slug": "weekly-full",
+        "title": "Catalog: Weekly full (08:00 UTC daily, paused)",
+        "description": "Paused template — resume in Schedules to enable automatic runs.",
+        "period": "daily",
+        "repeat": "daily",
+        "stop_rule": "never",
+        "runs_per_period": 1,
+        "all_day": False,
+        "run_slots": [{"time": "08:00"}],
+        "timezone": "UTC",
+        "status": "paused",
+    },
+    {
+        "catalog_slug": "catalog-api-sweep-max-utc-3x-daily",
+        "profile_catalog_slug": "api-sweep-max",
+        "title": "Catalog: API sweep max (06:00 / 14:00 / 20:00 UTC daily, active)",
+        "description": "Active baseline — runs a broad trace/API sweep three times daily.",
+        "period": "daily",
+        "repeat": "daily",
+        "stop_rule": "never",
+        "runs_per_period": 3,
+        "all_day": False,
+        "run_slots": [{"time": "06:00"}, {"time": "14:00"}, {"time": "20:00"}],
+        "timezone": "UTC",
+        "status": "active",
+    },
 ]
 
 
@@ -394,35 +490,37 @@ def _ensure_schedules(m: Any) -> None:
     from api.app.schedules.models import ScheduleUpsertRequest
 
     anchor = _anchor_start_iso()
-    desc = "Paused template — resume in Schedules to enable automatic runs."
-    for sched_slug, prof_slug, title in SCHEDULE_SPECS:
+    for spec in SCHEDULE_SPECS:
+        sched_slug = str(spec["catalog_slug"])
+        prof_slug = str(spec["profile_catalog_slug"])
         profile_id = _profile_id_for_catalog_slug(m, prof_slug)
         existing_id = _schedule_id_for_catalog_slug(m, sched_slug)
         req = ScheduleUpsertRequest(
-            name=title,
-            description=desc,
+            name=str(spec["title"]),
+            description=str(spec.get("description") or ""),
             schedule_type="simple",
             profile_id=profile_id,
             anchor_start_at=anchor,
-            period="daily",
-            stop_rule="never",
-            repeat="daily",
-            runs_per_period=1,
-            all_day=False,
-            run_slots=[{"time": "08:00"}],
-            timezone="UTC",
+            period=str(spec.get("period") or "daily"),
+            stop_rule=str(spec.get("stop_rule") or "never"),
+            repeat=str(spec.get("repeat") or "daily"),
+            runs_per_period=max(1, int(spec.get("runs_per_period") or 1)),
+            all_day=bool(spec.get("all_day")),
+            run_slots=[dict(slot) for slot in (spec.get("run_slots") or [{"time": "08:00"}])],
+            timezone=str(spec.get("timezone") or "UTC"),
             cadence="daily",
             campaign_steps=[],
         )
+        status = str(spec.get("status") or "paused")
         if existing_id is not None:
             m._update_schedule(existing_id, req, None)
             m._persist_schedule_catalog_slug(existing_id, sched_slug)
-            m._set_schedule_status(existing_id, "paused")
+            m._set_schedule_status(existing_id, status)
         else:
             created = m._create_schedule(req, None)
             sid = int(created["schedule"]["id"])
             m._persist_schedule_catalog_slug(sid, sched_slug)
-            m._set_schedule_status(sid, "paused")
+            m._set_schedule_status(sid, status)
 
 
 def ensure_catalog_seed() -> None:

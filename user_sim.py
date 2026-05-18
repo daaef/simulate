@@ -1335,7 +1335,32 @@ async def place_order(
         fixtures,
         recorder=recorder,
         scenario=scenario,
-    )   
+    )
+    return await place_order_with_payload(
+        client,
+        user_token=user_token,
+        token_source=token_source,
+        worker_id=worker_id,
+        fixtures=fixtures,
+        recorder=recorder,
+        payload=payload,
+        scenario=scenario,
+        step=step,
+    )
+
+
+async def place_order_with_payload(
+    client: httpx.AsyncClient,
+    *,
+    user_token: str,
+    token_source: str,
+    worker_id: int,
+    fixtures: UserFixtures,
+    recorder: RunRecorder,
+    payload: dict[str, Any],
+    scenario: str = "load",
+    step: str = "place_order",
+) -> dict[str, Any] | None:
     _validate_order_request_context(
         user_token=user_token,
         token_source=token_source,

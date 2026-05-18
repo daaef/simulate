@@ -55,6 +55,23 @@ Use the **same words** in the web UI, email footers, and this README so owners a
 
 **No separate “last-mile ping” endpoint:** Proof of last-mile health is intentionally a **real** doctor/trace run (or a scheduled profile that runs one). That avoids a false green from a tiny probe that does not exercise auth, menus, payment, or websockets.
 
+## Probe Contract Policy
+
+Probe contracts are sourced only from these session docs:
+- `app-20260428.full-session-user.md`
+- `app-20260430.full-session-user.md`
+- `app-20260517.full-session-user.md`
+- `app-20260429.full-session-store.md`
+- `app-20260430.full-session-store.md`
+
+Probe status semantics are strict:
+- `failed`: only transport exception, timeout/connection error, or HTTP `5xx`.
+- `passed`: endpoint call succeeded and response matches at least one documented sample variant.
+- `inconclusive`: endpoint call succeeded but response status/shape is not yet documented in contract variants.
+- `skipped`: required documented preflight data is missing, or no sample exists for that probe.
+
+When no sample exists, simulator emits `reason_code=missing_reference_sample`, `next_action=request_sample_from_user`, records a `probe_sample_needed` finding, and continues the run. Event metrics `failed_events` now count only real failures under these rules.
+
 ## Web UI Operations
 
 The authenticated app shell includes active route highlighting for `Overview`, `Runs`, `Config`, `Schedules`, `Archives`, `Retention`, and `Admin`.
@@ -63,7 +80,8 @@ The authenticated app shell includes active route highlighting for `Overview`, `
   - **Latest run metrics dashboard:** Under the latest-run hero, an expandable metrics dashboard shows Business KPIs by default with a segmented switch for Business, Operations, and Engineering views. The technical action list remains available as a collapsed drill-down with action-key search. Run metrics from `GET /api/v1/runs/{id}/metrics` still include `action_counts` (complete list) plus `top_actions` (top 10 only, unchanged for compatibility).
   - Latest Run Overview `Critical Findings` is intentionally server-focused: it shows server/API availability failures (`5xx`, transport/network, websocket availability) and excludes expected missing-information/business-availability states (for example missing token, no saved card, no coupon). Full raw findings still remain in `events.json`, `report.md`, and `story.md`.
   - Decision events with expected non-failure reasons (for example `unsupported_profile_fetch_contract`, `no_customer_id`, and `missing_*`/`missing_auth_token` preflight skips) are classified as informational context and do not count toward failure badges/counters.
-  - `Critical Findings` now includes the failed API route/endpoint when available.
+  - `Critical Findings` rows include the failed API route/endpoint, HTTP method/status when recorded, simulator `flow`/`step`, optional session phase labels (from `app-20260428.full-session-user.md` / `app-20260430.full-session-user.md` mappings), and up to three preceding steps from the same actor/scenario in `events.json`.
+  - Latest Run Overview shows **Critical** and **Operational** findings side by side (`findings.critical` / `findings.operational`).
   - Latest Run hero now shows run-context chips when present: `profile:<name>`, `schedule:<name>`, and integration route context (`route:<project/environment>`).
 - `Runs`: launch, cancel, replay, delete completed runs, and inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles.
   - Run detail **Overview** tab: summary counts plus a metrics dashboard (Business default, Operations/Engineering switch, collapsed technical drill-down with action-key search).
@@ -76,6 +94,7 @@ The authenticated app shell includes active route highlighting for `Overview`, `
   - Plan selection is dropdown-only in Start Run: `sim_actors.json` is always available and GUI plans are appended when present; free-text plan entry has been removed.
   - Start Run now uses flow capability metadata from `/api/v1/flows` and renders only the inputs valid for the resolved `Flow -> Mode -> Suite/Scenarios` context.
   - Advanced Mode Overrides can explicitly set `mode`, `suite`, and multi-scenario selections. The command preview reflects these typed fields directly (not hidden `extra_args`).
+  - `Scenarios (trace only)` in Advanced Mode Overrides now uses a searchable chips multiselect (typeahead + keyboard navigation) and accepts only supported scenarios from the selected flow capability.
   - Start Run now includes an inline **Execution Impact** assistant under command preview: concise default summary, expandable detailed behavior, and blocking warnings aligned with launcher validation.
   - Every Start Run control now shows example placeholder/help values (flow, suite/scenarios, load knobs, toggles) to speed up correct run setup.
   - Trace-context inputs: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, websocket gate toggle.
@@ -159,9 +178,14 @@ Keep actor and run behavior out of `.env`: do not set `USER_PHONE_NUMBER`, `STOR
 
 Admins can edit GUI-owned plans from `Config`. Use the saved plan path, for example `runs/gui-plans/daily-doctor.json`, in the Runs launcher or with `--plan`.
 
-### Catalog run profiles and paused schedules
+### Catalog run profiles and schedules
 
-When the API starts and initializes its database, it **idempotently** upserts six built-in run profiles (stable `catalog_slug` values: `daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and a matching **paused** daily schedule for each (08:00 UTC, one slot). Use **Resume** in `/schedules` when you want automatic triggers. Catalog profiles and their catalog schedules cannot be deleted from the API (HTTP 403); adjust copies in user-owned profiles/schedules instead.
+When the API starts and initializes its database, it **idempotently** upserts seven built-in run profiles (stable `catalog_slug` values: `api-sweep-max`, `daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and one catalog schedule per profile.
+
+- `api-sweep-max` is pinned to the top of `GET /api/v1/run-profiles` ordering and powers an **active** UTC schedule that runs daily at `06:00`, `14:00`, and `20:00`.
+- The remaining catalog schedules stay **paused** daily templates at `08:00 UTC` (resume them in `/schedules` when needed).
+
+Catalog profiles and their catalog schedules cannot be deleted from the API (HTTP 403); adjust copies in user-owned profiles/schedules instead.
 
 `bounded-load-smoke` now runs with a phased bounded policy: it guarantees at least one accepted/completed order before reject/cancel tail behavior, and fails with `accepted_baseline_not_met` when the baseline cannot be achieved within configured attempts. See `docs/BOUNDED_LOAD_SMOKE_FIX_EXPLAINER.md`.
 

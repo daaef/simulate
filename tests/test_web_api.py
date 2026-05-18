@@ -155,6 +155,75 @@ class EventsCacheTests(unittest.TestCase):
         self.assertIn("total_runs", summary_payload)
         self.assertLess(elapsed, 0.45)
 
+    def test_compact_event_keeps_decision_status(self) -> None:
+        compact = web_api._compact_event(
+            {
+                "id": 1,
+                "ts": "2026-05-17T22:00:00Z",
+                "actor": "user",
+                "action": "probe_saved_cards",
+                "category": "decision",
+                "status": "inconclusive",
+                "reason_code": "probe_schema_undocumented",
+                "reason_message": "shape not documented",
+                "next_action": "continue_run",
+                "run_continued": True,
+                "ok": True,
+            }
+        )
+        self.assertEqual(compact["status"], "inconclusive")
+        self.assertEqual(compact["category"], "decision")
+
+    def test_event_metrics_count_only_real_failures(self) -> None:
+        metrics = web_api._event_metrics(
+            [
+                {
+                    "id": 1,
+                    "category": "decision",
+                    "status": "skipped",
+                    "ok": False,
+                    "reason_code": "missing_reference_sample",
+                },
+                {
+                    "id": 2,
+                    "category": "decision",
+                    "status": "inconclusive",
+                    "ok": False,
+                    "reason_code": "probe_schema_undocumented",
+                },
+                {
+                    "id": 3,
+                    "category": "decision",
+                    "status": "passed",
+                    "ok": True,
+                },
+                {
+                    "id": 4,
+                    "category": "http",
+                    "method": "GET",
+                    "endpoint": "/v1/statistics/subentities/7/",
+                    "http_status": 404,
+                    "ok": False,
+                },
+                {
+                    "id": 5,
+                    "category": "http",
+                    "method": "GET",
+                    "endpoint": "/v1/core/orders/",
+                    "http_status": 503,
+                    "ok": False,
+                },
+                {
+                    "id": 6,
+                    "category": "decision",
+                    "status": "failed",
+                    "ok": False,
+                    "reason_code": "probe_http_server_error",
+                },
+            ]
+        )
+        self.assertEqual(metrics["failed_events"], 2)
+
 
 class AuthSeedTests(unittest.TestCase):
     def test_default_admin_seed_password_matches_documented_credentials(self) -> None:
@@ -453,6 +522,9 @@ class OverviewLatestRunTests(unittest.TestCase):
                 "id": 1,
                 "actor": "user",
                 "action": "probe_saved_cards",
+                "scenario": "returning_paid_no_coupon",
+                "step": "probe_saved_cards",
+                "method": "GET",
                 "endpoint": "/v1/core/cards/",
                 "http_status": 404,
                 "message": "no saved card",
@@ -462,6 +534,9 @@ class OverviewLatestRunTests(unittest.TestCase):
                 "id": 2,
                 "actor": "user",
                 "action": "place_order",
+                "scenario": "returning_paid_no_coupon",
+                "step": "place_order",
+                "method": "POST",
                 "endpoint": "/v1/core/orders/",
                 "http_status": 503,
                 "message": "service unavailable",
@@ -473,12 +548,16 @@ class OverviewLatestRunTests(unittest.TestCase):
                 "severity": "error",
                 "code": "missing_user_token",
                 "message": "Saved cards were skipped because user authentication is missing.",
+                "scenario": "returning_paid_no_coupon",
+                "step": "probe_saved_cards",
                 "related_event_id": 1,
             },
             {
                 "severity": "error",
                 "code": "payment_intent_http_error",
                 "message": "HTTP error creating payment intent",
+                "scenario": "returning_paid_no_coupon",
+                "step": "place_order",
                 "related_event_id": 2,
             },
         ]
@@ -496,6 +575,12 @@ class OverviewLatestRunTests(unittest.TestCase):
         self.assertEqual(issues, findings["critical"])
         self.assertTrue(any(item.get("code") == "missing_user_token" for item in findings["operational"]))
         self.assertEqual(payload["metrics"]["failed_events"], 1)
+        critical = findings["critical"][0]
+        self.assertEqual(critical.get("flow"), "returning_paid_no_coupon")
+        self.assertEqual(critical.get("step"), "place_order")
+        self.assertEqual(critical.get("method"), "POST")
+        self.assertEqual(critical.get("http_status"), 503)
+        self.assertTrue(critical.get("preceding_steps"))
 
     def test_latest_run_overview_classifies_websocket_and_gate_buckets(self) -> None:
         run = {"id": 1001, "status": "failed"}
@@ -1921,17 +2006,43 @@ class CatalogSeedTests(unittest.TestCase):
                 self.assertEqual(row["users"], 2)
                 self.assertEqual(row["orders"], 3)
                 self.assertIn("--bounded-load-smoke-policy", row["extra_args"])
+            if slug == "api-sweep-max":
+                self.assertEqual(row["mode"], "trace")
+                self.assertTrue(row["enforce_websocket_gates"])
+                self.assertTrue(row["post_order_actions"])
+                self.assertEqual(
+                    row["scenarios"],
+                    ["completed", "rejected", "cancelled", "auto_cancel"],
+                )
 
-    def test_catalog_schedules_exist_and_paused(self) -> None:
+    def test_catalog_profiles_are_pinned_with_api_sweep_max_first(self) -> None:
+        profiles = web_api._list_run_profiles()
+        self.assertTrue(profiles)
+        self.assertEqual(profiles[0].get("catalog_slug"), "api-sweep-max")
+
+    def test_catalog_schedules_exist_with_expected_status_and_slots(self) -> None:
         from api.app import catalog_seed
 
         schedules = web_api._list_schedules()["schedules"]
         by_slug = {s["catalog_slug"]: s for s in schedules if s.get("catalog_slug")}
-        for sched_slug, prof_slug, _title in catalog_seed.SCHEDULE_SPECS:
+        for spec in catalog_seed.SCHEDULE_SPECS:
+            sched_slug = spec["catalog_slug"]
+            prof_slug = spec["profile_catalog_slug"]
             self.assertIn(sched_slug, by_slug, msg=f"missing catalog schedule {sched_slug}")
             sched = by_slug[sched_slug]
-            self.assertEqual(sched["status"], "paused")
-            self.assertEqual(sched.get("next_run_reason"), "no_future_run")
+            expected_status = spec.get("status", "paused")
+            self.assertEqual(sched["status"], expected_status)
+            if expected_status == "paused":
+                self.assertEqual(sched.get("next_run_reason"), "no_future_run")
+            else:
+                self.assertIsNotNone(sched.get("next_run_at"))
+            self.assertEqual(sched.get("period"), spec.get("period", "daily"))
+            self.assertEqual(sched.get("repeat"), spec.get("repeat", "daily"))
+            self.assertEqual(
+                int(sched.get("runs_per_period") or 0),
+                int(spec.get("runs_per_period") or 1),
+            )
+            self.assertEqual(sched.get("run_slots") or [], spec.get("run_slots") or [])
             prof_id = next(p["id"] for p in web_api._list_run_profiles() if p.get("catalog_slug") == prof_slug)
             steps = sched.get("campaign_steps") or []
             self.assertTrue(steps)
@@ -1975,6 +2086,22 @@ class CatalogSeedTests(unittest.TestCase):
         req = web_api._profile_request_to_run_request(row)
         cmd = web_api._build_command(req)
         self.assertIn("--enforce-websocket-gates", cmd)
+
+    def test_catalog_api_sweep_max_command_uses_full_suite_and_explicit_scenarios(self) -> None:
+        profiles = web_api._list_run_profiles()
+        row = next(p for p in profiles if p.get("catalog_slug") == "api-sweep-max")
+        req = web_api._profile_request_to_run_request(row)
+        cmd = web_api._build_command(req)
+        self.assertIn("--suite", cmd)
+        idx = cmd.index("--suite")
+        self.assertEqual(cmd[idx + 1], "full")
+        scenario_values = [cmd[i + 1] for i, token in enumerate(cmd[:-1]) if token == "--scenario"]
+        self.assertIn("completed", scenario_values)
+        self.assertIn("rejected", scenario_values)
+        self.assertIn("cancelled", scenario_values)
+        self.assertIn("auto_cancel", scenario_values)
+        self.assertIn("--enforce-websocket-gates", cmd)
+        self.assertIn("--post-order-actions", cmd)
 
     def test_catalog_profile_delete_is_forbidden(self) -> None:
         profiles = web_api._list_run_profiles()

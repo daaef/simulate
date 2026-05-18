@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
   fetchExecutionSnapshot,
@@ -8,7 +8,6 @@ import {
   fetchRun,
   fetchRunArtifactEvents,
   fetchRunArtifactText,
-  fetchRunLog,
   fetchRunMetrics,
   replayRun,
   type RunFindings,
@@ -22,6 +21,7 @@ import RunDetailTabNav from "../../../../components/runs/detail/RunDetailTabNav"
 import RunEventsPanel from "../../../../components/runs/detail/RunEventsPanel";
 import RunExecutionSnapshotPanel from "../../../../components/runs/detail/RunExecutionSnapshotPanel";
 import RunLogPanel from "../../../../components/runs/detail/RunLogPanel";
+import { useRunLogTail } from "../../../../lib/useRunLogTail";
 
 type TabType = "overview" | "story" | "report" | "traffic" | "console" | "execution";
 
@@ -72,7 +72,6 @@ export default function RunDetailPage() {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [eventsTotal, setEventsTotal] = useState(0);
   const [eventsOffset, setEventsOffset] = useState(0);
-  const [log, setLog] = useState<string | null>(null);
   const [reportChunk, setReportChunk] = useState(0);
   const [isReplaying, setIsReplaying] = useState(false);
 
@@ -101,7 +100,6 @@ export default function RunDetailPage() {
     setEvents([]);
     setEventsTotal(0);
     setEventsOffset(0);
-    setLog(null);
   }, [runId]);
 
   // Fetch metrics
@@ -134,23 +132,14 @@ export default function RunDetailPage() {
       });
   }, [runId]);
 
-  useEffect(() => {
-    if (activeTab !== "console" || !run) return;
-    const shouldPoll = isActiveRunStatus(run.status);
-    const refreshLog = () => {
-      fetchRunLog(runId, 5000)
-        .then((res) => {
-          if (res.available) setLog(res.log);
-        })
-        .catch(() => {
-          // ignore
-        });
-    };
-    refreshLog();
-    if (!shouldPoll) return;
-    const timer = window.setInterval(refreshLog, 1000);
-    return () => window.clearInterval(timer);
-  }, [activeTab, run, runId]);
+  const consoleTabActive = activeTab === "console";
+  const shouldPollConsoleLog = Boolean(run && isActiveRunStatus(run.status));
+  const { log: consoleLog, setLogRef } = useRunLogTail(consoleTabActive ? runId : null, {
+    enabled: shouldPollConsoleLog,
+    pollMs: 1000,
+    tail: 5000,
+  });
+  const logForPanel = useMemo(() => (consoleLog ? consoleLog : null), [consoleLog]);
 
   // Fetch artifacts based on active tab
   useEffect(() => {
@@ -179,13 +168,11 @@ export default function RunDetailPage() {
             }
           }
           break;
-        case "console":
-          break;
       }
     };
 
     loadArtifact();
-  }, [activeTab, run, runId, eventsOffset, report, story, log]);
+  }, [activeTab, run, runId, eventsOffset, report, story]);
 
   const goBack = () => {
     router.push("/runs");
@@ -266,7 +253,7 @@ export default function RunDetailPage() {
           )}
 
           {activeTab === "console" && (
-            <RunLogPanel log={log} logClassForLine={logClassForLine} />
+            <RunLogPanel log={logForPanel} logRef={setLogRef} logClassForLine={logClassForLine} />
           )}
         </div>
       </div>

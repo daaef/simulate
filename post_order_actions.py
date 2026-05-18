@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import random
+import string
+import uuid
 from typing import Any
 
 import httpx
 from rich.console import Console
 
 import config
+from interaction_catalog import MENU_AVAILABLE
 from reporting import RunRecorder
-from transport import HttpResult, RequestError, request_json
+from transport import HttpResult, RequestError, api_data, request_json
 
 console = Console()
 
@@ -20,6 +24,110 @@ def receipt_endpoint(order_db_id: int) -> str:
 
 def reorder_params(order_db_id: int) -> dict[str, str]:
     return {"order_id": str(order_db_id)}
+
+
+def _random_order_id() -> str:
+    digits = "".join(random.choices(string.digits, k=6))
+    return f"#{digits}"
+
+
+def parse_reorder_cart_items(payload: Any) -> list[dict[str, Any]]:
+    """Parse reorder API `data` array (session walkthrough Phase 24)."""
+    raw = api_data(payload)
+    if not isinstance(raw, list):
+        return []
+
+    items: list[dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("status") or "").strip().lower() != MENU_AVAILABLE:
+            continue
+        menu_id = entry.get("id")
+        if menu_id is None:
+            continue
+        try:
+            quantity = int(entry.get("quantity") or 1)
+        except (TypeError, ValueError):
+            quantity = 1
+        if quantity < 1:
+            continue
+        discount_price = entry.get("discount_price")
+        price = entry.get("price")
+        line_price = discount_price if discount_price not in (None, 0, 0.0) else price
+        try:
+            line_price = float(line_price)
+        except (TypeError, ValueError):
+            continue
+        if line_price <= 0:
+            continue
+        items.append({**entry, "quantity": quantity, "_line_price": line_price})
+    return items
+
+
+def build_reorder_order_payload(
+    *,
+    fixtures: Any,
+    reorder_items: list[dict[str, Any]],
+    recorder: RunRecorder,
+    scenario: str,
+    source_order_db_id: int,
+) -> dict[str, Any] | None:
+    if not reorder_items:
+        recorder.record_issue(
+            severity="error",
+            code="reorder_empty_cart",
+            actor="user",
+            scenario=scenario,
+            step="reorder_cart_built",
+            order_db_id=source_order_db_id,
+            message="Reorder API returned no available cart items",
+        )
+        return None
+
+    menu_lines: list[dict[str, Any]] = []
+    total = 0.0
+    menu_ids: list[Any] = []
+
+    for entry in reorder_items:
+        menu = {key: value for key, value in entry.items() if not str(key).startswith("_")}
+        qty = int(entry.get("quantity") or 1)
+        price = float(entry["_line_price"])
+        line_total = round(price * qty, 2)
+        total += line_total
+        menu_ids.append(menu.get("id"))
+        menu_lines.append(
+            {
+                "id": str(uuid.uuid1()),
+                "menuId": menu.get("id"),
+                "menu": menu,
+                "quantity": qty,
+                "price": price,
+                "sides": menu.get("sides") or [],
+            }
+        )
+
+    total = round(total, 2)
+    recorder.record_event(
+        actor="user",
+        action="reorder_cart_built",
+        category="post_order",
+        scenario=scenario,
+        step="reorder_cart_built",
+        order_db_id=source_order_db_id,
+        details={"item_count": len(menu_lines), "menu_ids": menu_ids, "total_price": total},
+        track_order=False,
+    )
+
+    return {
+        "order_id": _random_order_id(),
+        "restaurant": fixtures.store,
+        "location": fixtures.location,
+        "menu": menu_lines,
+        "total_price": total,
+        "status": "pending",
+        "user": fixtures.user_id,
+    }
 
 
 def build_review_payload(
@@ -203,7 +311,7 @@ async def run_post_order_actions(
     order_ref: str,
     subentity: dict[str, Any],
     scenario: str,
-) -> None:
+) -> HttpResult | None:
     if not config.SIM_RUN_POST_ORDER_ACTIONS:
         console.print(
             f"[dim]post_order:[/] Skipping receipt/review/reorder for order {order_ref}."
@@ -218,7 +326,7 @@ async def run_post_order_actions(
             details={"reason": "SIM_RUN_POST_ORDER_ACTIONS=false"},
             track_order=False,
         )
-        return
+        return None
     console.print(f"[cyan]post_order:[/] Generating receipt for order {order_ref} ...")
     await generate_receipt(
         client,
@@ -244,7 +352,7 @@ async def run_post_order_actions(
         scenario=scenario,
     )
     console.print(f"[cyan]post_order:[/] Fetching reorder data for order {order_ref} ...")
-    await fetch_reorder(
+    return await fetch_reorder(
         client,
         recorder=recorder,
         user_token=user_token,

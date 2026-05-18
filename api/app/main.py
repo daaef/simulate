@@ -1323,13 +1323,31 @@ def _list_run_profiles() -> list[dict[str, Any]]:
         conn = _get_db_connection()
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
-                cursor.execute("SELECT * FROM run_profiles ORDER BY updated_at DESC, id DESC")
+                cursor.execute(
+                    """
+                    SELECT * FROM run_profiles
+                    ORDER BY
+                        CASE WHEN catalog_slug = %s THEN 0 ELSE 1 END ASC,
+                        updated_at DESC,
+                        id DESC
+                    """,
+                    ("api-sweep-max",),
+                )
                 rows = cursor.fetchall()
         finally:
             conn.close()
     else:
         with DB_LOCK, _db() as conn:
-            rows = conn.execute("SELECT * FROM run_profiles ORDER BY updated_at DESC, id DESC").fetchall()
+            rows = conn.execute(
+                """
+                SELECT * FROM run_profiles
+                ORDER BY
+                    CASE WHEN catalog_slug = ? THEN 0 ELSE 1 END ASC,
+                    updated_at DESC,
+                    id DESC
+                """,
+                ("api-sweep-max",),
+            ).fetchall()
     return [_profile_row_to_dict_any(row) for row in rows]
 
 
@@ -4358,6 +4376,7 @@ def _compact_event(event: dict[str, Any]) -> dict[str, Any]:
         "actor": event.get("actor"),
         "action": event.get("action"),
         "category": event.get("category"),
+        "status": event.get("status"),
         "ok": event.get("ok"),
         "scenario": event.get("scenario"),
         "order_db_id": event.get("order_db_id"),
@@ -4518,13 +4537,30 @@ def _event_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         action = str(event.get("action") or "unknown")
         actors[actor] = actors.get(actor, 0) + 1
         actions[action] = actions.get(action, 0) + 1
-        status = str(event.get("status") or "").lower()
-        ok_flag = event.get("ok")
-        if isinstance(ok_flag, bool):
-            if not ok_flag:
+        status = str(event.get("status") or "").strip().lower()
+        category = str(event.get("category") or "").strip().lower()
+        http_status = event.get("http_status") or event.get("status_code")
+        http_status_code: int | None = None
+        try:
+            if http_status is not None:
+                http_status_code = int(http_status)
+        except (TypeError, ValueError):
+            http_status_code = None
+
+        if category == "decision":
+            if status in {"failed", "error", "blocked"}:
                 failed_events += 1
-        elif status in {"error", "failed", "failure"}:
-            failed_events += 1
+        else:
+            if http_status_code is not None:
+                if http_status_code >= 500:
+                    failed_events += 1
+            else:
+                ok_flag = event.get("ok")
+                if isinstance(ok_flag, bool):
+                    if not ok_flag:
+                        failed_events += 1
+                elif status in {"error", "failed", "failure"}:
+                    failed_events += 1
         metadata = event.get("metadata")
         saw_http = False
         if isinstance(metadata, dict) and "http_status" in metadata:

@@ -6,6 +6,8 @@ import types
 import unittest
 from unittest import mock
 
+import httpx
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from interaction_catalog import (
@@ -19,7 +21,7 @@ from interaction_catalog import (
 from reporting import RunRecorder
 from scenarios import resolve_trace_scenarios
 from flow_presets import resolve_flow
-from transport import build_auth_proof, sanitize_payload, token_fingerprint
+from transport import HttpResult, build_auth_proof, sanitize_payload, token_fingerprint
 from websocket_observer import validate_websocket_events
 
 
@@ -1452,6 +1454,27 @@ class HealthSummaryTests(unittest.TestCase):
 
 
 class AppProbeTests(unittest.IsolatedAsyncioTestCase):
+    def _http_result(self, *, recorder: RunRecorder, action: str, status_code: int, payload: object) -> HttpResult:
+        event = recorder.record_event(
+            actor="probe",
+            action=action,
+            category="probe",
+            ok=status_code < 400,
+            method="GET",
+            endpoint="/v1/mock/",
+            http_status=status_code,
+            track_order=False,
+        )
+        return HttpResult(
+            response=httpx.Response(
+                status_code=status_code,
+                request=httpx.Request("GET", "https://example.test/v1/mock/"),
+            ),
+            payload=payload,
+            event=event,
+            latency_ms=20,
+        )
+
     def test_probe_specs_cover_real_app_surfaces(self) -> None:
         from app_probes import PROBE_SPECS
 
@@ -1466,15 +1489,16 @@ class AppProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("top_customers", names)
 
     async def test_safe_probe_records_issue_without_raising(self) -> None:
-        from app_probes import ProbeSpec, run_probe
+        from app_probes import probe_spec, run_probe
         from transport import RequestError
 
         recorder = RunRecorder.bootstrap()
+        spec = probe_spec("global_config")
 
         async def failing_request(*args, **kwargs):
             event = recorder.record_event(
                 actor="probe",
-                action="failing_probe",
+                action=spec.action,
                 category="probe",
                 ok=False,
                 track_order=False,
@@ -1484,20 +1508,155 @@ class AppProbeTests(unittest.IsolatedAsyncioTestCase):
         result = await run_probe(
             object(),
             recorder=recorder,
-            spec=ProbeSpec(
-                name="failing_probe",
-                actor="user",
-                action="failing_probe",
-                method="GET",
-                base="lastmile",
-                endpoint="/v1/example/",
-            ),
+            spec=spec,
             request_func=failing_request,
         )
 
         self.assertIsNone(result)
         self.assertEqual(recorder.issues[0]["code"], "probe_failed")
-        self.assertIn("failing_probe", recorder.issues[0]["message"])
+        self.assertIn(spec.name, recorder.issues[0]["message"])
+
+    async def test_probe_4xx_with_documented_variant_is_passed(self) -> None:
+        from app_probes import probe_spec, run_probe
+        from transport import RequestError
+
+        recorder = RunRecorder.bootstrap()
+        spec = probe_spec("store_statistics")
+        result_404 = self._http_result(
+            recorder=recorder,
+            action=spec.action,
+            status_code=404,
+            payload={"status": "error", "message": "Object not found"},
+        )
+
+        async def request_404(*args, **kwargs):
+            raise RequestError("HTTP 404", event=result_404.event, result=result_404)
+
+        result = await run_probe(
+            object(),
+            recorder=recorder,
+            spec=spec,
+            context={"subentity_id": 7},
+            token="store-token",
+            token_source="test",
+            request_func=request_404,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(recorder.decisions[-1]["status"], "passed")
+        self.assertEqual(recorder.decisions[-1]["reason_code"], "probe_response_ok")
+        self.assertFalse(any(issue["code"] == "probe_failed" for issue in recorder.issues))
+
+    async def test_probe_4xx_with_undocumented_shape_is_inconclusive(self) -> None:
+        from app_probes import probe_spec, run_probe
+        from transport import RequestError
+
+        recorder = RunRecorder.bootstrap()
+        spec = probe_spec("store_statistics")
+        result_404 = self._http_result(
+            recorder=recorder,
+            action=spec.action,
+            status_code=404,
+            payload={"status": "error", "unexpected": True},
+        )
+
+        async def request_404(*args, **kwargs):
+            raise RequestError("HTTP 404", event=result_404.event, result=result_404)
+
+        result = await run_probe(
+            object(),
+            recorder=recorder,
+            spec=spec,
+            context={"subentity_id": 7},
+            token="store-token",
+            token_source="test",
+            request_func=request_404,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(recorder.decisions[-1]["status"], "inconclusive")
+        self.assertEqual(recorder.decisions[-1]["reason_code"], "probe_schema_undocumented")
+        self.assertFalse(any(issue["code"] == "probe_failed" for issue in recorder.issues))
+
+    async def test_probe_5xx_is_failed(self) -> None:
+        from app_probes import probe_spec, run_probe
+        from transport import RequestError
+
+        recorder = RunRecorder.bootstrap()
+        spec = probe_spec("store_statistics")
+        result_503 = self._http_result(
+            recorder=recorder,
+            action=spec.action,
+            status_code=503,
+            payload={"status": "error", "message": "service unavailable"},
+        )
+
+        async def request_503(*args, **kwargs):
+            raise RequestError("HTTP 503", event=result_503.event, result=result_503)
+
+        result = await run_probe(
+            object(),
+            recorder=recorder,
+            spec=spec,
+            context={"subentity_id": 7},
+            token="store-token",
+            token_source="test",
+            request_func=request_503,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(recorder.decisions[-1]["status"], "failed")
+        self.assertEqual(recorder.decisions[-1]["reason_code"], "probe_http_server_error")
+        self.assertTrue(any(issue["code"] == "probe_failed" for issue in recorder.issues))
+
+    async def test_missing_probe_sample_is_skipped_and_requests_user_sample(self) -> None:
+        from app_probes import ProbeSpec, run_probe
+
+        recorder = RunRecorder.bootstrap()
+
+        async def should_not_run(*args, **kwargs):  # pragma: no cover - defensive guard
+            raise AssertionError("request function should not run when probe sample is missing")
+
+        result = await run_probe(
+            object(),
+            recorder=recorder,
+            spec=ProbeSpec(
+                name="undocumented_probe",
+                actor="user",
+                action="probe_undocumented",
+                method="GET",
+                base="lastmile",
+                endpoint="/v1/unknown/",
+            ),
+            request_func=should_not_run,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(recorder.decisions[-1]["status"], "skipped")
+        self.assertEqual(recorder.decisions[-1]["reason_code"], "missing_reference_sample")
+        self.assertEqual(recorder.decisions[-1]["next_action"], "request_sample_from_user")
+        self.assertTrue(any(issue["code"] == "probe_sample_needed" for issue in recorder.issues))
+
+
+class ProbeContractIntegrityTests(unittest.TestCase):
+    def test_probe_contract_references_only_allowed_docs(self) -> None:
+        from session_probe_reference import contract_integrity_issues
+
+        self.assertEqual(contract_integrity_issues(), [])
+
+    def test_probe_preflight_requirements_have_source_attribution(self) -> None:
+        from session_probe_reference import PROBE_CONTRACTS
+
+        for probe_name, contract in PROBE_CONTRACTS.items():
+            for requirement in contract.get("preflight") or ():
+                self.assertTrue(
+                    str(requirement.get("source_doc") or "").strip(),
+                    msg=f"{probe_name} preflight requirement missing source_doc",
+                )
+                self.assertTrue(
+                    str(requirement.get("source_phase") or "").strip(),
+                    msg=f"{probe_name} preflight requirement missing source_phase",
+                )
 
 
 class WebsocketGateEnforcementTests(unittest.IsolatedAsyncioTestCase):
@@ -1583,6 +1742,134 @@ class PostOrderActionTests(unittest.TestCase):
 
         self.assertEqual(receipt_endpoint(549), "/v1/core/generate-receipt/549/")
         self.assertEqual(reorder_params(549), {"order_id": "549"})
+
+    def test_parse_reorder_cart_items_from_session_shape(self) -> None:
+        from post_order_actions import build_reorder_order_payload, parse_reorder_cart_items
+        from user_sim import UserFixtures
+
+        payload = {
+            "status": "success",
+            "message": "Reorder successful",
+            "data": [
+                {
+                    "id": 1,
+                    "category": 1,
+                    "subentity": 1,
+                    "name": "Meal",
+                    "price": 2.0,
+                    "discount_price": 1.96,
+                    "status": "available",
+                    "quantity": 1,
+                    "sides": [],
+                }
+            ],
+        }
+        items = parse_reorder_cart_items(payload)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["_line_price"], 1.96)
+
+        fixtures = UserFixtures(
+            user_id=27,
+            store={"id": 1, "name": "Cafe", "status": "open"},
+            location={"id": 8},
+            menu_items=[],
+            currency="jpy",
+        )
+        recorder = RunRecorder.bootstrap()
+        order_payload = build_reorder_order_payload(
+            fixtures=fixtures,
+            reorder_items=items,
+            recorder=recorder,
+            scenario="receipt_review_reorder_second",
+            source_order_db_id=544,
+        )
+        self.assertIsNotNone(order_payload)
+        assert order_payload is not None
+        self.assertEqual(len(order_payload["menu"]), 1)
+        self.assertEqual(order_payload["menu"][0]["quantity"], 1)
+        self.assertEqual(order_payload["total_price"], 1.96)
+
+
+class SavedCardsProbeTests(unittest.TestCase):
+    def _result(self, payload: object) -> HttpResult:
+        return HttpResult(
+            response=httpx.Response(
+                status_code=200,
+                request=httpx.Request("GET", "https://example.test/v1/core/cards/"),
+            ),
+            payload=payload,
+            event={"id": 1},
+            latency_ms=10,
+        )
+
+    def test_empty_cards_list_from_session_is_passed(self) -> None:
+        from app_probes import _validate_probe_response, probe_spec
+
+        payload = {
+            "status": "success",
+            "message": "Cards retrieved successfully",
+            "data": {
+                "object": "list",
+                "data": [],
+                "has_more": False,
+                "url": "/v1/customers/cus_UQ9ecHvtCOzchX/payment_methods",
+            },
+        }
+        status, reason, message, _details = _validate_probe_response(
+            probe_spec("saved_cards"),
+            self._result(payload),
+        )
+        self.assertEqual(status, "passed")
+        self.assertEqual(reason, "probe_response_ok")
+        self.assertIn("documented sample variant", message)
+
+    def test_nonempty_cards_from_session_passes_shape_check(self) -> None:
+        from app_probes import _validate_probe_response, probe_spec
+
+        payload = {
+            "status": "success",
+            "message": "Cards retrieved successfully",
+            "data": {
+                "object": "list",
+                "data": [
+                    {
+                        "id": "pm_1TYBKgLfBn92UFOlfVRW4Gq0",
+                        "object": "payment_method",
+                    }
+                ],
+                "has_more": False,
+                "url": "/v1/customers/cus_test/payment_methods",
+            },
+        }
+        status, reason, _, _ = _validate_probe_response(
+            probe_spec("saved_cards"),
+            self._result(payload),
+        )
+        self.assertEqual(status, "passed")
+        self.assertEqual(reason, "probe_response_ok")
+
+    def test_malformed_cards_payload_is_inconclusive_not_no_content(self) -> None:
+        from app_probes import _validate_probe_response, probe_spec
+
+        status, reason, message, _ = _validate_probe_response(
+            probe_spec("saved_cards"),
+            self._result({}),
+        )
+        self.assertEqual(status, "inconclusive")
+        self.assertEqual(reason, "probe_schema_undocumented")
+        self.assertNotIn("no content", message.lower())
+
+    def test_saved_cards_preflight_allows_missing_customer_id(self) -> None:
+        from app_probes import _probe_preflight, probe_spec
+
+        allowed, reason, _ = _probe_preflight(
+            spec=probe_spec("saved_cards"),
+            context={"user_id": 27, "currency": "jpy"},
+            token="user-token",
+            customer_id=None,
+        )
+        self.assertTrue(allowed)
+        self.assertEqual(reason, "preflight_passed")
 
 
 class TransportProofTests(unittest.TestCase):

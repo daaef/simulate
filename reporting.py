@@ -589,6 +589,7 @@ class RunRecorder:
             decision["details"] = _json_safe(details)
 
         self.decisions.append(decision)
+        decision_ok = str(status).strip().lower() not in {"failed", "error", "blocked"}
         self.record_event(
             actor=actor or "simulator",
             action=action,
@@ -596,7 +597,7 @@ class RunRecorder:
             scenario=scenario,
             step=step,
             status=status,
-            ok=status in {"called", "recovered"},
+            ok=decision_ok,
             reason_code=str(decision["reason_code"]),
             reason_message=str(decision["reason_message"]),
             next_action=next_action,
@@ -852,7 +853,7 @@ class RunRecorder:
         important = [
             item
             for item in self.decisions
-            if item.get("status") in {"blocked", "skipped", "recovered", "failed"}
+            if item.get("status") in {"blocked", "skipped", "recovered", "failed", "inconclusive"}
         ]
 
         if not important:
@@ -868,8 +869,8 @@ class RunRecorder:
             [
                 "The simulator records these decisions so expected app behavior is not mistaken for backend failure.",
                 "",
-                _table_row(["Status", "Action", "Reason", "Message", "Scenario", "Step"]),
-                _table_row(["---", "---", "---", "---", "---", "---"]),
+                _table_row(["Status", "Action", "Reason", "Message", "Scenario", "Step", "Session doc"]),
+                _table_row(["---", "---", "---", "---", "---", "---", "---"]),
             ]
         )
 
@@ -878,6 +879,11 @@ class RunRecorder:
             reason_code = item.get("reason_code") or item.get("reason")
             if is_informational_decision_reason(status=status, reason_code=reason_code):
                 status = f"info ({status})"
+            details = item.get("details") if isinstance(item.get("details"), dict) else {}
+            session_ref = details.get("session_reference") if isinstance(details, dict) else {}
+            source_doc = ""
+            if isinstance(session_ref, dict):
+                source_doc = str(session_ref.get("source_doc") or "")
             lines.append(
                 _table_row(
                     [
@@ -887,9 +893,13 @@ class RunRecorder:
                         item.get("message", ""),
                         item.get("scenario", ""),
                         item.get("step", ""),
+                        source_doc,
                     ]
                 )
             )
+            preview = details.get("response_preview") or details.get("raw_payload")
+            if preview:
+                lines.append(f"- Response evidence: `{preview}`")
 
         lines.append("")
         return lines

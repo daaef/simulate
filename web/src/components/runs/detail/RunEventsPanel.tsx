@@ -26,6 +26,7 @@ function eventTimestamp(event: EventRow): string {
 function eventStatus(event: EventRow): string {
   const explicit = eventField(event, "status");
   if (explicit) return explicit;
+  if (eventField(event, "category") === "decision") return "";
   const ok = event["ok"];
   if (typeof ok === "boolean") return ok ? "ok" : "failed";
   return "";
@@ -59,6 +60,31 @@ function isHttpEvent(event: EventRow): boolean {
   const method = eventField(event, "method");
   const url = eventField(event, "url") || eventField(event, "endpoint") || eventField(event, "path");
   return !!method && !!url;
+}
+
+function httpStatusCode(event: EventRow): number | null {
+  const raw = event["http_status"] ?? event["status_code"];
+  if (typeof raw === "number") return raw;
+  const parsed = Number(eventField(event, "http_status") || eventField(event, "status_code"));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isHttpError(event: EventRow): boolean {
+  if (!isHttpEvent(event)) return false;
+  const status = httpStatusCode(event);
+  if (status !== null) return status >= 500;
+  return event["ok"] === false;
+}
+
+function httpResultLabel(event: EventRow): string {
+  const status = httpStatusCode(event);
+  if (status !== null) {
+    if (status >= 500) return "error";
+    if (status >= 400) return "client error";
+  }
+  const label = eventStatus(event);
+  if (label === "failed") return "error";
+  return label || "ok";
 }
 
 export default function RunEventsPanel({
@@ -98,14 +124,15 @@ export default function RunEventsPanel({
                   const url = eventField(event, "url") || eventField(event, "endpoint") || eventField(event, "path");
                   const status = eventField(event, "status_code") || eventField(event, "http_status") || eventStatus(event);
                   const latency = eventField(event, "latency_ms") || eventField(event, "duration_ms");
+                  const errorRow = isHttpError(event);
                   return (
-                    <tr key={idx}>
+                    <tr key={idx} className={errorRow ? "log-line-error" : undefined}>
                       <td>{eventTimestamp(event) || "—"}</td>
                       <td>{method ? <span className={`method-badge ${methodClass(method)}`}>{method.toUpperCase()}</span> : null}</td>
                       <td style={{ maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis" }}>{url}</td>
                       <td>{status}</td>
                       <td>{latency ? `${latency}ms` : "—"}</td>
-                      <td>{eventStatus(event)}</td>
+                      <td>{httpResultLabel(event)}</td>
                     </tr>
                   );
                 })}
@@ -131,8 +158,10 @@ export default function RunEventsPanel({
               </tr>
             </thead>
             <tbody>
-              {events.map((event, idx) => (
-                <tr key={idx}>
+              {events.map((event, idx) => {
+                const errorRow = isHttpError(event) || eventStatus(event) === "failed" || eventStatus(event) === "error";
+                return (
+                <tr key={idx} className={errorRow ? "log-line-error" : undefined}>
                   <td>{eventTimestamp(event) || "—"}</td>
                   <td>{eventField(event, "actor") || "—"}</td>
                   <td>{eventField(event, "action") || eventField(event, "method") || "—"}</td>
@@ -141,7 +170,8 @@ export default function RunEventsPanel({
                   <td>{eventField(event, "next_action") || detailField(event, "next_action") || "—"}</td>
                   <td style={{ maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis" }}>{eventMessage(event) || "—"}</td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>

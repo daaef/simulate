@@ -8,6 +8,7 @@ then drives each scenario step-by-step using polling for verification.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import httpx
 from rich.console import Console
@@ -630,37 +631,17 @@ async def _wait_for_ws_gate(
     return True
 
 
-async def _run_completed(
+async def _fulfill_placed_order(
     client: httpx.AsyncClient,
     *,
+    order: dict[str, Any],
     user_session: user_sim.UserSession,
     store_session: store_sim.StoreSession,
-    fixtures: user_sim.UserFixtures,
     recorder: RunRecorder,
     timing: TimingProfile,
     observer: WebsocketObserver,
-    scenario: str = "completed",
-) -> None:
-    recorder.start_scenario(scenario, expected_final_status="completed")
-    order = await user_sim.place_order(
-        client,
-        user_token=user_session.token,
-        token_source=user_session.token_source,
-        worker_id=1,
-        fixtures=fixtures,
-        recorder=recorder,
-        scenario=scenario,
-        step="place_order",
-    )
-    if order is None:
-        _finish_checked(
-            recorder,
-            scenario,
-            actual_final_status="placement_failed",
-            note="Order could not be created.",
-        )
-        return
-
+    scenario: str,
+) -> str:
     if not await _wait_for_ws_gate(
         observer,
         recorder=recorder,
@@ -672,7 +653,7 @@ async def _run_completed(
         sources={"store_orders"},
         phase="precondition",
     ):
-        return
+        return "websocket_gate_failed"
 
     recorder.record_event(
         actor="store",
@@ -715,7 +696,7 @@ async def _run_completed(
             order_db_id=order["order_db_id"],
             order_ref=order["order_ref"],
         )
-        return
+        return "accept_failed"
 
     if not await _wait_for_ws_gate(
         observer,
@@ -728,7 +709,7 @@ async def _run_completed(
         sources={"user_orders", "store_orders"},
         phase="result",
     ):
-        return
+        return "websocket_gate_failed"
 
     recorder.record_event(
         actor="store",
@@ -799,7 +780,7 @@ async def _run_completed(
             order_db_id=order["order_db_id"],
             order_ref=order["order_ref"],
         )
-        return
+        return "payment_failed"
 
     if not await _wait_for_ws_gate(
         observer,
@@ -812,7 +793,7 @@ async def _run_completed(
         sources={"store_orders", "user_orders"},
         phase="result",
     ):
-        return
+        return "websocket_gate_failed"
 
     recorder.record_event(
         actor="store",
@@ -855,7 +836,7 @@ async def _run_completed(
             order_db_id=order["order_db_id"],
             order_ref=order["order_ref"],
         )
-        return
+        return "ready_failed"
     if not await _wait_for_ws_gate(
         observer,
         recorder=recorder,
@@ -867,7 +848,7 @@ async def _run_completed(
         sources={"store_orders"},
         phase="result",
     ):
-        return
+        return "websocket_gate_failed"
 
     previous_status = "ready"
     for status, _ in robot_sim.ROBOT_LIFECYCLE:
@@ -882,7 +863,7 @@ async def _run_completed(
             sources={"store_orders"},
             phase="precondition",
         ):
-            return
+            return "websocket_gate_failed"
         await traced_sleep(
             timing.robot_delay(status),
             recorder=recorder,
@@ -912,7 +893,7 @@ async def _run_completed(
                 order_db_id=order["order_db_id"],
                 order_ref=order["order_ref"],
             )
-            return
+            return "robot_status_failed"
         if not await _wait_for_ws_gate(
             observer,
             recorder=recorder,
@@ -924,7 +905,7 @@ async def _run_completed(
             sources={"store_orders"},
             phase="result",
         ):
-            return
+            return "websocket_gate_failed"
         previous_status = status
         if status == "robot_arrived_for_delivery":
             await _verify_receive_code(
@@ -956,13 +937,57 @@ async def _run_completed(
         timeout_code="trace_completed_timeout",
         timeout_message="Order never reached completed in trace mode.",
     )
-    actual_final_status = (
+    return (
         str(final_state.get("status") or "completed_timeout")
         if final_state
         else "completed_timeout"
     )
+
+
+async def _run_completed(
+    client: httpx.AsyncClient,
+    *,
+    user_session: user_sim.UserSession,
+    store_session: store_sim.StoreSession,
+    fixtures: user_sim.UserFixtures,
+    recorder: RunRecorder,
+    timing: TimingProfile,
+    observer: WebsocketObserver,
+    scenario: str = "completed",
+) -> None:
+    recorder.start_scenario(scenario, expected_final_status="completed")
+    order = await user_sim.place_order(
+        client,
+        user_token=user_session.token,
+        token_source=user_session.token_source,
+        worker_id=1,
+        fixtures=fixtures,
+        recorder=recorder,
+        scenario=scenario,
+        step="place_order",
+    )
+    if order is None:
+        _finish_checked(
+            recorder,
+            scenario,
+            actual_final_status="placement_failed",
+            note="Order could not be created.",
+        )
+        return
+
+    actual_final_status = await _fulfill_placed_order(
+        client,
+        order=order,
+        user_session=user_session,
+        store_session=store_session,
+        recorder=recorder,
+        timing=timing,
+        observer=observer,
+        scenario=scenario,
+    )
+    reorder_result = None
     if actual_final_status == "completed" and config.SIM_RUN_POST_ORDER_ACTIONS:
-        await post_order_actions.run_post_order_actions(
+        reorder_result = await post_order_actions.run_post_order_actions(
             client,
             recorder=recorder,
             user_token=user_session.token,
@@ -972,12 +997,117 @@ async def _run_completed(
             subentity=fixtures.store,
             scenario=scenario,
         )
+    if actual_final_status == "completed" and scenario == "receipt_review_reorder":
+        second_status = await _run_reorder_second_order(
+            client,
+            user_session=user_session,
+            store_session=store_session,
+            fixtures=fixtures,
+            recorder=recorder,
+            timing=timing,
+            observer=observer,
+            source_order_db_id=order["order_db_id"],
+            source_order_ref=order["order_ref"],
+            reorder_result=reorder_result,
+        )
+        if second_status != "completed":
+            actual_final_status = second_status
     _finish_checked(
         recorder,
         scenario,
         actual_final_status=actual_final_status,
         order_db_id=order["order_db_id"],
         order_ref=order["order_ref"],
+    )
+
+
+async def _run_reorder_second_order(
+    client: httpx.AsyncClient,
+    *,
+    user_session: user_sim.UserSession,
+    store_session: store_sim.StoreSession,
+    fixtures: user_sim.UserFixtures,
+    recorder: RunRecorder,
+    timing: TimingProfile,
+    observer: WebsocketObserver,
+    source_order_db_id: int,
+    source_order_ref: str,
+    reorder_result: Any | None = None,
+) -> str:
+    scenario = "receipt_review_reorder_second"
+    recorder.start_scenario(scenario, expected_final_status="completed")
+
+    if reorder_result is None:
+        reorder_result = await post_order_actions.fetch_reorder(
+            client,
+            recorder=recorder,
+            user_token=user_session.token,
+            token_source=user_session.token_source,
+            order_db_id=source_order_db_id,
+            order_ref=source_order_ref,
+            scenario="receipt_review_reorder",
+        )
+    if reorder_result is None:
+        _finish_checked(
+            recorder,
+            scenario,
+            actual_final_status="reorder_fetch_failed",
+            order_db_id=source_order_db_id,
+            order_ref=source_order_ref,
+        )
+        return "reorder_fetch_failed"
+
+    reorder_items = post_order_actions.parse_reorder_cart_items(reorder_result.payload)
+    payload = post_order_actions.build_reorder_order_payload(
+        fixtures=fixtures,
+        reorder_items=reorder_items,
+        recorder=recorder,
+        scenario=scenario,
+        source_order_db_id=source_order_db_id,
+    )
+    if payload is None:
+        _finish_checked(
+            recorder,
+            scenario,
+            actual_final_status="reorder_cart_empty",
+            order_db_id=source_order_db_id,
+            order_ref=source_order_ref,
+        )
+        return "reorder_cart_empty"
+
+    console.print(
+        f"[cyan]post_order:[/] Placing reorder cart for source order {source_order_ref} ..."
+    )
+    order = await user_sim.place_order_with_payload(
+        client,
+        user_token=user_session.token,
+        token_source=user_session.token_source,
+        worker_id=1,
+        fixtures=fixtures,
+        recorder=recorder,
+        payload=payload,
+        scenario=scenario,
+        step="reorder_place_order",
+    )
+    if order is None:
+        _finish_checked(
+            recorder,
+            scenario,
+            actual_final_status="reorder_placement_failed",
+            order_db_id=source_order_db_id,
+            order_ref=source_order_ref,
+        )
+        return "reorder_placement_failed"
+
+    return await _fulfill_placed_order(
+        client,
+        order=order,
+        user_session=user_session,
+        store_session=store_session,
+        recorder=recorder,
+        timing=timing,
+        observer=observer,
+        scenario=scenario,
     )
 
 
@@ -1022,7 +1152,7 @@ async def _run_rejected(
         sources={"store_orders"},
         phase="precondition",
     ):
-        return
+        return "websocket_gate_failed"
 
     recorder.record_event(
         actor="store",

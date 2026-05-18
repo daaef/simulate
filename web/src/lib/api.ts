@@ -421,6 +421,14 @@ export type LifecycleStep = {
   latency_ms?: number | null;
 };
 
+export type FindingPrecedingStep = {
+  at?: string | null;
+  action: string;
+  step?: string | null;
+  endpoint?: string | null;
+  ok?: boolean | null;
+};
+
 export type LatestRunIssue = {
   severity: string;
   code: string;
@@ -428,6 +436,13 @@ export type LatestRunIssue = {
   actor?: string | null;
   at?: string | null;
   route?: string | null;
+  flow?: string | null;
+  flow_label?: string | null;
+  step?: string | null;
+  method?: string | null;
+  http_status?: number | null;
+  order_ref?: string | null;
+  preceding_steps?: FindingPrecedingStep[];
 };
 
 export type RunFindings = {

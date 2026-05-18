@@ -25,9 +25,11 @@ def is_informational_decision_reason(*, status: Any, reason_code: Any) -> bool:
     decision_status = _as_text(status)
     reason = _as_text(reason_code)
 
-    if decision_status not in {"skipped", "recovered"}:
+    if decision_status not in {"skipped", "recovered", "inconclusive"}:
         return False
     if reason.startswith("missing_"):
+        return True
+    if reason in {"saved_cards_empty_list", "saved_cards_envelope_unavailable"}:
         return True
     return reason in INFORMATIONAL_DECISION_REASON_CODES
 
