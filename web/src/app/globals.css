@@ -1558,6 +1558,17 @@ pre.log {
   white-space: nowrap;
 }
 
+/* Global a:hover / a:visited beat .hero-link alone; keep button contrast */
+.hero-link:hover,
+.hero-link:visited {
+  color: var(--button-primary-text);
+  text-decoration: none;
+}
+
+.hero-link:hover {
+  background: var(--button-primary-hover);
+}
+
 .latest-run-meta-grid,
 .protocol-metrics,
 .actor-card-meta {

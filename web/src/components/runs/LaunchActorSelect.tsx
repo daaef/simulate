@@ -6,11 +6,7 @@ import {
   ACTOR_SELECT_DEFAULT,
   ACTOR_SELECT_OTHER,
   actorSelectValue,
-  buildStoreDetailRows,
-  buildUserDetailRows,
   deriveActorSelectMode,
-  findPlanStore,
-  findPlanUser,
   formatStoreOptionLabel,
   formatUserOptionLabel,
   isPlanDefaultStore,
@@ -19,7 +15,6 @@ import {
   listPlanUsers,
   storeActorKey,
   userActorKey,
-  type ActorDetailRow,
 } from "../../lib/plan-actor-options";
 
 type LaunchActorFieldId = "store" | "phone";
@@ -32,20 +27,6 @@ interface LaunchActorSelectProps {
   onFocus?: () => void;
   onBlur?: () => void;
   onTouch?: () => void;
-}
-
-function ActorDetailCard({ rows }: { rows: ActorDetailRow[] }) {
-  if (!rows.length) return null;
-  return (
-    <div className="actor-card-meta launcher-actor-detail" style={{ marginTop: 8 }}>
-      {rows.map((row) => (
-        <div key={row.label}>
-          <span>{row.label}</span>
-          <strong>{row.value}</strong>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 export default function LaunchActorSelect({
@@ -80,15 +61,6 @@ export default function LaunchActorSelect({
   const mode = useMemo(() => deriveActorSelectMode(value, actors), [value, actors]);
 
   const selectValue = actorSelectValue(mode, value);
-
-  const selectedStore = isStore && mode === "plan" ? findPlanStore(planContent, String(value ?? "")) : null;
-  const selectedUser = !isStore && mode === "plan" ? findPlanUser(planContent, String(value ?? "")) : null;
-
-  const detailRows = useMemo(() => {
-    if (selectedStore) return buildStoreDetailRows(selectedStore);
-    if (selectedUser) return buildUserDetailRows(selectedUser);
-    return [];
-  }, [selectedStore, selectedUser]);
 
   const placeholder = isStore ? "e.g. FZY_926025" : "e.g. +2348166675609";
 
@@ -147,8 +119,6 @@ export default function LaunchActorSelect({
           }}
         />
       ) : null}
-
-      {mode === "plan" ? <ActorDetailCard rows={detailRows} /> : null}
     </div>
   );
 }

@@ -101,6 +101,7 @@ These map to `RunCreateRequest` in `web/src/lib/api.ts`.
 | 3.4.1 | Leave blank | Preview has no `--store` / `--phone`. |
 | 3.4.2 | Enter store and phone from plan | Preview shows `--store` and `--phone`; run succeeds against last-mile when values ∈ plan. |
 | 3.4.3 | Enter values **not** in plan | Run fails with plan-scope error (simulator validates). |
+| 3.4.4 | Focus **Store ID** or **Phone** with a plan actor selected | Field help **Selected** lists detail rows (name, GPS, etc.); no metadata grid under the dropdown. **Resolved scope** still previews defaults when fields are blank. |
 
 ---
 
