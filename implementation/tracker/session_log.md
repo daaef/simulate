@@ -2674,3 +2674,38 @@ curl -s -b /tmp/sim-cookies.txt http://localhost:8080/api/v1/flows
 
 1. `docker compose up -d --build api web` then re-smoke Config and Runs load launcher.
 2. Run Phase 31 manual smoke (dark mode, schedules edit, archives/retention pages).
+
+## 2026-05-19 03:55
+
+### Summary
+
+Post-rebuild Docker smoke after Phase 34 closeout commits.
+
+### Tests / Commands Run
+
+```bash
+docker compose up -d --build api web
+curl -s http://localhost:8080/healthz
+curl login + GET /api/v1/simulation-plans/sim-actors
+curl GET /api/v1/flows (load capabilities)
+curl GET /api/v1/schedules /api/v1/archives/summary /api/v1/retention/summary
+docker compose exec api python -m unittest tests.test_web_api.SimulationPlansApiTests tests.test_load_worker_assignment -v
+rg "Load Pace|config-tab-plans" web/.next/static/chunks
+```
+
+### Results
+
+- `/healthz` 200; admin login 200.
+- `GET /api/v1/simulation-plans/sim-actors` returns `sim-actors` / `sim_actors.json` with 11 users and 4 stores.
+- Load flow capabilities expose `users`, `orders`, `interval`, `all_users` flags.
+- Schedules, archives summary, retention summary endpoints return 200.
+- Container API tests: 14/14 pass.
+- Built web bundles include Config tab ids and Load Pace UI strings.
+
+### Issues / Blockers
+
+- Full browser smoke (dark mode toggle, schedule edit form, visual tab switching) still requires manual GUI walkthrough.
+
+### Next Steps
+
+1. Manual browser pass for dark mode, schedule edit, and load launcher pace selector interaction.
