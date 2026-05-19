@@ -5,6 +5,7 @@ This simulator is a daily doctor for the ordering platform. It simulates user ap
 Docker note: this stack runs the Next.js web app with `next start` from the built image. If `./web` is bind-mounted over `/app`, the built `.next` directory can be masked and `web` will crash with `Could not find a production build in the '.next' directory`.
 
 **Capability catalog:** For an exhaustive reference to flows, suites, scenarios, CLI flags, run-plan JSON keys, environment variables, and web/API launch parity, see [docs/SIMULATOR_CAPABILITIES.md](docs/SIMULATOR_CAPABILITIES.md).
+**Flow guides:** For one comprehensive operator document per GUI Flow selector option, see [docs/flows/README.md](docs/flows/README.md).
 
 **Simulation test guide (run efficiency):** For a practical operator playbook focused on choosing the right run quickly and using suites/scenarios/flags efficiently, see [docs/SIMULATION_TEST_GUIDE.md](docs/SIMULATION_TEST_GUIDE.md).
 
@@ -234,6 +235,11 @@ Advanced Mode Overrides are optional and let operators explicitly set `--mode`, 
 The `Scenarios (trace only)` control in Advanced Mode Overrides is a searchable chips multiselect. It only allows scenarios returned by the selected flow capability (no free-text custom scenario values).
 Trace-context fields in the launcher: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, `enforce_websocket_gates`.
 Load-context fields in the launcher: `users`, `orders`, `interval`, `reject`, `continuous`, `all_users`, plus shared store/phone/provision controls.
+
+Load user-assignment semantics:
+- `all_users=false` -> single selected/default user is reused across `users=N` workers.
+- `all_users=true` and `N <= plan users` -> first `N` users are selected in plan order.
+- `all_users=true` and `N > plan users` -> users are assigned by deterministic round-robin repeat from the beginning.
 
 Simulation plan API reserved-id semantics (`sim-actors`):
 - `GET /api/v1/simulation-plans/sim-actors` returns the default `sim_actors.json` plan payload.

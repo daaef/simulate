@@ -1,263 +1,34 @@
 # Fainzy Simulator
 
-This repo contains a CLI-driven ordering-flow simulator plus a Dockerized web UI to run simulations, inspect runs, and manage users/roles. It is intended as an operator-focused "daily doctor" for the ordering platform: it simulates user/store/robot behavior, checks HTTP + websocket paths, and writes evidence-rich reports.
+CLI + web UI for running simulator flows, inspecting runs, and operating daily health checks.
 
-## Quick Start (Docker)
+## Quickstart (Docker)
 
 ```bash
 docker compose up -d --build
 ```
 
-The `web` service runs `next start` (production mode) from the built image. Do not bind-mount `./web` into `/app` for this stack, or the image-built `.next` output will be hidden and the container will fail with `Could not find a production build in the '.next' directory`.
-
 Open:
 
 - Web UI: `http://localhost:8080`
-- PostgreSQL (host): `localhost:5433` (container: `postgres:5432`)
+- PostgreSQL (host): `localhost:5433`
 
-## Web UI Auth
-
-Default admin credentials:
+Default web admin credentials:
 
 - Username: `admin`
 - Password: `admin123`
 
-User roles: `admin`, `operator`, `runner`, `viewer`, `auditor`. See `SIMULATOR_GUIDE.md` (section "Web UI Authentication, Admin Account, and Roles") for the full role model, how to change the default admin, create new admins/users, and lockout recovery.
-
-Admins can delete completed runs from the web UI. Deleting a run removes only that run's database row, GUI log file, and owned artifact folder; shared GUI log storage and other runs are preserved. The delete API reports both `deleted_files` and `missing_files`.
-
-## Health contract (Up / Degraded / Down)
-
-Use the **same words** in the web UI, email footers, and this README so owners and engineers do not talk past each other:
-
-- **Up:** The simulator **control plane** is usable: you can sign in, `GET /healthz` returns ok, and (when you care about product health) a recent **doctor** or **trace** run completed successfully within your policy window.
-- **Degraded:** Partial risk—examples: retention/archive backlog, schedule campaign warnings, alerts open, or websocket gate warnings while the run still completed. Investigate, but you may not be fully **Down**.
-- **Down:** A blocking failure—failed run, cannot authenticate, cannot launch runs, or the ordering check never completes (for example websocket gates enforced and required events never arrived—see `SIMULATOR_GUIDE.md` and `ARCHITECTURE.md`).
-
-**Important:** `GET /healthz` (shown as API health on **Runs** and **Overview**) checks **only** the FastAPI process and basic metadata (`project_dir`, `db_path`). It does **not** validate last-mile HTTP, WebSocket gateways, Stripe, or store menus. For that, run **doctor** or **trace** against real endpoints (see next section).
-
-### Symptom → likely layer (quick)
-
-| What you see | Likely layer |
-|--------------|----------------|
-| `/healthz` or Runs “API health” fails | Simulator stack (nginx, `api` container, DB), or browser cannot reach the host |
-| `/healthz` ok but doctor/trace fails on `wss://lastmile...` with 502 | Upstream last-mile **proxy** (see README `scripts/check_lastmile_ws.sh`) |
-| HTTP 5xx on core/order APIs in run log | Last-mile **application** or dependency |
-| Run failed with business validation / missing coupon | Often **data or plan** configuration—not “API down” |
-
-## Which simulation flow should I use?
-
-1. **Is the platform healthy end-to-end?** → **`doctor`** with your agreed daily plan (`sim_actors.json` or `runs/gui-plans/daily-doctor.json` or another GUI plan your team standardized on).
-2. **Did we break a specific path?** → **`trace`** with a narrow suite (`core`, `doctor`, or individual scenarios—see `ARCHITECTURE.md` Trace Mode).
-3. **Stress / churn / many orders?** → **`load`** mode (engineering-led; not a substitute for a daily health doctor).
-
-**Plans:** Keep one blessed repo plan for production-like checks; use `runs/gui-plans/*.json` for owner-editable variants. **Flags:** Prefer defaults; put `SIM_ENFORCE_WEBSOCKET_GATES`, `SIM_STRICT_PLAN`, and scenario overrides in the Runs **Advanced** area or `.env` only when you understand they change pass/fail behavior—see `SIMULATOR_GUIDE.md` (Operator observability).
-
-**No separate “last-mile ping” endpoint:** Proof of last-mile health is intentionally a **real** doctor/trace run (or a scheduled profile that runs one). That avoids a false green from a tiny probe that does not exercise auth, menus, payment, or websockets.
-
-## Probe Contract Policy
-
-Probe contracts are sourced only from these session docs:
-- `app-20260428.full-session-user.md`
-- `app-20260430.full-session-user.md`
-- `app-20260517.full-session-user.md`
-- `app-20260429.full-session-store.md`
-- `app-20260430.full-session-store.md`
-
-Probe status semantics are strict:
-- `failed`: only transport exception, timeout/connection error, or HTTP `5xx`.
-- `passed`: endpoint call succeeded and response matches at least one documented sample variant.
-- `inconclusive`: endpoint call succeeded but response status/shape is not yet documented in contract variants.
-- `skipped`: required documented preflight data is missing, or no sample exists for that probe.
-
-When no sample exists, simulator emits `reason_code=missing_reference_sample`, `next_action=request_sample_from_user`, records a `probe_sample_needed` finding, and continues the run. Event metrics `failed_events` now count only real failures under these rules.
-
-## Web UI Operations
-
-The authenticated app shell includes active route highlighting for `Overview`, `Runs`, `Config`, `Schedules`, `Archives`, `Retention`, and `Admin`.
-
-- `Overview`: status cards, run status and success charts, flow distribution, failure trend, archive/purge backlog, schedule health, and alerts.
-  - **Latest run metrics dashboard:** Under the latest-run hero, an expandable metrics dashboard shows Business KPIs by default with a segmented switch for Business, Operations, and Engineering views. The technical action list remains available as a collapsed drill-down with action-key search. Run metrics from `GET /api/v1/runs/{id}/metrics` still include `action_counts` (complete list) plus `top_actions` (top 10 only, unchanged for compatibility).
-  - Latest Run Overview `Critical Findings` is intentionally server-focused: it shows server/API availability failures (`5xx`, transport/network, websocket availability) and excludes expected missing-information/business-availability states (for example missing token, no saved card, no coupon). Full raw findings still remain in `events.json`, `report.md`, and `story.md`.
-  - Decision events with expected non-failure reasons (for example `unsupported_profile_fetch_contract`, `no_customer_id`, and `missing_*`/`missing_auth_token` preflight skips) are classified as informational context and do not count toward failure badges/counters.
-  - `Critical Findings` rows include the failed API route/endpoint, HTTP method/status when recorded, simulator `flow`/`step`, optional session phase labels (from `app-20260428.full-session-user.md` / `app-20260430.full-session-user.md` mappings), and up to three preceding steps from the same actor/scenario in `events.json`.
-  - Latest Run Overview shows **Critical** and **Operational** findings side by side (`findings.critical` / `findings.operational`).
-  - Latest Run hero now shows run-context chips when present: `profile:<name>`, `schedule:<name>`, and integration route context (`route:<project/environment>`).
-- `Runs`: launch, cancel, replay, delete completed runs, and inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles.
-  - Run detail **Overview** tab: summary counts plus a metrics dashboard (Business default, Operations/Engineering switch, collapsed technical drill-down with action-key search).
-  - Run detail Overview includes side-by-side **Critical Findings** (server/API/websocket availability) and **Operational Findings** (business preconditions, probes, gate bypass warnings). Both buckets come from `findings` on `GET /api/v1/overview/runs/{run_id}` (`issues` remains critical-only for compatibility).
-  - Each web run writes stdout to its own `run-{id}.log`. **Live Console** on `/runs` follows the selected or launched run (use **Console** on a table row to watch without leaving the page). Run detail **Console** polls while the run is active.
-  - Run detail artifacts are run-id scoped: `/runs/{id}` now reads only that run's own log/artifact metadata and active runs do not hydrate event/report/story paths until artifacts are produced for that same run.
-  - Per-endpoint charts are still not shown until wired from real traffic data; use **Traffic** and **Console** tabs for depth.
-  - Runs now show launch attribution (`trigger_source`, `trigger_label`, optional `profile_id`) in list/console/detail views.
-  - Start Run now includes a `Save as profile` shortcut under command preview that scrolls/focuses the Saved Profiles name input.
-  - Plan selection is dropdown-only in Start Run: `sim_actors.json` is always available and GUI plans are appended when present; free-text plan entry has been removed.
-  - Start Run now uses flow capability metadata from `/api/v1/flows` and renders only the inputs valid for the resolved `Flow -> Mode -> Suite/Scenarios` context.
-  - Advanced Mode Overrides can explicitly set `mode`, `suite`, and multi-scenario selections. The command preview reflects these typed fields directly (not hidden `extra_args`).
-  - `Scenarios (trace only)` in Advanced Mode Overrides now uses a searchable chips multiselect (typeahead + keyboard navigation) and accepts only supported scenarios from the selected flow capability.
-  - Start Run now includes an inline **Execution Impact** assistant under command preview: concise default summary, expandable detailed behavior, and blocking warnings aligned with launcher validation.
-  - Every Start Run control now shows example placeholder/help values (flow, suite/scenarios, load knobs, toggles) to speed up correct run setup.
-  - Trace-context inputs: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, websocket gate toggle.
-  - Load-context inputs: `users`, `orders`, `interval`, `reject`, `continuous`, `all_users`, plus shared identity/provision toggles.
-- `Config`: tabbed configuration surface with `Plans`, `Email`, and `Integration mappings`.
-  - In `Plans`, `New` now clones the currently loaded JSON editor content (falling back to selected plan content/template when needed), clears selected plan id, and defaults name to `<selected plan> (Copy)` or `Daily Doctor Plan` when nothing is selected.
-- `Schedules`: creates campaign-first schedules (simple requests are normalized to campaign execution), supports period-specific run slots, all-day mode, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, edit, pause/resume, disable/enable, and soft delete/restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
-- `Archives`: searchable archive/raw-purge candidate browsing with retained run summaries.
-- `Retention`: policy windows, archive/purge queues, retained-summary fields, and purge-safety state.
-- `Admin`: manage users under `/admin/users` and configure system policies (including allowed scheduling timezones) under `/admin/system`.
-
-## Schedule Semantics
-
-Preferred schedule contract (for new/edited schedules):
-
-1. `anchor_start_at`: when recurring automation starts.
-2. `period`: `daily`, `weekly`, or `monthly`.
-3. `repeat`: `none`, `daily`, `weekly`, `monthly`, `annually`, `weekdays`, or `custom`.
-4. `stop_rule`: `never`, `end_at`, or `duration`.
-5. `all_day`: when `true`, scheduler uses whole-day triggers and ignores slot times.
-6. `run_slots`: period-specific slot definitions:
-   - daily: `[{ "time": "HH:MM" }]`
-   - weekly: `[{ "weekday": "monday", "time": "HH:MM" }]`
-   - monthly: mixed `day_of_month` + `weekday_ordinal` slots
-7. Optional constraint: `blackout_dates`.
-
-Custom repeat uses `recurrence_config.weekdays` and requires `stop_rule=end_at`.
-
-The scheduler computes period candidates, applies stop rule, applies window/blackout constraints, then emits:
-
-- `next_run_at`
-- `next_run_reason`
-- `current_period_runs`
-- `requested_runs_per_period`
-- `feasible_runs_per_period`
-- `schedule_warnings`
-
-Legacy cadence/custom fields remain accepted for compatibility with existing schedules that have not been edited.
-
-The `/schedules` form shows pre-submit automation preview (next run, requested vs feasible runs, and warnings). See `SIMULATOR_GUIDE.md` section **Schedule and Campaign APIs** for full details and worked examples.
-
-Recent schedule executions now render one current-state card per schedule with two chips: schedule phase (`Queued`, `Starting`, `Run launched`, `Launch failed`) and latest run status (`Queued`, `Running`, `Succeeded`, `Failed`, `Cancelled`). Cards are clickable to run detail when a latest run exists.
-
-## CLI Simulator
-
-Daily recommended run:
+## Quickstart (CLI)
 
 ```bash
 python3 -m simulate doctor --plan sim_actors.json --timing fast
 ```
 
-See `SIMULATOR_GUIDE.md` for the full command matrix, scenarios, flags, artifacts, and common failure signatures. For an operator-first run-efficiency playbook (what to run, when, and why), see `docs/SIMULATION_TEST_GUIDE.md`.
-
-If doctor/trace runs fail with websocket gate errors and websocket coverage shows `HTTP 502` on `wss://lastmile.../ws/soc/...`, the fix is on the upstream `lastmile` reverse proxy/gateway (not this repo's nginx). Use:
-
-```bash
-scripts/check_lastmile_ws.sh https://lastmile.fainzy.tech <user_id> <store_subentity_id>
-```
-
-and confirm `101 Switching Protocols` for all three socket endpoints before rerunning doctor.
-
-## Configuration Model
-
-`.env` is for secrets, auth cache values, credentials, and deployment URLs only. Non-sensitive simulator choices live in JSON run plans such as `sim_actors.json` or GUI-generated plans under `runs/gui-plans/`.
-
-Plan files define users, stores, delivery GPS, runtime defaults, autopilot rules, fixture/menu defaults, payment mode/coupon defaults, and review/new-user defaults. Existing CLI commands still work: explicit CLI flags override plan values, and `.env` is only a fallback for secret/auth/deployment values.
-
-Store and user scope for execution is now strict to the selected plan:
-- Load and trace runs only use stores defined in plan `stores[]`.
-- Run phones must exist in plan `users[]`.
-- Explicit `--store` / `--phone` values outside plan scope fail fast with a validation error.
-- Out-of-plan `STORE_ID` / `USER_PHONE_NUMBER` values and cached token paths are rejected for both trace and load runs.
-- If the selected plan file has any load/validation issue (missing file, unreadable file, invalid JSON, or invalid schema/content), the simulator logs a warning and falls back to repo default `sim_actors.json`. If fallback also fails, the run exits with a clear error.
-- `--strict-plan` (or `rules.strict_plan=true`) still applies after fallback: the fallback plan must pass strict validation when strict mode is active.
-- Trace/doctor order-driving scenarios are websocket-gated: each next action waits for the required websocket status event first (for example `pending -> payment_processing -> order_processing -> ready -> robot statuses`).
-- Websocket gate enforcement is configurable and now defaults to off: when enforcement is off, gate failures/timeouts are recorded as websocket warnings and scenarios continue; when enforcement is on, gate failures fail fast.
-- Controls:
-  - Env: `SIM_ENFORCE_WEBSOCKET_GATES=false` (default)
-  - CLI: `--enforce-websocket-gates` or `--no-enforce-websocket-gates`
-  - Web UI: Runs page checkbox `Enforce Websocket Gates` (default unchecked)
-
-Keep actor and run behavior out of `.env`: do not set `USER_PHONE_NUMBER`, `STORE_ID`, `SIM_RUN_MODE`, `SIM_TRACE_SUITE`, `SIM_TIMING_PROFILE`, `N_USERS`, `SIM_ORDERS`, `ORDER_INTERVAL_SECONDS`, `REJECT_RATE`, `SIM_LAT`, or `SIM_LNG` there for normal use. Put those values in `sim_actors.json` or the selected GUI plan; use `--phone` or `--store` only for one-off overrides.
-
-Admins can edit GUI-owned plans from `Config`. Use the saved plan path, for example `runs/gui-plans/daily-doctor.json`, in the Runs launcher or with `--plan`.
-
-Simulation plan API reserved-id semantics (`sim-actors`):
-- `GET /api/v1/simulation-plans/sim-actors` returns the default repo plan `sim_actors.json`.
-- The same endpoint returns `404` when `sim_actors.json` is missing or invalid JSON.
-- `POST /api/v1/simulation-plans` and `PUT /api/v1/simulation-plans/{id}` reject the reserved `sim-actors` id (`400`).
-- `GET /api/v1/simulation-plans` dedupes legacy GUI files with id `sim-actors` so the response contains one reserved default entry.
-
-### Catalog run profiles and schedules
-
-When the API starts and initializes its database, it **idempotently** upserts seven built-in run profiles (stable `catalog_slug` values: `api-sweep-max`, `daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and one catalog schedule per profile.
-
-- `api-sweep-max` is pinned to the top of `GET /api/v1/run-profiles` ordering and powers an **active** UTC schedule that runs daily at `06:00`, `14:00`, and `20:00`.
-- The remaining catalog schedules stay **paused** daily templates at `08:00 UTC` (resume them in `/schedules` when needed).
-
-Catalog profiles and their catalog schedules cannot be deleted from the API (HTTP 403); adjust copies in user-owned profiles/schedules instead.
-
-`bounded-load-smoke` now runs with a phased bounded policy: it guarantees at least one accepted/completed order before reject/cancel tail behavior, and fails with `accepted_baseline_not_met` when the baseline cannot be achieved within configured attempts. See `docs/BOUNDED_LOAD_SMOKE_FIX_EXPLAINER.md`.
-
-- **Skip seeding:** set `SIM_SKIP_CATALOG_SEED` to `1`, `true`, or `yes` if you must avoid touching catalog rows (for example some tests or air-gapped installs).
-
-## Email Notifications
-
-Config page now includes tabbed sections (`Plans`, `Email`, `Integration mappings`). The **Email Notifications** panel remains under the `Email` tab for non-secret settings:
-- `email_enabled`
-- `email_from_email`
-- `email_from_name`
-- `email_subject_prefix`
-- `email_recipients`
-- `email_event_triggers` (`run_failed`, `schedule_launch_failed`, `critical_alert`)
-
-System API endpoints:
-- `GET /api/v1/system/email`
-- `PUT /api/v1/system/email`
-- `POST /api/v1/system/email/test`
-
-SMTP secrets remain env-only and are required for sends:
-- `SMTP_HOST`
-- `SMTP_PORT`
-- `SMTP_USERNAME`
-- `SMTP_PASSWORD`
-- `SMTP_TLS_MODE` (`starttls` or `ssl`)
-
-Compose wiring:
-- Local stack (`docker compose up`) passes these from repo `.env` into `api`.
-- Production stack (`docker compose -f docker-compose.prod.yml --env-file .env.prod ...`) passes these from `.env.prod` into `api`.
-- After changing SMTP vars, recreate `api` so new env values are loaded.
-
-`critical_alert` is mapped to run-failure notifications in v1 to avoid duplicate/noisy alert sources. Test-email endpoint enforces a short cooldown.
-Run/schedule failure emails now start with launch context in fixed order: `Profile`, `Trigger`, `Project`, `Repository` (and `Schedule` when applicable).
-
-## Repo Map
-
-- `api/`: FastAPI service (auth, run orchestration, schedules, alerts, archive/retention, admin APIs) used by the web UI.
-- `web/`: Next.js frontend for the web UI.
-- `infra/`: Nginx config and infra wiring for the Docker stack.
-- `runs/`: Generated run artifacts (`events.json`, `report.md`, `story.md`) and web UI runtime storage, including per-run GUI logs under `runs/web-gui/`.
-- `tests/`: API/unit tests.
-
 ## Docs
 
-- `SIMULATOR_GUIDE.md`: Operator guide (CLI + web UI + auth/roles). Start with **Operator observability** and **Operator GUI (web)** for health vocabulary, flow ladder, and screen-by-screen UI semantics.
-- `docs/SIMULATION_TEST_GUIDE.md`: Run-efficiency guide focused on selecting suites/scenarios/flags quickly and executing simulations with minimal wasted runs.
-- `docs/SIMULATOR_CAPABILITIES.md`: Capability catalog (every flow, mode, suite, scenario, CLI flag, run-plan key, environment variable, and web/API run-field mapping).
-- `docs/GUI_TESTING.md`: Manual test guide for the operator web UI (Runs launcher, profiles, validation, roles, other routes).
-- `docs/IDEAS_GUI_AND_FUNCTIONAL.md`: Brainstorm backlog for GUI and simulator/product improvements (not committed work).
-- `docs/BOUNDED_LOAD_SMOKE_FIX_EXPLAINER.md`: Deep-dive on bounded-load smoke redesign, precedence fix, before/after behavior, and troubleshooting.
-- `ARCHITECTURE.md`: System architecture and component responsibilities.
-- `docs/deployment.md`: Production deployment runbook (SSH + GitHub Actions + Docker Compose).
-
-## Production Deployment
-
-Production deployment is handled by a portable SSH workflow in `.github/workflows/deploy.yml`.
-
-- Triggered on push to `main` and manually via `workflow_dispatch`.
-- Deploys only the simulator stack (`nginx`, `web`, `api`, `postgres`) using `docker-compose.prod.yml`.
-- Preserves state with named Docker volumes for Postgres data, run artifacts, and GUI plans.
-- Requires host-managed `.env.prod`; workflow fails if `.env.prod` is missing.
-- Uses `git@github.com:daaef/simulate.git` and defaults deployment path to `/root/simulate`.
-- Defaults to `http://127.0.0.1:8090` via `SIMULATOR_HOST_BIND=127.0.0.1` and `SIMULATOR_HOST_PORT=8090`; set `0.0.0.0` only when intentionally exposing publicly.
-- Supports cross-repository GitHub webhooks at `POST /api/v1/integrations/github/deployment-complete`: `deployment_status` (success) and `workflow_run` (completed + success conclusion), each with HMAC verification, `(project, environment)` profile mapping, idempotent trigger records, and deployment-status callback to GitHub for deployment-driven runs (`simulator/verification` context). Runs record `trigger_source=github` and integration context so the web UI can show GitHub as the launch origin—not only a saved profile.
-
-See `docs/deployment.md` for first-time VPS setup, cross-project GitHub Actions trigger integration, verification, troubleshooting, and security hardening.
+- Canonical operator guide: [SIMULATOR_GUIDE.md](SIMULATOR_GUIDE.md)
+- Flow-by-flow GUI/CLI docs: [docs/flows/README.md](docs/flows/README.md)
+- Architecture reference: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Capability matrix (flows/suites/scenarios/flags): [docs/SIMULATOR_CAPABILITIES.md](docs/SIMULATOR_CAPABILITIES.md)
+- Run-efficiency playbook: [docs/SIMULATION_TEST_GUIDE.md](docs/SIMULATION_TEST_GUIDE.md)
+- GUI testing checklist: [docs/GUI_TESTING.md](docs/GUI_TESTING.md)

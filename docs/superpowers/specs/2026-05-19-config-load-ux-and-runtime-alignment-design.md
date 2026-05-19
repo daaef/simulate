@@ -21,9 +21,12 @@
 6. **Load pacing presets:** add load-only pacing preset selector (`slow=10s`, `normal=3s`, `fast=1s`) that writes `interval` with manual override retained.
 7. **Runtime worker policy:**
    - `all_users=false` and `users=N`: reuse one selected/default user across all `N` workers.
-   - `all_users=true` and `users=N`: assign users by strict deterministic round-robin, repeating from beginning when `N > plan users`.
+   - `all_users=true` and `users=N`:
+     - when `N <= plan users`, assign the first `N` users in plan order.
+     - when `N > plan users`, assign users by strict deterministic round-robin, repeating from beginning.
 8. **Timing separation:** trace `fast/realistic` remains independent from load pacing presets.
 9. **Docs ownership:** `SIMULATOR_GUIDE.md` becomes canonical operator doc; `README.md` reduced to quickstart and links.
+10. **Per-flow operator docs:** add one comprehensive doc per GUI-selectable flow under `docs/flows/`.
 
 ## UX contract
 
@@ -50,7 +53,9 @@
 - Effective worker pool size is `N_USERS`.
 - User assignment policy:
   - `all_users=false`: every worker uses same actor identity context for selected/default phone.
-  - `all_users=true`: precompute worker->user mapping by deterministic modulo indexing over plan users.
+  - `all_users=true`:
+    - if `N_USERS <= len(plan_users)`, use the first `N_USERS` users in plan order.
+    - if `N_USERS > len(plan_users)`, precompute worker->user mapping by deterministic modulo indexing.
 - This policy must be reproducible across identical runs.
 - Existing constraints remain:
   - `users >= 1`
@@ -93,6 +98,7 @@ No breaking API redesign.
 
 - `SIMULATOR_GUIDE.md` (canonical operator behavior)
 - `README.md` (quickstart + links only)
+- `docs/flows/*.md` (one comprehensive operator guide per GUI flow)
 
 ## Testing strategy
 
@@ -103,9 +109,11 @@ No breaking API redesign.
    - new-draft clone-from-loaded behavior.
 3. Launcher tests for load-mode field visibility and pace preset mapping.
 4. Runtime tests for worker/user assignment:
-   - single-user reuse for `all_users=false`.
-   - round-robin fill for `all_users=true` when `N` exceeds user count.
+  - single-user reuse for `all_users=false`.
+  - first-`N` selection for `all_users=true` when `N <= plan users`.
+  - round-robin fill for `all_users=true` when `N` exceeds user count.
 5. Regression tests for command preview and profile/schedule compatibility.
+6. Docs coverage check: every flow from `/api/v1/flows` has a matching `docs/flows/<flow>.md`.
 
 ## Risks and mitigations
 
@@ -125,3 +133,4 @@ No breaking API redesign.
 - Load pace preset exists and maps to `interval` with manual override retained.
 - Runtime assignment follows approved policy for `all_users` true/false with `users=N`.
 - `SIMULATOR_GUIDE.md` is canonical and `README.md` is reduced to quickstart + links.
+- `docs/flows/` contains one comprehensive operator file for each GUI flow option.
