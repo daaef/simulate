@@ -1894,6 +1894,7 @@ async def run(
     session: UserSession | None = None,
     fixtures: UserFixtures | None = None,
     store_sessions: list | None = None,
+    worker_count: int | None = None,
 ) -> None:
     """Run the user simulation.
 
@@ -1918,8 +1919,9 @@ async def run(
     watcher = _UserOrderWatcher(session.user_id, recorder)
     await watcher.start()
 
+    resolved_worker_count = config.N_USERS if worker_count is None else max(0, int(worker_count))
     console.print(
-        f"[bold cyan]user_sim:[/] Starting {config.N_USERS} user worker(s), "
+        f"[bold cyan]user_sim:[/] Starting {resolved_worker_count} user worker(s), "
         f"interval={config.ORDER_INTERVAL_SECONDS}s, "
         f"{'continuous' if config.SIM_CONTINUOUS else f'orders={config.SIM_ORDERS}'}"
     )
@@ -1939,7 +1941,7 @@ async def run(
                     user_session=session,
                 )
             )
-            for i in range(config.N_USERS)
+            for i in range(resolved_worker_count)
         ]
         await asyncio.gather(*workers)
     finally:

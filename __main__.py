@@ -27,6 +27,7 @@ import config
 import app_probes
 from flow_presets import FLOW_PRESETS, resolve_flow
 from interaction_catalog import PAYMENT_CASES
+from load_worker_assignment import build_worker_user_index_assignment
 from reporting import RunRecorder
 import robot_sim
 from scenarios import resolve_trace_scenarios
@@ -429,24 +430,46 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
                 f"Configured store {config.STORE_ID!r} is not present in the selected plan stores: {plan_store_ids}."
             )
 
-    # Determine which user(s) to auth.
-    if config.ALL_USERS:
-        user_phones = [u.get("phone", "") for u in actor_users if u.get("phone")]
-    else:
-        user_phones = [config.USER_PHONE_NUMBER] if config.USER_PHONE_NUMBER else []
-    allowed_phones = {str(u.get("phone")) for u in actor_users if u.get("phone")}
-    out_of_plan_users = [phone for phone in user_phones if phone and phone not in allowed_phones]
-    if out_of_plan_users:
-        raise RuntimeError(
-            "All load-run users must be defined in the selected plan users[]. "
-            f"Out-of-plan phone(s): {out_of_plan_users}"
-        )
-
-    if not user_phones:
+    plan_users = [user for user in actor_users if user.get("phone")]
+    if not plan_users:
         raise RuntimeError(
             "No user phone numbers available. Set USER_PHONE_NUMBER in .env, "
             "add users to sim_actors.json, or use --phone."
         )
+
+    if config.ALL_USERS:
+        worker_user_indices = build_worker_user_index_assignment(
+            all_users=True,
+            worker_count=config.N_USERS,
+            plan_user_count=len(plan_users),
+        )
+        worker_user_phones = [
+            str(plan_users[index].get("phone")) for index in worker_user_indices
+        ]
+    else:
+        selected_phone = str(config.USER_PHONE_NUMBER or "").strip()
+        allowed_phones = {
+            str(user.get("phone"))
+            for user in plan_users
+            if user.get("phone")
+        }
+        if not selected_phone:
+            raise RuntimeError(
+                "No user phone numbers available. Set USER_PHONE_NUMBER in .env, "
+                "add users to sim_actors.json, or use --phone."
+            )
+        if selected_phone not in allowed_phones:
+            raise RuntimeError(
+                f"Configured phone {selected_phone!r} is not present in selected plan users[]."
+            )
+        worker_user_indices = build_worker_user_index_assignment(
+            all_users=False,
+            worker_count=config.N_USERS,
+            plan_user_count=1,
+        )
+        worker_user_phones = [selected_phone for _ in worker_user_indices]
+
+    auth_user_phones = list(dict.fromkeys(worker_user_phones))
 
     # ── Phase 1: Bootstrap ALL stores ──────────────────────────────────────
     console.print(
@@ -501,11 +524,12 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
 
     # ── Phase 2: Bootstrap user(s) ─────────────────────────────────────────
     console.print(
-        f"[cyan]main:[/] Phase 2 — Authenticating {len(user_phones)} user(s) ..."
+        f"[cyan]main:[/] Phase 2 — Authenticating {len(auth_user_phones)} user(s) ..."
     )
-    user_bundles: list[
-        tuple[user_sim.UserSession, user_sim.UserFixtures]
-    ] = []
+    user_bundles_by_phone: dict[
+        str, tuple[user_sim.UserSession, user_sim.UserFixtures]
+    ] = {}
+    authenticated_user_order: list[str] = []
 
     # Use first store with valid GPS for initial fixtures.
     primary_store = store_sessions[0]
@@ -516,7 +540,7 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
     }
 
     async with httpx.AsyncClient() as bootstrap_client:
-        for phone in user_phones:
+        for phone in auth_user_phones:
             try:
                 us = await user_sim.bootstrap_auth(
                     bootstrap_client, recorder, phone=phone
@@ -554,17 +578,28 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
                         currency=fixtures.currency,
                         scenario="load_app_probes",
                     )
-                user_bundles.append((us, fixtures))
+                user_bundles_by_phone[phone] = (us, fixtures)
+                authenticated_user_order.append(phone)
             except Exception as exc:
                 console.print(
                     f"[yellow]main:[/] User {phone} auth failed: {exc}  (skipping)"
                 )
 
-    if not user_bundles:
+    if not user_bundles_by_phone:
         raise RuntimeError("No users could be authenticated. Cannot proceed.")
 
+    worker_counts_by_phone: dict[str, int] = {}
+    for phone in worker_user_phones:
+        if phone not in user_bundles_by_phone:
+            continue
+        worker_counts_by_phone[phone] = worker_counts_by_phone.get(phone, 0) + 1
+
+    if not worker_counts_by_phone:
+        raise RuntimeError("No worker assignments could be built from authenticated users.")
+
+    total_user_workers = sum(worker_counts_by_phone.values())
     console.print(
-        f"[green]main:[/] {len(user_bundles)} user(s) authenticated successfully."
+        f"[green]main:[/] {len(user_bundles_by_phone)} user(s) authenticated successfully."
     )
 
     # ── Phase 3: Build robot sessions from store sessions ──────────────────
@@ -589,7 +624,7 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
 
     # ── Phase 4: Launch all workers concurrently ───────────────────────────
     console.print(
-        f"[bold green]main:[/] Launching {len(user_bundles)} user worker(s), "
+        f"[bold green]main:[/] Launching {total_user_workers} user worker(s), "
         f"{len(store_sessions)} store listener(s), "
         f"{len(robot_sessions)} robot listener(s) ..."
     )
@@ -605,7 +640,7 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
 
     all_tasks: list[asyncio.Task] = []
 
-    primary_user_id = user_bundles[0][0].user_id
+    primary_user_id = user_bundles_by_phone[authenticated_user_order[0]][0].user_id
     primary_store_id = store_sessions[0].store_id
     observer = WebsocketObserver(
         recorder=recorder,
@@ -629,13 +664,18 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
 
     # User workers.
     user_tasks: list[asyncio.Task] = []
-    for us, fixtures in user_bundles:
+    for phone in authenticated_user_order:
+        assigned_worker_count = worker_counts_by_phone.get(phone, 0)
+        if assigned_worker_count < 1:
+            continue
+        us, fixtures = user_bundles_by_phone[phone]
         t = asyncio.create_task(
             user_sim.run(
                 recorder=recorder,
                 session=us,
                 fixtures=fixtures,
                 store_sessions=store_sessions,
+                worker_count=assigned_worker_count,
             )
         )
         user_tasks.append(t)

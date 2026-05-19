@@ -2095,6 +2095,28 @@ class RecorderTests(unittest.TestCase):
             self.assertIn("cancelled", story_path.read_text(encoding="utf-8").lower())
 
 
+class LoadWorkerRuntimeTests(unittest.TestCase):
+    def test_worker_counts_for_all_users_round_robin_distribution(self) -> None:
+        from load_worker_assignment import summarize_worker_user_index_counts
+
+        counts = summarize_worker_user_index_counts(
+            all_users=True,
+            worker_count=8,
+            plan_user_count=3,
+        )
+        self.assertEqual(counts, {0: 3, 1: 3, 2: 2})
+
+    def test_worker_counts_for_single_user_reuse(self) -> None:
+        from load_worker_assignment import summarize_worker_user_index_counts
+
+        counts = summarize_worker_user_index_counts(
+            all_users=False,
+            worker_count=5,
+            plan_user_count=3,
+        )
+        self.assertEqual(counts, {0: 5})
+
+
 class InteractionCatalogueTests(unittest.TestCase):
     def test_menu_add_to_cart_rules(self) -> None:
         self.assertTrue(
