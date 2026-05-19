@@ -1792,6 +1792,33 @@ class SimulationPlansApiTests(unittest.TestCase):
         self.assertIn("sim-actors", response.json()["detail"])
         self.assertIn("reserved", response.json()["detail"].lower())
 
+    def test_list_plans_dedupes_legacy_gui_sim_actors_entry(self) -> None:
+        legacy_path = pathlib.Path(self.tmpdir.name) / "sim-actors.json"
+        legacy_path.write_text(
+            json.dumps(
+                {
+                    "name": "legacy-sim-actors",
+                    "users": [{"phone": "+2348000001111"}],
+                    "stores": [{"store_id": "FZY_123"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        default_plan = {
+            "id": "sim-actors",
+            "name": "sim_actors",
+            "path": "sim_actors.json",
+            "content": {"users": [], "stores": []},
+        }
+        with mock.patch.object(web_api, "_default_sim_actors_plan_payload", return_value=default_plan):
+            response = self.client.get("/api/v1/simulation-plans")
+
+        self.assertEqual(response.status_code, 200)
+        plans = response.json()["plans"]
+        reserved = [item for item in plans if item["id"] == "sim-actors"]
+        self.assertEqual(len(reserved), 1)
+        self.assertEqual(reserved[0]["path"], "sim_actors.json")
+
     def test_plan_api_rejects_sensitive_content(self) -> None:
         response = self.client.post(
             "/api/v1/simulation-plans",

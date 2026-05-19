@@ -4255,6 +4255,7 @@ def _list_simulation_plans_payload() -> dict[str, Any]:
         for path in sorted(_simulation_plans_dir().glob("*.json"))
         if path.is_file()
     ]
+    plans = [plan for plan in plans if plan.get("id") != DEFAULT_SIM_ACTORS_PLAN_ID]
     default_plan = _default_sim_actors_plan_payload()
     if default_plan and not any(plan.get("path") == "sim_actors.json" for plan in plans):
         plans.insert(0, default_plan)
