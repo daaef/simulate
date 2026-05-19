@@ -18,6 +18,7 @@ import {
   type SimulationPlanContent,
 } from "../../../lib/api";
 import IntegrationMappingsPanel from "../../../components/config/IntegrationMappingsPanel";
+import { buildNewPlanDraft } from "../../../lib/config-plan-draft";
 
 const PLAN_TEMPLATE: SimulationPlanContent = {
   schema_version: 2,
@@ -120,9 +121,11 @@ function formatError(error: unknown): string {
   return "Request failed.";
 }
 
-function pretty(value: SimulationPlanContent): string {
+function pretty(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
+
+type ConfigTab = "plans" | "email" | "integration";
 
 const EMAIL_TRIGGER_OPTIONS: { value: EmailEventTrigger; label: string }[] = [
   { value: "run_failed", label: "Run failed" },
@@ -142,6 +145,7 @@ const DEFAULT_EMAIL_SETTINGS: SystemEmailSettings = {
 export default function ConfigPage() {
   const { hasPermission } = useRole();
   const canConfigure = hasPermission("system", "configure");
+  const [activeTab, setActiveTab] = useState<ConfigTab>("plans");
   const [plans, setPlans] = useState<SimulationPlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [planName, setPlanName] = useState("Daily Doctor Plan");
@@ -212,9 +216,11 @@ export default function ConfigPage() {
   }
 
   function startNewPlan() {
+    const nextName = selectedPlan ? `${selectedPlan.name} (Copy)` : "Daily Doctor Plan";
+    const draft = buildNewPlanDraft(editorValue, selectedPlan?.content ?? PLAN_TEMPLATE, nextName);
     setSelectedPlanId(null);
-    setPlanName("Daily Doctor Plan");
-    setEditorValue(pretty(PLAN_TEMPLATE));
+    setPlanName(draft.name);
+    setEditorValue(pretty(draft.content));
     setMessage(null);
     setError(null);
   }
@@ -318,171 +324,207 @@ export default function ConfigPage() {
         </div>
       </div>
 
-      <div className="grid two" style={{ alignItems: "start" }}>
-        <section className="panel grid" style={{ gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <h2>Plans</h2>
-            <button type="button" className="secondary small" style={{ width: "auto" }} onClick={startNewPlan}>
-              New
-            </button>
-          </div>
-          {isLoading ? (
-            <div className="muted">Loading plans...</div>
-          ) : plans.length ? (
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Path</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {plans.map((plan) => (
-                  <tr key={plan.id} style={plan.id === selectedPlanId ? { background: "var(--bg-tertiary)" } : undefined}>
-                    <td>{plan.name}</td>
-                    <td><code>{plan.path}</code></td>
-                    <td>
-                      <button type="button" className="secondary small" onClick={() => void loadPlan(plan.id)}>
-                        Load
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="muted">No GUI plans saved yet.</div>
-          )}
-        </section>
+      <div className="tabs" role="tablist" aria-label="Config sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "plans"}
+          className={activeTab === "plans" ? "" : "secondary"}
+          onClick={() => setActiveTab("plans")}
+        >
+          Plans
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "email"}
+          className={activeTab === "email" ? "" : "secondary"}
+          onClick={() => setActiveTab("email")}
+        >
+          Email
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "integration"}
+          className={activeTab === "integration" ? "" : "secondary"}
+          onClick={() => setActiveTab("integration")}
+        >
+          Integration mappings
+        </button>
+      </div>
 
-        <section className="panel grid" style={{ gap: 12 }}>
-          <label>
-            Plan Name
-            <input value={planName} onChange={(event) => setPlanName(event.target.value)} />
-          </label>
-          {selectedPlan ? (
-            <div style={{ color: "var(--text-secondary)" }}>
-              Launch path: <code>{selectedPlan.path}</code>
+      {activeTab === "plans" ? (
+        <div className="grid two" style={{ alignItems: "start" }}>
+          <section className="panel grid" style={{ gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <h2>Plans</h2>
+              <button type="button" className="secondary small" style={{ width: "auto" }} onClick={startNewPlan}>
+                New
+              </button>
             </div>
-          ) : null}
+            {isLoading ? (
+              <div className="muted">Loading plans...</div>
+            ) : plans.length ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Path</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {plans.map((plan) => (
+                    <tr key={plan.id} style={plan.id === selectedPlanId ? { background: "var(--bg-tertiary)" } : undefined}>
+                      <td>{plan.name}</td>
+                      <td><code>{plan.path}</code></td>
+                      <td>
+                        <button type="button" className="secondary small" onClick={() => void loadPlan(plan.id)}>
+                          Load
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="muted">No GUI plans saved yet.</div>
+            )}
+          </section>
+
+          <section className="panel grid" style={{ gap: 12 }}>
+            <label>
+              Plan Name
+              <input value={planName} onChange={(event) => setPlanName(event.target.value)} />
+            </label>
+            {selectedPlan ? (
+              <div style={{ color: "var(--text-secondary)" }}>
+                Launch path: <code>{selectedPlan.path}</code>
+              </div>
+            ) : null}
+            <label>
+              JSON Plan
+              <textarea
+                value={editorValue}
+                onChange={(event) => setEditorValue(event.target.value)}
+                rows={28}
+                spellCheck={false}
+                style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
+              />
+            </label>
+            {error ? (
+              <div style={{ border: "1px solid #fca5a5", color: "#991b1b", borderRadius: 6, padding: "10px 12px" }}>
+                {error}
+              </div>
+            ) : null}
+            {message ? (
+              <div style={{ border: "1px solid #86efac", color: "#166534", borderRadius: 6, padding: "10px 12px" }}>
+                {message}
+              </div>
+            ) : null}
+            <div className="grid two">
+              <button type="button" disabled={isSaving || !planName.trim()} onClick={() => void savePlan()}>
+                {isSaving ? "Saving..." : selectedPlanId ? "Save Plan" : "Create Plan"}
+              </button>
+              <button type="button" className="secondary" disabled={isSaving || !selectedPlanId} onClick={() => void removePlan()}>
+                Delete Selected
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {activeTab === "email" ? (
+        <section className="panel grid" style={{ gap: 12 }}>
+          <h2>Email Notifications</h2>
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={emailSettings.email_enabled}
+              onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_enabled: event.target.checked }))}
+            />
+            Enable email notifications
+          </label>
+          <div className="grid two">
+            <label>
+              From Email
+              <input
+                value={emailSettings.email_from_email}
+                onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_from_email: event.target.value }))}
+                placeholder="alerts@example.com"
+              />
+            </label>
+            <label>
+              From Name (Optional)
+              <input
+                value={emailSettings.email_from_name}
+                onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_from_name: event.target.value }))}
+                placeholder="Simulator Alerts"
+              />
+            </label>
+          </div>
           <label>
-            JSON Plan
+            Subject Prefix (Optional)
+            <input
+              value={emailSettings.email_subject_prefix}
+              onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_subject_prefix: event.target.value }))}
+              placeholder="[Simulator]"
+            />
+          </label>
+          <label>
+            Recipients (comma or newline separated)
             <textarea
-              value={editorValue}
-              onChange={(event) => setEditorValue(event.target.value)}
-              rows={28}
+              value={emailRecipientsInput}
+              onChange={(event) => setEmailRecipientsInput(event.target.value)}
+              rows={4}
               spellCheck={false}
+              placeholder="ops@example.com&#10;eng@example.com"
               style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
             />
           </label>
-          {error ? (
+          <div className="grid" style={{ gap: 8 }}>
+            <div style={{ fontWeight: 600 }}>Event Triggers</div>
+            {EMAIL_TRIGGER_OPTIONS.map((trigger) => (
+              <label key={trigger.value} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={emailSettings.email_event_triggers.includes(trigger.value)}
+                  onChange={(event) => {
+                    setEmailSettings((prev) => {
+                      const next = new Set(prev.email_event_triggers);
+                      if (event.target.checked) next.add(trigger.value);
+                      else next.delete(trigger.value);
+                      return { ...prev, email_event_triggers: Array.from(next) as EmailEventTrigger[] };
+                    });
+                  }}
+                />
+                {trigger.label}
+              </label>
+            ))}
+          </div>
+          {emailError ? (
             <div style={{ border: "1px solid #fca5a5", color: "#991b1b", borderRadius: 6, padding: "10px 12px" }}>
-              {error}
+              {emailError}
             </div>
           ) : null}
-          {message ? (
+          {emailMessage ? (
             <div style={{ border: "1px solid #86efac", color: "#166534", borderRadius: 6, padding: "10px 12px" }}>
-              {message}
+              {emailMessage}
             </div>
           ) : null}
           <div className="grid two">
-            <button type="button" disabled={isSaving || !planName.trim()} onClick={() => void savePlan()}>
-              {isSaving ? "Saving..." : selectedPlanId ? "Save Plan" : "Create Plan"}
+            <button type="button" disabled={isEmailSaving} onClick={() => void saveEmailSettings()}>
+              {isEmailSaving ? "Saving..." : "Save Email Settings"}
             </button>
-            <button type="button" className="secondary" disabled={isSaving || !selectedPlanId} onClick={() => void removePlan()}>
-              Delete Selected
+            <button type="button" className="secondary" disabled={isEmailTesting} onClick={() => void sendTestEmail()}>
+              {isEmailTesting ? "Sending..." : "Send Test Email"}
             </button>
           </div>
         </section>
-      </div>
-      <section className="panel grid" style={{ gap: 12 }}>
-        <h2>Email Notifications</h2>
-        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={emailSettings.email_enabled}
-            onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_enabled: event.target.checked }))}
-          />
-          Enable email notifications
-        </label>
-        <div className="grid two">
-          <label>
-            From Email
-            <input
-              value={emailSettings.email_from_email}
-              onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_from_email: event.target.value }))}
-              placeholder="alerts@example.com"
-            />
-          </label>
-          <label>
-            From Name (Optional)
-            <input
-              value={emailSettings.email_from_name}
-              onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_from_name: event.target.value }))}
-              placeholder="Simulator Alerts"
-            />
-          </label>
-        </div>
-        <label>
-          Subject Prefix (Optional)
-          <input
-            value={emailSettings.email_subject_prefix}
-            onChange={(event) => setEmailSettings((prev) => ({ ...prev, email_subject_prefix: event.target.value }))}
-            placeholder="[Simulator]"
-          />
-        </label>
-        <label>
-          Recipients (comma or newline separated)
-          <textarea
-            value={emailRecipientsInput}
-            onChange={(event) => setEmailRecipientsInput(event.target.value)}
-            rows={4}
-            spellCheck={false}
-            placeholder="ops@example.com&#10;eng@example.com"
-            style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
-          />
-        </label>
-        <div className="grid" style={{ gap: 8 }}>
-          <div style={{ fontWeight: 600 }}>Event Triggers</div>
-          {EMAIL_TRIGGER_OPTIONS.map((trigger) => (
-            <label key={trigger.value} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={emailSettings.email_event_triggers.includes(trigger.value)}
-                onChange={(event) => {
-                  setEmailSettings((prev) => {
-                    const next = new Set(prev.email_event_triggers);
-                    if (event.target.checked) next.add(trigger.value);
-                    else next.delete(trigger.value);
-                    return { ...prev, email_event_triggers: Array.from(next) as EmailEventTrigger[] };
-                  });
-                }}
-              />
-              {trigger.label}
-            </label>
-          ))}
-        </div>
-        {emailError ? (
-          <div style={{ border: "1px solid #fca5a5", color: "#991b1b", borderRadius: 6, padding: "10px 12px" }}>
-            {emailError}
-          </div>
-        ) : null}
-        {emailMessage ? (
-          <div style={{ border: "1px solid #86efac", color: "#166534", borderRadius: 6, padding: "10px 12px" }}>
-            {emailMessage}
-          </div>
-        ) : null}
-        <div className="grid two">
-          <button type="button" disabled={isEmailSaving} onClick={() => void saveEmailSettings()}>
-            {isEmailSaving ? "Saving..." : "Save Email Settings"}
-          </button>
-          <button type="button" className="secondary" disabled={isEmailTesting} onClick={() => void sendTestEmail()}>
-            {isEmailTesting ? "Sending..." : "Send Test Email"}
-          </button>
-        </div>
-      </section>
-      <IntegrationMappingsPanel />
+      ) : null}
+
+      {activeTab === "integration" ? <IntegrationMappingsPanel /> : null}
     </div>
   );
 }

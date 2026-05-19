@@ -174,7 +174,9 @@ Run detail data is strictly scoped to the requested run id: active runs do not b
 
 ### Route: `/config`
 
-Edit GUI-owned plans, integration mappings, **Email notifications** panel (non-secret SMTP settings + triggers), and related operator configuration.
+Config uses three tabs: `Plans`, `Email`, and `Integration mappings`.
+In `Plans`, `New` clones the currently loaded editor JSON (fallback to selected plan/template content when editor JSON is invalid), clears selected plan id, and names the draft `<selected plan> (Copy)` or `Daily Doctor Plan` when no plan is selected.
+The `Email` tab contains **Email notifications** (non-secret SMTP settings + triggers); `Integration mappings` remains unchanged.
 
 ### Route: `/schedules`
 
@@ -1014,7 +1016,7 @@ PUT /api/v1/system/timezones
 
 ### System Settings: Email Notifications
 
-Config page includes an Email Notifications panel to manage persisted non-secret settings:
+Config page `Email` tab includes an Email Notifications panel to manage persisted non-secret settings:
 - `email_enabled`
 - `email_from_email`
 - `email_from_name`

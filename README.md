@@ -99,6 +99,8 @@ The authenticated app shell includes active route highlighting for `Overview`, `
   - Every Start Run control now shows example placeholder/help values (flow, suite/scenarios, load knobs, toggles) to speed up correct run setup.
   - Trace-context inputs: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, websocket gate toggle.
   - Load-context inputs: `users`, `orders`, `interval`, `reject`, `continuous`, `all_users`, plus shared identity/provision toggles.
+- `Config`: tabbed configuration surface with `Plans`, `Email`, and `Integration mappings`.
+  - In `Plans`, `New` now clones the currently loaded JSON editor content (falling back to selected plan content/template when needed), clears selected plan id, and defaults name to `<selected plan> (Copy)` or `Daily Doctor Plan` when nothing is selected.
 - `Schedules`: creates campaign-first schedules (simple requests are normalized to campaign execution), supports period-specific run slots, all-day mode, blackout skip dates, and next automatic trigger visibility, then supports manual trigger, edit, pause/resume, disable/enable, and soft delete/restore. The page auto-refreshes schedule status/execution state every 15 seconds and on browser focus.
 - `Archives`: searchable archive/raw-purge candidate browsing with retained run summaries.
 - `Retention`: policy windows, archive/purge queues, retained-summary fields, and purge-safety state.
@@ -199,7 +201,7 @@ Catalog profiles and their catalog schedules cannot be deleted from the API (HTT
 
 ## Email Notifications
 
-Config page now includes an **Email Notifications** panel for non-secret settings:
+Config page now includes tabbed sections (`Plans`, `Email`, `Integration mappings`). The **Email Notifications** panel remains under the `Email` tab for non-secret settings:
 - `email_enabled`
 - `email_from_email`
 - `email_from_name`
