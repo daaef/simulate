@@ -130,6 +130,7 @@ MONITORED_ENDPOINT_PREFIXES = (
 )
 LOGGER = logging.getLogger("simulate.web_api")
 SIMULATION_PLAN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,79}$")
+DEFAULT_SIM_ACTORS_PLAN_ID = "sim-actors"
 
 
 @dataclass
@@ -4172,6 +4173,14 @@ def _validate_plan_id(plan_id: str) -> str:
     return plan_id
 
 
+def _raise_if_reserved_simulation_plan_id(plan_id: str) -> None:
+    if plan_id == DEFAULT_SIM_ACTORS_PLAN_ID:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Simulation plan id {plan_id!r} is reserved for default plan sim_actors.json.",
+        )
+
+
 def _simulation_plan_path(plan_id: str) -> Path:
     safe_id = _validate_plan_id(plan_id)
     return _simulation_plans_dir() / f"{safe_id}.json"
@@ -4233,7 +4242,7 @@ def _default_sim_actors_plan_payload() -> dict[str, Any] | None:
         return None
     name = str(content.get("name") or "sim_actors")
     return {
-        "id": "sim-actors",
+        "id": DEFAULT_SIM_ACTORS_PLAN_ID,
         "name": name,
         "path": "sim_actors.json",
         "content": content,
@@ -4253,7 +4262,7 @@ def _list_simulation_plans_payload() -> dict[str, Any]:
 
 
 def _get_simulation_plan_payload(plan_id: str) -> dict[str, Any]:
-    if plan_id == "sim-actors":
+    if plan_id == DEFAULT_SIM_ACTORS_PLAN_ID:
         default_plan = _default_sim_actors_plan_payload()
         if default_plan is None:
             raise HTTPException(
@@ -4266,6 +4275,7 @@ def _get_simulation_plan_payload(plan_id: str) -> dict[str, Any]:
 
 def _next_simulation_plan_path(name: str) -> Path:
     base = _slugify_plan_name(name)
+    _raise_if_reserved_simulation_plan_id(base)
     candidate = _simulation_plan_path(base)
     suffix = 2
     while candidate.exists():
@@ -4286,6 +4296,7 @@ def _create_simulation_plan(request: SimulationPlanUpsertRequest) -> dict[str, A
 
 
 def _update_simulation_plan(plan_id: str, request: SimulationPlanUpsertRequest) -> dict[str, Any]:
+    _raise_if_reserved_simulation_plan_id(plan_id)
     path = _simulation_plan_path(plan_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Simulation plan {plan_id!r} not found.")

@@ -1751,6 +1751,46 @@ class SimulationPlansApiTests(unittest.TestCase):
         self.assertEqual(plan["id"], "sim-actors")
         self.assertEqual(plan["path"], "sim_actors.json")
         self.assertIn("content", plan)
+        self.assertIsInstance(plan["content"], dict)
+
+    def test_get_default_sim_actors_plan_by_id_returns_404_when_default_missing(self) -> None:
+        with mock.patch.object(web_api, "_default_sim_actors_plan_payload", return_value=None):
+            response = self.client.get("/api/v1/simulation-plans/sim-actors")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("sim_actors.json", response.json()["detail"])
+
+    def test_create_plan_rejects_reserved_sim_actors_id(self) -> None:
+        response = self.client.post(
+            "/api/v1/simulation-plans",
+            json={
+                "name": "sim actors",
+                "content": {
+                    "users": [{"phone": "+2348000001111"}],
+                    "stores": [{"store_id": "FZY_123"}],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sim-actors", response.json()["detail"])
+        self.assertIn("reserved", response.json()["detail"].lower())
+
+    def test_update_reserved_sim_actors_id_is_rejected(self) -> None:
+        response = self.client.put(
+            "/api/v1/simulation-plans/sim-actors",
+            json={
+                "name": "attempted override",
+                "content": {
+                    "users": [{"phone": "+2348000001111"}],
+                    "stores": [{"store_id": "FZY_123"}],
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sim-actors", response.json()["detail"])
+        self.assertIn("reserved", response.json()["detail"].lower())
 
     def test_plan_api_rejects_sensitive_content(self) -> None:
         response = self.client.post(
