@@ -309,15 +309,24 @@ def _apply_args(args: argparse.Namespace) -> None:
     if preset is None:
         return
 
+    has_mode_override = _has_cli_flag(argv, "--mode")
+    has_suite_override = _has_cli_flag(argv, "--suite")
+    has_scenario_override = _has_cli_flag(argv, "--scenario")
+
     _active_flow = preset["name"]
     config.SIM_FLOW = _active_flow
-    config.SIM_RUN_MODE = preset.get("mode", config.SIM_RUN_MODE)
+    if not has_mode_override:
+        config.SIM_RUN_MODE = preset.get("mode", config.SIM_RUN_MODE)
     if preset.get("suite"):
-        config.SIM_TRACE_SUITE = str(preset["suite"])
-        config.SIM_TRACE_SCENARIOS = []
+        if not has_suite_override:
+            config.SIM_TRACE_SUITE = str(preset["suite"])
+        if not has_scenario_override:
+            config.SIM_TRACE_SCENARIOS = []
     if preset.get("scenarios"):
-        config.SIM_TRACE_SUITE = ""
-        config.SIM_TRACE_SCENARIOS = [str(item) for item in preset["scenarios"]]
+        if not has_suite_override:
+            config.SIM_TRACE_SUITE = ""
+        if not has_scenario_override:
+            config.SIM_TRACE_SCENARIOS = [str(item) for item in preset["scenarios"]]
     if "payment_mode" in preset:
         config.SIM_PAYMENT_MODE = str(preset["payment_mode"])
     if "payment_case" in preset:

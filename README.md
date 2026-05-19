@@ -24,6 +24,11 @@ Default web admin credentials:
 python3 -m simulate doctor --plan sim_actors.json --timing fast
 ```
 
+## Launch precedence
+
+- Explicit CLI flags (`--mode`, `--suite`, repeated `--scenario`) override flow preset defaults.
+- In trace mode, `--suite` and repeated `--scenario` can be combined: suite scenarios resolve first, then explicit scenarios are appended (deduped in order).
+
 ## Failure Policy Defaults
 
 - Default run-failure policy is API-focused: `SIM_FAILURE_POLICY=api_only`.

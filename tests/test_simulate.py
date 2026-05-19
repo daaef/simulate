@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 import pathlib
 import os
 import sys
@@ -35,6 +36,15 @@ def _fixtures():
         menu_items=[{"id": 1}, {"id": 2}],
         currency="jpy",
     )
+
+
+def _load_simulate_entrypoint_module():
+    module_path = pathlib.Path(__file__).resolve().parents[1] / "__main__.py"
+    spec = importlib.util.spec_from_file_location("simulate_entrypoint_test", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class RunPlanTests(unittest.TestCase):
@@ -2246,6 +2256,185 @@ class WebsocketStatusPrimeTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(observed, "completed")
         self.assertEqual(queue.get_nowait(), "completed")
+
+
+class CliArgPrecedenceTests(unittest.TestCase):
+    def test_explicit_trace_flags_not_overridden_by_flow_preset(self) -> None:
+        sim_main = _load_simulate_entrypoint_module()
+        config = sim_main.config
+        tracked = (
+            "SIM_FLOW",
+            "SIM_RUN_MODE",
+            "SIM_TRACE_SUITE",
+            "SIM_TRACE_SCENARIOS",
+            "USER_PHONE_NUMBER",
+            "STORE_ID",
+            "SIM_STORE_EXPLICIT",
+            "SIM_ACTORS",
+        )
+        previous = {name: getattr(config, name) for name in tracked}
+        previous_store_from_cli = sim_main._store_from_cli
+        previous_active_flow = sim_main._active_flow
+        previous_argv = list(sim_main.sys.argv)
+        original_loader = config.load_sim_actors
+        actors = {
+            "defaults": {},
+            "users": [{"phone": "+15550000001", "role": "returning", "lat": 35.1, "lng": 136.9}],
+            "stores": [{"store_id": "FZY_1", "subentity_id": 7, "lat": 35.1, "lng": 136.9}],
+        }
+
+        def fake_load_sim_actors(*_args, **_kwargs):
+            config.SIM_ACTORS = actors
+            return actors
+
+        config.load_sim_actors = fake_load_sim_actors
+        try:
+            config.USER_PHONE_NUMBER = "+15550000001"
+            config.STORE_ID = "FZY_1"
+            config.SIM_TRACE_SUITE = "core"
+            config.SIM_TRACE_SCENARIOS = []
+            sim_main.sys.argv = [
+                "simulate",
+                "full",
+                "--mode",
+                "trace",
+                "--suite",
+                "full",
+                "--scenario",
+                "completed",
+                "--scenario",
+                "rejected",
+                "--scenario",
+                "cancelled",
+                "--scenario",
+                "auto_cancel",
+                "--phone",
+                "+15550000001",
+                "--store",
+                "FZY_1",
+            ]
+            args = types.SimpleNamespace(
+                flow="full",
+                mode="trace",
+                suite="full",
+                scenario=["completed", "rejected", "cancelled", "auto_cancel"],
+                timing="fast",
+                users=1,
+                interval=30.0,
+                reject=0.1,
+                orders=1,
+                continuous=False,
+                phone="+15550000001",
+                store="FZY_1",
+                all_users=False,
+                plan=None,
+                strict_plan=False,
+                skip_app_probes=False,
+                skip_store_dashboard_probes=False,
+                post_order_actions=False,
+                enforce_websocket_gates=None,
+                no_auto_provision=False,
+                bounded_load_smoke_policy=False,
+                bounded_baseline_min_completed=1,
+                bounded_baseline_max_attempts=3,
+                bounded_tail_reject_rate=None,
+                bounded_tail_cancel_rate=0.0,
+            )
+            sim_main._apply_args(args)
+            self.assertEqual(config.SIM_FLOW, "full")
+            self.assertEqual(config.SIM_RUN_MODE, "trace")
+            self.assertEqual(config.SIM_TRACE_SUITE, "full")
+            self.assertEqual(
+                config.SIM_TRACE_SCENARIOS,
+                ["completed", "rejected", "cancelled", "auto_cancel"],
+            )
+        finally:
+            config.load_sim_actors = original_loader
+            sim_main.sys.argv = previous_argv
+            sim_main._store_from_cli = previous_store_from_cli
+            sim_main._active_flow = previous_active_flow
+            for name, value in previous.items():
+                setattr(config, name, value)
+
+    def test_explicit_mode_override_not_replaced_by_flow_default(self) -> None:
+        sim_main = _load_simulate_entrypoint_module()
+        config = sim_main.config
+        tracked = (
+            "SIM_FLOW",
+            "SIM_RUN_MODE",
+            "SIM_TRACE_SUITE",
+            "SIM_TRACE_SCENARIOS",
+            "USER_PHONE_NUMBER",
+            "STORE_ID",
+            "SIM_STORE_EXPLICIT",
+            "SIM_ACTORS",
+        )
+        previous = {name: getattr(config, name) for name in tracked}
+        previous_store_from_cli = sim_main._store_from_cli
+        previous_active_flow = sim_main._active_flow
+        previous_argv = list(sim_main.sys.argv)
+        original_loader = config.load_sim_actors
+        actors = {
+            "defaults": {},
+            "users": [{"phone": "+15550000001", "role": "returning", "lat": 35.1, "lng": 136.9}],
+            "stores": [{"store_id": "FZY_1", "subentity_id": 7, "lat": 35.1, "lng": 136.9}],
+        }
+
+        def fake_load_sim_actors(*_args, **_kwargs):
+            config.SIM_ACTORS = actors
+            return actors
+
+        config.load_sim_actors = fake_load_sim_actors
+        try:
+            config.USER_PHONE_NUMBER = "+15550000001"
+            config.STORE_ID = "FZY_1"
+            sim_main.sys.argv = [
+                "simulate",
+                "full",
+                "--mode",
+                "load",
+                "--phone",
+                "+15550000001",
+                "--store",
+                "FZY_1",
+            ]
+            args = types.SimpleNamespace(
+                flow="full",
+                mode="load",
+                suite=None,
+                scenario=None,
+                timing="fast",
+                users=1,
+                interval=30.0,
+                reject=0.1,
+                orders=1,
+                continuous=False,
+                phone="+15550000001",
+                store="FZY_1",
+                all_users=False,
+                plan=None,
+                strict_plan=False,
+                skip_app_probes=False,
+                skip_store_dashboard_probes=False,
+                post_order_actions=False,
+                enforce_websocket_gates=None,
+                no_auto_provision=False,
+                bounded_load_smoke_policy=False,
+                bounded_baseline_min_completed=1,
+                bounded_baseline_max_attempts=3,
+                bounded_tail_reject_rate=None,
+                bounded_tail_cancel_rate=0.0,
+            )
+            sim_main._apply_args(args)
+            self.assertEqual(config.SIM_FLOW, "full")
+            self.assertEqual(config.SIM_RUN_MODE, "load")
+        finally:
+            config.load_sim_actors = original_loader
+            sim_main.sys.argv = previous_argv
+            sim_main._store_from_cli = previous_store_from_cli
+            sim_main._active_flow = previous_active_flow
+            for name, value in previous.items():
+                setattr(config, name, value)
 
 
 class LoadModeTimingTests(unittest.TestCase):

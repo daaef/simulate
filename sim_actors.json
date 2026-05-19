@@ -206,6 +206,19 @@
       "created_at": "2024-07-15T07:01:00",
       "lat": 35.15494521954757,
       "lng": 136.9663666561246
+    }
+  ],
+  "pending_subscription_stores": [
+    {
+      "store_id": "FZY_598615",
+      "owner": "fainzy_admin",
+      "name": "MAGXI TASTY SHAWARMA Jos",
+      "branch": "MAGXI TASTY SHAWARMA Jos",
+      "currency": "jpy",
+      "status": 3,
+      "last_active_at": "2026-04-22T23:39:00",
+      "created_at": "2026-04-22T23:39:00",
+      "subscription_ready": false
     },
     {
       "store_id": "FZY_712646",
@@ -226,19 +239,6 @@
       "status": 3,
       "last_active_at": "2024-03-28T06:27:00",
       "created_at": "2024-03-25T11:39:00"
-    }
-  ],
-  "pending_subscription_stores": [
-    {
-      "store_id": "FZY_598615",
-      "owner": "fainzy_admin",
-      "name": "MAGXI TASTY SHAWARMA Jos",
-      "branch": "MAGXI TASTY SHAWARMA Jos",
-      "currency": "jpy",
-      "status": 3,
-      "last_active_at": "2026-04-22T23:39:00",
-      "created_at": "2026-04-22T23:39:00",
-      "subscription_ready": false
     },
     {
       "store_id": "FZY_897908",

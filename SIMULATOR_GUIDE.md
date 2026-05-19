@@ -267,7 +267,8 @@ Configuration precedence:
 The GUI stores admin-created plans in `runs/gui-plans/` and launches them through the same `--plan` CLI path.
 On the Runs page, Start Run plan selection is dropdown-only: `sim_actors.json` is always shown, then GUI plans from `runs/gui-plans/`; manual text entry is not supported.
 Start Run now reads flow capabilities from `GET /api/v1/flows` and conditionally renders only flags valid for the selected `Flow`, resolved `Mode`, and selected `Suite/Scenarios`.
-Advanced Mode Overrides are optional and let operators explicitly set `--mode`, `--suite`, and repeated `--scenario` flags; command preview mirrors typed fields exactly.
+Advanced Mode Overrides are optional and let operators explicitly set `--mode`, `--suite`, and repeated `--scenario` flags; command preview and actual runtime resolution honor those explicit overrides over flow defaults.
+When both `--suite` and repeated `--scenario` are provided in trace mode, suite scenarios resolve first, then explicit scenarios are appended (deduped in order).
 The `Scenarios (trace only)` control in Advanced Mode Overrides is a searchable chips multiselect. It only allows scenarios returned by the selected flow capability (no free-text custom scenario values).
 Trace-context fields in the launcher: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, `enforce_websocket_gates`.
 Load-context fields in the launcher: `users`, `orders`, `interval`, `reject`, `continuous`, `all_users`, plus shared store/phone/provision controls.
