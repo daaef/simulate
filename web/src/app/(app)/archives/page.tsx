@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { DistributionDonut } from "../../../components/charts/DistributionDonut";
+import { HorizontalBarChart } from "../../../components/charts/HorizontalBarChart";
 import {
   ApiRequestError,
   fetchArchivedProfiles,
@@ -9,6 +11,7 @@ import {
   fetchArchivedIntegrationMappings,
   fetchArchiveRuns,
   fetchArchiveSummary,
+  fetchRetentionSummary,
   restoreRun,
   restoreRunProfile,
   restoreGitHubIntegrationMapping,
@@ -18,11 +21,22 @@ import {
   purgeSchedule,
   purgeIntegrationMapping,
   type IntegrationMapping,
+  type RetentionSummary,
   type RunProfile,
   type Schedule,
   type ArchiveRun,
   type ArchiveSummary,
 } from "../../../lib/api";
+
+function addDays(base: Date, days: number): Date {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatDate(d: Date): string {
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
 
 function toMessage(error: unknown): string {
   if (error instanceof ApiRequestError) return error.message;
@@ -36,6 +50,36 @@ function statusClass(status: string): string {
   if (normalized === "failed") return "status-danger";
   if (normalized === "cancelled") return "status-warning";
   return "status-info";
+}
+
+type LifecycleState = "active" | "archive_candidate" | "raw_purge_candidate" | "archived";
+
+function lifecyclePillClass(state: LifecycleState): string {
+  if (state === "raw_purge_candidate") return "status-danger";
+  if (state === "archive_candidate") return "status-warning";
+  if (state === "active") return "status-success";
+  return "status-info";
+}
+
+function lifecyclePillLabel(state: LifecycleState): string {
+  if (state === "raw_purge_candidate") return "Purge-ready";
+  if (state === "archive_candidate") return "Archive-ready";
+  if (state === "active") return "Active";
+  return "Archived";
+}
+
+function LifecyclePill({ state }: { state: LifecycleState }) {
+  return (
+    <span className={`status-pill ${lifecyclePillClass(state)}`} style={{ fontSize: "11px" }}>
+      {lifecyclePillLabel(state)}
+    </span>
+  );
+}
+
+function archivedAtState(archivedAt: string | null | undefined, archiveDays: number): LifecycleState {
+  if (!archivedAt) return "archived";
+  const ageDays = (Date.now() - new Date(archivedAt).getTime()) / 86_400_000;
+  return ageDays >= archiveDays ? "raw_purge_candidate" : "archived";
 }
 
 interface PurgeConfirmState {
@@ -167,6 +211,7 @@ function BulkActionBar({
 
 export default function ArchivesPage() {
   const [summary, setSummary] = useState<ArchiveSummary | null>(null);
+  const [retentionSummary, setRetentionSummary] = useState<RetentionSummary | null>(null);
   const [runs, setRuns] = useState<ArchiveRun[]>([]);
   const [archivedProfiles, setArchivedProfiles] = useState<RunProfile[]>([]);
   const [archivedSchedules, setArchivedSchedules] = useState<Schedule[]>([]);
@@ -192,9 +237,10 @@ export default function ArchivesPage() {
     let active = true;
     const load = async () => {
       try {
-        const [summaryPayload, runsPayload, profilesPayload, schedulesPayload, mappingsPayload] =
+        const [summaryPayload, retentionPayload, runsPayload, profilesPayload, schedulesPayload, mappingsPayload] =
           await Promise.all([
             fetchArchiveSummary(),
+            fetchRetentionSummary(),
             fetchArchiveRuns(100, 0),
             fetchArchivedProfiles(),
             fetchArchivedSchedules(),
@@ -202,6 +248,7 @@ export default function ArchivesPage() {
           ]);
         if (!active) return;
         setSummary(summaryPayload);
+        setRetentionSummary(retentionPayload);
         setRuns(runsPayload.runs);
         setArchivedProfiles(profilesPayload);
         setArchivedSchedules(schedulesPayload);
@@ -399,6 +446,23 @@ export default function ArchivesPage() {
   const activeDays = summary?.policy_days.active ?? 30;
   const archiveDays = summary?.policy_days.archive ?? 180;
 
+  const now = new Date();
+  const archiveCutoff = addDays(now, -activeDays);
+  const purgeCutoff = addDays(now, -archiveDays);
+
+  const chartData = useMemo(() => ({
+    lifecycle: [
+      { label: "Active", value: summary?.counts.active ?? 0, color: "var(--chart-success)" },
+      { label: "Archive-ready", value: summary?.counts.archive_ready ?? 0, color: "var(--chart-warning)" },
+      { label: "Purge-ready", value: summary?.counts.purge_ready ?? 0, color: "var(--chart-danger)" },
+    ],
+    queue: [
+      { label: "Archive ready", value: retentionSummary?.queue.archive_ready ?? summary?.counts.archive_ready ?? 0, color: "var(--chart-warning)" },
+      { label: "Purge ready", value: retentionSummary?.queue.purge_ready ?? summary?.counts.purge_ready ?? 0, color: "var(--chart-danger)" },
+      { label: "Artifact-backed", value: retentionSummary?.queue.artifact_backed_runs ?? 0, color: "var(--chart-info)" },
+    ],
+  }), [summary, retentionSummary]);
+
   return (
     <div className="page-shell">
       {purgeConfirm ? (
@@ -452,6 +516,51 @@ export default function ArchivesPage() {
           <span className="stat-description muted" style={{ fontSize: "12px" }}>
             Archived runs older than {archiveDays} days
           </span>
+        </article>
+      </section>
+
+      {/* ── Lifecycle health ──────────────────────────────────────────────── */}
+      <section className="panel">
+        <h2 className="section-title">Policy Timeline</h2>
+        <div style={{ display: "grid", gap: "12px", fontSize: "14px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
+            <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", backgroundColor: "var(--chart-success)", flexShrink: 0 }} />
+            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>Active</span>
+            <span style={{ color: "var(--text-secondary)" }}>
+              Runs created within the last {activeDays} days (after <strong>{formatDate(archiveCutoff)}</strong>). Fully visible on the Runs page.
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
+            <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", backgroundColor: "var(--chart-warning)", flexShrink: 0 }} />
+            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>Archive-ready</span>
+            <span style={{ color: "var(--text-secondary)" }}>
+              Runs created between {activeDays}–{archiveDays} days ago (between <strong>{formatDate(purgeCutoff)}</strong> and <strong>{formatDate(archiveCutoff)}</strong>). Auto-archived hourly — hidden from Runs but restorable here.
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
+            <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", backgroundColor: "var(--chart-danger)", flexShrink: 0 }} />
+            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>Purge-ready</span>
+            <span style={{ color: "var(--text-secondary)" }}>
+              Runs created more than {archiveDays} days ago (before <strong>{formatDate(purgeCutoff)}</strong>). Auto-purged hourly — permanently deleted including all on-disk artifacts.
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className="chart-grid">
+        <article className="panel">
+          <DistributionDonut
+            title="Lifecycle Distribution"
+            data={chartData.lifecycle}
+            emptyLabel="No run lifecycle data"
+          />
+        </article>
+        <article className="panel">
+          <HorizontalBarChart
+            title="Queue Pressure"
+            data={chartData.queue}
+            emptyLabel="No retention pressure"
+          />
         </article>
       </section>
 
@@ -535,7 +644,12 @@ export default function ArchivesPage() {
                     <div>{run.store_id || "auto-store"}</div>
                     <div className="muted">{run.phone || "auto-user"}</div>
                   </td>
-                  <td>{run.age_days ?? "--"} days old</td>
+                  <td>
+                    <div>{run.age_days ?? "--"} days old</div>
+                    {run.lifecycle_state ? (
+                      <LifecyclePill state={run.lifecycle_state} />
+                    ) : null}
+                  </td>
                   <td>
                     <div>{run.retained_summary?.narrative ?? "Summary pending"}</div>
                     <div className="muted">
@@ -647,8 +761,11 @@ export default function ArchivesPage() {
                     </td>
                     <td>{profile.name}</td>
                     <td>{profile.flow}</td>
-                    <td className="muted" style={{ fontSize: "13px" }}>
-                      {profile.archived_at ?? profile.updated_at ?? "—"}
+                    <td>
+                      <div className="muted" style={{ fontSize: "13px" }}>
+                        {profile.archived_at ?? profile.updated_at ?? "—"}
+                      </div>
+                      <LifecyclePill state={archivedAtState(profile.archived_at, archiveDays)} />
                     </td>
                     <td>
                       <div className="row-actions">
@@ -751,7 +868,10 @@ export default function ArchivesPage() {
                     </td>
                     <td>{schedule.name}</td>
                     <td>{schedule.timezone}</td>
-                    <td className="muted" style={{ fontSize: "13px" }}>{schedule.updated_at}</td>
+                    <td>
+                      <div className="muted" style={{ fontSize: "13px" }}>{schedule.updated_at}</div>
+                      <LifecyclePill state={archivedAtState(schedule.updated_at, archiveDays)} />
+                    </td>
                     <td>
                       <div className="row-actions">
                         <button
@@ -856,8 +976,11 @@ export default function ArchivesPage() {
                   <td>{mapping.project}</td>
                   <td>{mapping.environment}</td>
                   <td>{mapping.profile_name ?? `#${mapping.profile_id}`}</td>
-                  <td className="muted" style={{ fontSize: "13px" }}>
-                    {mapping.archived_at ?? mapping.updated_at ?? "—"}
+                  <td>
+                    <div className="muted" style={{ fontSize: "13px" }}>
+                      {mapping.archived_at ?? mapping.updated_at ?? "—"}
+                    </div>
+                    <LifecyclePill state={archivedAtState(mapping.archived_at ?? mapping.updated_at, archiveDays)} />
                   </td>
                   <td>
                     <div className="row-actions">

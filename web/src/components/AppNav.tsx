@@ -9,7 +9,6 @@ const navItems = [
   { href: "/config", label: "Config" },
   { href: "/schedules", label: "Schedules" },
   { href: "/archives", label: "Archives" },
-  { href: "/retention", label: "Retention" },
   { href: "/admin/users", label: "Admin" },
 ];
 
