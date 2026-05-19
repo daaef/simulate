@@ -1160,6 +1160,39 @@ class RunControlTests(unittest.TestCase):
         active_runs = self.client.get("/api/v1/runs").json().get("runs", [])
         self.assertTrue(any(int(item.get("id")) == run_id for item in active_runs))
 
+    def test_reconcile_finalizes_succeeded_from_log_instead_of_orphan_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = pathlib.Path(tmpdir) / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row(flow="free-coupon")
+            run_id = int(run["id"])
+            log_path = log_dir / f"run-{run_id}.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        'main: identity_context: {"user_phone": "+2348166675609", "store_name": "Ask Me"}',
+                        "trace: Selected store FZY_926025 (subentity_id=7).",
+                        "main: events: /tmp/runs/sample/events.json",
+                        "main: report: /tmp/runs/20260519T-free-coupon-FZY_926025-user5609/report.md",
+                        "main: story: /tmp/runs/20260519T-free-coupon-FZY_926025-user5609/story.md",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            web_api._update_run(
+                run_id,
+                status="running",
+                log_path=str(log_path),
+                started_at=web_api._utc_now(),
+                store_id="",
+                phone="",
+            )
+            with mock.patch.object(web_api, "LOG_DIR", log_dir):
+                payload = web_api._get_run(run_id)
+            self.assertEqual(payload.get("status"), "succeeded")
+            self.assertEqual(payload.get("store_id"), "FZY_926025")
+            self.assertEqual(payload.get("exit_code"), 0)
+
     def test_run_payload_includes_control_flags(self) -> None:
         run = self._create_run_row()
         run_id = int(run["id"])

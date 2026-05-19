@@ -8,6 +8,7 @@ then drives each scenario step-by-step using polling for verification.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -54,9 +55,117 @@ FIXTURE_REQUIRED_SCENARIOS = {
     "receipt_review_reorder",
 }
 
+MENU_FLOW_SCENARIOS = frozenset(
+    {
+        "menu_available",
+        "menu_unavailable",
+        "menu_sold_out",
+        "menu_store_closed",
+    }
+)
+
 
 def _trace_requires_fixtures(scenarios: list[str]) -> bool:
     return any(name in FIXTURE_REQUIRED_SCENARIOS for name in scenarios)
+
+
+def _is_menus_flow_run(resolved: list[str]) -> bool:
+    return bool(resolved) and all(name in MENU_FLOW_SCENARIOS for name in resolved)
+
+
+async def _provision_menus_flow_inventory(
+    client: httpx.AsyncClient,
+    *,
+    store_session: store_sim.StoreSession,
+    user_session: user_sim.UserSession,
+    recorder: RunRecorder,
+) -> user_sim.UserFixtures:
+    """Create a fresh menu item in the target store before menu gate scenarios."""
+    scenario = "menu_available"
+    previous_mutate_menu = config.SIM_MUTATE_MENU_SETUP
+    if not store_sim.menu_provisioning_enabled():
+        config.SIM_MUTATE_MENU_SETUP = True
+
+    try:
+        setup_ok = await store_sim.ensure_store_setup(
+            client,
+            session=store_session,
+            recorder=recorder,
+            scenario=scenario,
+        )
+        if not setup_ok:
+            raise RuntimeError("Store setup is not complete; cannot create menu item for menus flow.")
+
+        await store_sim.open_store_for_simulation(
+            client,
+            session=store_session,
+            recorder=recorder,
+            scenario=scenario,
+        )
+
+        categories = await store_sim.fetch_categories(
+            client,
+            session=store_session,
+            recorder=recorder,
+            scenario=scenario,
+            step="menus_run_fetch_categories",
+        )
+        if not categories:
+            category = await store_sim.create_category(
+                client,
+                session=store_session,
+                name=config.SIM_MENU_CATEGORY_NAME,
+                recorder=recorder,
+                scenario=scenario,
+                step="menus_run_create_category",
+            )
+            categories = [category]
+
+        category_id = int(categories[0]["id"])
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        menu_name = f"{config.SIM_MENU_NAME} {stamp}"
+        created_menu = await store_sim.create_menu(
+            client,
+            session=store_session,
+            category_id=category_id,
+            status=MENU_AVAILABLE,
+            recorder=recorder,
+            scenario=scenario,
+            step="menus_run_create_item",
+            name=menu_name,
+        )
+
+        recorder.record_event(
+            actor="store",
+            action="menus_run_item_created",
+            category="store_setup",
+            scenario=scenario,
+            step="menus_run_create_item",
+            details={
+                "menu_id": created_menu.get("id"),
+                "menu_name": created_menu.get("name") or menu_name,
+                "category_id": category_id,
+                "subentity_id": store_session.store_id,
+            },
+            track_order=False,
+        )
+        console.print(
+            f"[green]trace:[/] Menus flow created item "
+            f"{created_menu.get('name') or menu_name} (id={created_menu.get('id')})."
+        )
+
+        fixtures = await user_sim.bootstrap_fixtures(
+            client,
+            session=user_session,
+            store_token=store_session.last_mile_token,
+            subentity=store_session.subentity,
+            recorder=recorder,
+            subentity_id=store_session.store_id,
+        )
+        recorder.set_fixtures(fixtures)
+        return fixtures
+    finally:
+        config.SIM_MUTATE_MENU_SETUP = previous_mutate_menu
 
 
 def _trace_store_candidates() -> list[str | None]:
@@ -2164,6 +2273,13 @@ async def run(
     async with httpx.AsyncClient() as client:
         if observer is not None:
             await observer.start()
+        if _is_menus_flow_run(resolved) and fixtures is not None:
+            fixtures = await _provision_menus_flow_inventory(
+                client,
+                store_session=store_session,
+                user_session=user_session,
+                recorder=recorder,
+            )
         try:
             for name in resolved:
                 if name == "app_bootstrap":

@@ -16,6 +16,8 @@ Use this flow to validate menu/catalog data availability and related ordering pr
 ## Operator behavior
 
 - Runs in trace mode using the `menus` suite unless you intentionally override.
+- Before menu gate scenarios, the simulator creates a **new menu item** in the selected store (category created first if missing). The item name is `SIM_MENU_NAME` plus a UTC timestamp suffix.
+- Requires store setup to be completable and menu provisioning enabled (`SIM_AUTO_PROVISION_FIXTURES` or `SIM_MUTATE_MENU_SETUP`; the menus flow enables menu mutation for this step when needed).
 - Focuses on menu readiness and menu-dependent checks rather than high concurrency.
 
 ## Launch examples

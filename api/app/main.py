@@ -1634,6 +1634,90 @@ def _should_reconcile_stale_run(run: dict[str, Any], liveness: dict[str, Any]) -
     return False
 
 
+def _infer_run_outcome_from_log(lines: list[str]) -> tuple[str, str | None, int] | None:
+    """Return terminal (status, error, exit_code) when simulator log proves completion."""
+    if any("Simulation failed:" in line for line in lines):
+        return "failed", "Simulation exited with error (from log).", 1
+    if any("Simulation stopped." in line for line in lines):
+        return "cancelled", None, 1
+    if any("main: report:" in line.lower() for line in lines):
+        return "succeeded", None, 0
+    return None
+
+
+def _build_run_identity_updates(
+    *,
+    metadata: dict[str, Any],
+    run: dict[str, Any],
+    lines: list[str],
+    artifacts: dict[str, str],
+) -> dict[str, Any]:
+    identity = metadata.get("identity", {})
+    updates: dict[str, Any] = {}
+    actual_store_id = metadata.get("store_id") or _parse_store_id_from_lines(lines)
+    actual_phone = metadata.get("phone") or identity.get("user_phone") or _parse_phone_from_lines(lines)
+    if actual_store_id and not run.get("store_id"):
+        updates["store_id"] = actual_store_id
+    if actual_phone and not run.get("phone"):
+        updates["phone"] = actual_phone
+    if identity.get("store_phone") and not run.get("store_phone"):
+        updates["store_phone"] = identity["store_phone"]
+    if identity.get("user_name") and not run.get("user_name"):
+        updates["user_name"] = identity["user_name"]
+    if identity.get("store_name") and not run.get("store_name"):
+        updates["store_name"] = identity["store_name"]
+    if (not actual_store_id or not actual_phone) and artifacts.get("report_path"):
+        report_path = Path(artifacts["report_path"])
+        folder_name = report_path.parent.name
+        parts = folder_name.split("-")
+        if len(parts) >= 4:
+            for index, part in enumerate(parts):
+                if part.startswith("user") and index > 0:
+                    if not actual_store_id and index > 1 and parts[index - 1] not in ("auto", "no-store"):
+                        updates.setdefault("store_id", parts[index - 1])
+                    if not actual_phone:
+                        phone_digits = part[4:]
+                        if phone_digits and phone_digits != "no-user":
+                            updates.setdefault("phone", phone_digits)
+                    break
+    return updates
+
+
+def _try_finalize_run_from_log(run_id: int, run: dict[str, Any]) -> bool:
+    """Finalize a run from log evidence when the worker thread has not updated DB yet."""
+    log_path = _run_log_path_for_run(run_id, run.get("log_path"))
+    if log_path is None or not log_path.exists():
+        return False
+    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    outcome = _infer_run_outcome_from_log(lines)
+    if outcome is None:
+        return False
+    status, error, exit_code = outcome
+    metadata = _extract_metadata_from_log(log_path)
+    artifacts = metadata.get("artifacts", {})
+    artifact_updates = {
+        field: artifacts[field]
+        for field in ARTIFACT_FIELDS
+        if artifacts.get(field) and not run.get(field)
+    }
+    identity_updates = _build_run_identity_updates(
+        metadata=metadata,
+        run=run,
+        lines=lines,
+        artifacts=artifacts,
+    )
+    _update_run(
+        run_id,
+        status=status,
+        finished_at=_utc_now(),
+        exit_code=exit_code,
+        error=error,
+        **artifact_updates,
+        **identity_updates,
+    )
+    return True
+
+
 def _reconcile_stale_run(run_id: int, run: dict[str, Any] | None = None) -> dict[str, Any] | None:
     if run is None:
         run = _fetch_run_row(run_id)
@@ -1649,6 +1733,34 @@ def _reconcile_stale_run(run_id: int, run: dict[str, Any] | None = None) -> dict
                 process.terminate()
             except OSError:
                 pass
+        elif process is not None and process.poll() is not None:
+            return_code = process.poll()
+            if run_id in RUN_CANCELLED:
+                RUN_CANCELLED.discard(run_id)
+                terminal_status = "cancelled"
+                terminal_error = None
+            else:
+                terminal_status = "succeeded" if return_code == 0 else "failed"
+                terminal_error = (
+                    None
+                    if return_code == 0
+                    else f"Simulation exited with status {return_code}."
+                )
+            _update_run(
+                run_id,
+                status=terminal_status,
+                finished_at=_utc_now(),
+                exit_code=return_code,
+                error=terminal_error,
+            )
+            with RUN_LOG_STAT_LOCK:
+                RUN_LOG_STAT.pop(run_id, None)
+            return _fetch_run_row(run_id)
+
+    if _try_finalize_run_from_log(run_id, run):
+        with RUN_LOG_STAT_LOCK:
+            RUN_LOG_STAT.pop(run_id, None)
+        return _fetch_run_row(run_id)
 
     if status == "cancelling":
         _update_run(

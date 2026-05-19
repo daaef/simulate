@@ -82,7 +82,8 @@ python3 __main__.py new-user --plan sim_actors.json --timing fast
 | --- | --- | --- | --- |
 | `free-coupon` / `paid-coupon` | No coupon in catalog → scenario `unsupported` (`coupon_missing`); alternate-store retry may recover | `0` if no API fault | `degraded` or `passed` |
 | `new-user` | Phone already `setup_complete` → `unsupported` (`account_already_setup`) | `0` | `degraded` |
-| `menus`, `store-*`, `robot-complete` | Usually completes when plan store/user valid | `0` | `passed` |
+| `menus` | Creates a new catalog item in-store before gate scenarios; then runs menu_available/unavailable/sold_out/closed probes | `0` when setup/API OK | `passed` or `degraded` |
+| `store-*`, `robot-complete` | Usually completes when plan store/user valid | `0` | `passed` |
 | Any flow | HTTP 5xx / timeout / ws-connect failure on required path | `1` | `failed` |
 
 Artifacts record `failure_class` on issues and decisions in `events.json`; run config snapshot includes `failure_policy`.

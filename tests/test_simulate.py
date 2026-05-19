@@ -2313,6 +2313,108 @@ class InteractionCatalogueTests(unittest.TestCase):
         self.assertEqual(resolve_flow("ronot-complete")["name"], "robot-complete")
 
 
+class MenusFlowProvisioningTests(unittest.IsolatedAsyncioTestCase):
+    async def test_menus_flow_creates_new_menu_item_before_probes(self) -> None:
+        import config
+        import trace_runner
+        import user_sim
+        import store_sim
+
+        recorder = RunRecorder.bootstrap()
+        calls: list[str] = []
+        user_session = user_sim.UserSession(
+            token="user-token",
+            user_id=13,
+            user={"id": 13},
+            token_source="test",
+        )
+        store_session = store_sim.StoreSession(
+            last_mile_token="store-token",
+            fainzy_token=None,
+            subentity={"id": 7, "setup": True},
+            store_id=7,
+            token_source="test",
+        )
+        refreshed_fixtures = _fixtures()
+
+        async def fake_ensure_store_setup(*args, **kwargs):
+            calls.append("ensure_store_setup")
+            return True
+
+        async def fake_open_store(*args, **kwargs):
+            calls.append("open_store")
+            return 1
+
+        async def fake_fetch_categories(*args, **kwargs):
+            calls.append("fetch_categories")
+            return [{"id": 11, "name": "Drinks"}]
+
+        async def fake_create_menu(*args, **kwargs):
+            calls.append("create_menu")
+            return {"id": 99, "name": kwargs.get("name"), "status": "available"}
+
+        async def fake_bootstrap_fixtures(*args, **kwargs):
+            calls.append("bootstrap_fixtures")
+            return refreshed_fixtures
+
+        originals = (
+            store_sim.ensure_store_setup,
+            store_sim.open_store_for_simulation,
+            store_sim.fetch_categories,
+            store_sim.create_menu,
+            user_sim.bootstrap_fixtures,
+        )
+        store_sim.ensure_store_setup = fake_ensure_store_setup
+        store_sim.open_store_for_simulation = fake_open_store
+        store_sim.fetch_categories = fake_fetch_categories
+        store_sim.create_menu = fake_create_menu
+        user_sim.bootstrap_fixtures = fake_bootstrap_fixtures
+        try:
+            result = await trace_runner._provision_menus_flow_inventory(
+                object(),
+                store_session=store_session,
+                user_session=user_session,
+                recorder=recorder,
+            )
+        finally:
+            (
+                store_sim.ensure_store_setup,
+                store_sim.open_store_for_simulation,
+                store_sim.fetch_categories,
+                store_sim.create_menu,
+                user_sim.bootstrap_fixtures,
+            ) = originals
+
+        self.assertIs(result, refreshed_fixtures)
+        self.assertEqual(
+            calls,
+            [
+                "ensure_store_setup",
+                "open_store",
+                "fetch_categories",
+                "create_menu",
+                "bootstrap_fixtures",
+            ],
+        )
+        create_events = [
+            event
+            for event in recorder.events
+            if event.get("action") == "menus_run_item_created"
+        ]
+        self.assertEqual(len(create_events), 1)
+        self.assertEqual(create_events[0]["details"]["menu_id"], 99)
+
+    def test_is_menus_flow_run_detects_menus_suite(self) -> None:
+        import trace_runner
+
+        self.assertTrue(
+            trace_runner._is_menus_flow_run(
+                ["menu_available", "menu_unavailable", "menu_sold_out", "menu_store_closed"]
+            )
+        )
+        self.assertFalse(trace_runner._is_menus_flow_run(["menu_available", "completed"]))
+
+
 class FlowReliabilityPolicyTests(unittest.IsolatedAsyncioTestCase):
     async def test_coupon_retry_skips_api_fault_store_and_continues(self) -> None:
         import config

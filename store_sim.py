@@ -506,11 +506,12 @@ def build_menu_create_payload(
     session: StoreSession,
     category_id: int,
     status: str,
+    name: str | None = None,
 ) -> dict[str, Any]:
     return {
         "category": category_id,
         "subentity": session.store_id,
-        "name": config.SIM_MENU_NAME,
+        "name": name if name is not None else config.SIM_MENU_NAME,
         "price": config.SIM_MENU_PRICE,
         "description": config.SIM_MENU_DESCRIPTION,
         "currency_symbol": None,
@@ -743,6 +744,7 @@ async def create_menu(
     recorder: RunRecorder,
     scenario: str,
     step: str = "create_menu",
+    name: str | None = None,
 ) -> dict[str, Any]:
     if status not in MENU_STATUSES:
         raise RuntimeError(f"Unsupported menu status {status!r}")
@@ -751,6 +753,7 @@ async def create_menu(
         session=session,
         category_id=category_id,
         status=status,
+        name=name,
     )
     result = await request_json(
         client,
