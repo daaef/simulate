@@ -1743,6 +1743,15 @@ class SimulationPlansApiTests(unittest.TestCase):
         self.assertEqual(delete_response.status_code, 200)
         self.assertTrue(delete_response.json()["deleted"])
 
+    def test_get_default_sim_actors_plan_by_id(self) -> None:
+        response = self.client.get("/api/v1/simulation-plans/sim-actors")
+
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["id"], "sim-actors")
+        self.assertEqual(plan["path"], "sim_actors.json")
+        self.assertIn("content", plan)
+
     def test_plan_api_rejects_sensitive_content(self) -> None:
         response = self.client.post(
             "/api/v1/simulation-plans",

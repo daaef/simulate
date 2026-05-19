@@ -4253,6 +4253,14 @@ def _list_simulation_plans_payload() -> dict[str, Any]:
 
 
 def _get_simulation_plan_payload(plan_id: str) -> dict[str, Any]:
+    if plan_id == "sim-actors":
+        default_plan = _default_sim_actors_plan_payload()
+        if default_plan is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Default simulation plan 'sim_actors.json' is missing or invalid.",
+            )
+        return {"plan": default_plan}
     return {"plan": _simulation_plan_payload(_simulation_plan_path(plan_id))}
 
 
