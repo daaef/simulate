@@ -316,20 +316,21 @@ export default function ConfigPage() {
   }
 
   return (
-    <div className="grid" style={{ gap: 16, padding: "24px" }}>
-      <div>
-        <h1 style={{ margin: "0 0 8px", fontSize: "36px", color: "var(--text-primary)" }}>Config</h1>
-        <div style={{ color: "var(--text-secondary)" }}>
-          Secrets stay in `.env`; this page edits launchable JSON run plans.
+    <div className="config-page" style={{ padding: "24px" }}>
+      <div className="config-page__chrome">
+        <div>
+          <h1 style={{ margin: "0 0 8px", fontSize: "36px", color: "var(--text-primary)" }}>Config</h1>
+          <div style={{ color: "var(--text-secondary)" }}>
+            Secrets stay in `.env`; this page edits launchable JSON run plans.
+          </div>
         </div>
-      </div>
 
-      <div className="tabs" role="tablist" aria-label="Config sections">
+        <div className="tabs" role="tablist" aria-label="Config sections">
         <button
           id="config-tab-plans"
           type="button"
           role="tab"
-          tabIndex={0}
+          tabIndex={activeTab === "plans" ? 0 : -1}
           aria-selected={activeTab === "plans"}
           aria-controls="config-panel-plans"
           className={activeTab === "plans" ? "" : "secondary"}
@@ -341,7 +342,7 @@ export default function ConfigPage() {
           id="config-tab-email"
           type="button"
           role="tab"
-          tabIndex={0}
+          tabIndex={activeTab === "email" ? 0 : -1}
           aria-selected={activeTab === "email"}
           aria-controls="config-panel-email"
           className={activeTab === "email" ? "" : "secondary"}
@@ -353,7 +354,7 @@ export default function ConfigPage() {
           id="config-tab-integration"
           type="button"
           role="tab"
-          tabIndex={0}
+          tabIndex={activeTab === "integration" ? 0 : -1}
           aria-selected={activeTab === "integration"}
           aria-controls="config-panel-integration"
           className={activeTab === "integration" ? "" : "secondary"}
@@ -361,13 +362,15 @@ export default function ConfigPage() {
         >
           Integration mappings
         </button>
+        </div>
       </div>
 
+      <div className="config-page__panels">
+      {activeTab === "plans" ? (
       <div
         id="config-panel-plans"
         role="tabpanel"
         aria-labelledby="config-tab-plans"
-        hidden={activeTab !== "plans"}
         className="grid two"
         style={{ alignItems: "start" }}
       >
@@ -448,12 +451,13 @@ export default function ConfigPage() {
             </div>
           </section>
       </div>
+      ) : null}
 
+      {activeTab === "email" ? (
       <section
         id="config-panel-email"
         role="tabpanel"
         aria-labelledby="config-tab-email"
-        hidden={activeTab !== "email"}
         className="panel grid"
         style={{ gap: 12 }}
       >
@@ -542,14 +546,17 @@ export default function ConfigPage() {
             </button>
           </div>
         </section>
+      ) : null}
 
+      {activeTab === "integration" ? (
       <div
         id="config-panel-integration"
         role="tabpanel"
         aria-labelledby="config-tab-integration"
-        hidden={activeTab !== "integration"}
       >
         <IntegrationMappingsPanel />
+      </div>
+      ) : null}
       </div>
     </div>
   );

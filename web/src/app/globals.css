@@ -2,6 +2,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 /* Light Theme Variables */
 :root {
   --bg-primary: #f5f7fb;
@@ -235,6 +239,29 @@ h1, h2 {
   background: var(--button-secondary);
   color: var(--button-secondary-text);
   border-color: var(--button-secondary-border);
+}
+
+.config-page {
+  display: grid;
+  gap: 16px;
+}
+
+.config-page__chrome {
+  position: sticky;
+  top: var(--app-header-height, 73px);
+  z-index: 15;
+  display: grid;
+  gap: 12px;
+  background: var(--bg-primary);
+  padding-bottom: 12px;
+  margin: -24px -24px 0;
+  padding: 0 24px 12px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.config-page__panels {
+  display: grid;
+  gap: 16px;
 }
 
 .tab-link {

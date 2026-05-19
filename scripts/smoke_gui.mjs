@@ -50,24 +50,53 @@ async function main() {
       pass("dark-mode-toggle", "skipped (no toggle found)");
     }
 
-    // Config tabs
+    // Config tabs — only one panel visible at a time
     await page.goto(`${BASE}/config`, { waitUntil: "networkidle" });
     const plansTab = page.locator("#config-tab-plans");
     const emailTab = page.locator("#config-tab-email");
     const integrationTab = page.locator("#config-tab-integration");
+    const plansPanel = page.locator("#config-panel-plans");
+    const emailPanel = page.locator("#config-panel-email");
+    const integrationPanel = page.locator("#config-panel-integration");
+
     if ((await plansTab.count()) && (await emailTab.count()) && (await integrationTab.count())) {
       pass("config-tabs-present");
+
+      if (await plansPanel.isVisible()) pass("config-plans-visible-on-load");
+      else fail("config-plans-visible-on-load");
+      if (!(await emailPanel.isVisible()) && !(await integrationPanel.isVisible())) {
+        pass("config-inactive-panels-hidden-on-load");
+      } else {
+        fail("config-inactive-panels-hidden-on-load");
+      }
+
       await emailTab.click();
       await page.waitForTimeout(200);
-      const emailPanelHidden = await page.locator("#config-panel-email").getAttribute("hidden");
-      if (emailPanelHidden === null) pass("config-email-tab");
-      else fail("config-email-tab", "email panel still hidden");
+      if (await emailPanel.isVisible() && !(await plansPanel.isVisible()) && !(await integrationPanel.isVisible())) {
+        pass("config-email-tab-exclusive");
+      } else {
+        fail("config-email-tab-exclusive");
+      }
+
       await integrationTab.click();
       await page.waitForTimeout(200);
-      const integrationPanelHidden = await page.locator("#config-panel-integration").getAttribute("hidden");
-      if (integrationPanelHidden === null) pass("config-integration-tab");
-      else fail("config-integration-tab", "integration panel still hidden");
+      if (
+        (await integrationPanel.isVisible()) &&
+        !(await plansPanel.isVisible()) &&
+        !(await emailPanel.isVisible())
+      ) {
+        pass("config-integration-tab-exclusive");
+      } else {
+        fail("config-integration-tab-exclusive");
+      }
+
       await plansTab.click();
+      await page.waitForTimeout(200);
+      if (await plansPanel.isVisible() && !(await emailPanel.isVisible()) && !(await integrationPanel.isVisible())) {
+        pass("config-plans-tab-exclusive");
+      } else {
+        fail("config-plans-tab-exclusive");
+      }
     } else {
       fail("config-tabs-present", "missing tab buttons");
     }
