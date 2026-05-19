@@ -14,6 +14,7 @@ import {
   type LoadPaceSelection,
 } from "../../lib/load-mode-controls";
 import type { LauncherFieldId } from "../../lib/run-launcher-config";
+import { listPlanUsers, userActorKey } from "../../lib/plan-actor-options";
 import LaunchActorSelect from "./LaunchActorSelect";
 import { launcherFieldFocusHandlers, notifyLauncherField } from "./RunLaunchHelpSidebar";
 import ScenarioChipsMultiSelect from "./ScenarioChipsMultiSelect";
@@ -38,6 +39,9 @@ interface RunLaunchPanelProps {
   canCancelSelectedRun: boolean;
   planOptions?: SimulationPlan[];
   planContent?: SimulationPlanContent | null;
+  rotateEnabled?: boolean;
+  rotateCount?: number;
+  onRotateToggle?: (enabled: boolean) => void;
 }
 
 function CollapseButton({
@@ -96,9 +100,17 @@ export default function RunLaunchPanel({
   canCancelSelectedRun,
   planOptions = [],
   planContent = null,
+  rotateEnabled = false,
+  rotateCount = 0,
+  onRotateToggle,
 }: RunLaunchPanelProps) {
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const manualLoadIntervalRef = useRef<number | undefined>(undefined);
+  const planUserPhoneCount = useMemo(
+    () => listPlanUsers(planContent).map((u) => userActorKey(u)).filter(Boolean).length,
+    [planContent],
+  );
+  const canRotate = !form.all_users && planUserPhoneCount > 1;
   const capability = useMemo(() => flowCapabilities[form.flow] || null, [flowCapabilities, form.flow]);
   const suiteOptions = capability?.available_suites || [];
   const scenarioOptions = capability?.available_scenarios || [];
@@ -265,7 +277,7 @@ export default function RunLaunchPanel({
                 onChange={(store_id) => onFormChange((prev) => ({ ...prev, store_id }))}
               />
             </label>
-            <label {...focus("phone")}>
+            <div {...focus("phone")}>
               <div>Phone</div>
               <LaunchActorSelect
                 fieldId="phone"
@@ -276,7 +288,31 @@ export default function RunLaunchPanel({
                 onTouch={() => touch("phone")}
                 onChange={(phone) => onFormChange((prev) => ({ ...prev, phone }))}
               />
-            </label>
+              <label
+                className="checkbox"
+                style={{ marginTop: 6, opacity: canRotate ? 1 : 0.5 }}
+                title={
+                  form.all_users
+                    ? "Disabled when All Users is on"
+                    : planUserPhoneCount <= 1
+                      ? "Needs 2+ phones in the plan to rotate"
+                      : "Automatically pick a different phone after every 3 runs"
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={rotateEnabled}
+                  disabled={!canRotate}
+                  onChange={(e) => onRotateToggle?.(e.target.checked)}
+                />
+                Rotate / 3 runs
+              </label>
+              {rotateEnabled && canRotate ? (
+                <small className="muted" style={{ display: "block", marginTop: 2 }}>
+                  Run {rotateCount + 1} / 3
+                </small>
+              ) : null}
+            </div>
             {isLoadMode ? (
               <label {...focus("users")}>
                 <div>Users</div>

@@ -43,6 +43,7 @@ import {
 } from "../../../lib/api";
 import type { LauncherFieldId } from "../../../lib/run-launcher-config";
 import { canStopRun, shouldPollRunLog } from "../../../lib/run-control";
+import { listPlanUsers, userActorKey } from "../../../lib/plan-actor-options";
 
 // Architecture content (from ARCHITECTURE.md)
 const ARCHITECTURE_CONTENT = `# Complete Order Flow Simulator
@@ -412,6 +413,8 @@ export default function App() {
   const [isStartRunExpanded, setIsStartRunExpanded] = useState(true);
   const [isLiveConsoleExpanded, setIsLiveConsoleExpanded] = useState(false);
   const [focusedFieldId, setFocusedFieldId] = useState<LauncherFieldId | null>(null);
+  const [rotateEnabled, setRotateEnabled] = useState(false);
+  const [rotateCount, setRotateCount] = useState(0);
   const profilesSectionRef = useRef<HTMLDivElement | null>(null);
   const profileNameInputRef = useRef<HTMLInputElement | null>(null);
   const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
@@ -424,6 +427,19 @@ export default function App() {
   useEffect(() => {
     backendHealthyRef.current = backendHealthy;
   }, [backendHealthy]);
+
+  useEffect(() => {
+    const enabled = localStorage.getItem("sim_rotate_enabled") === "true";
+    const count = Number(localStorage.getItem("sim_rotate_count") ?? "0");
+    setRotateEnabled(enabled);
+    setRotateCount(Number.isFinite(count) ? count : 0);
+    if (enabled) {
+      const savedPhone = localStorage.getItem("sim_rotate_phone");
+      if (savedPhone) {
+        setForm((prev) => ({ ...prev, phone: savedPhone }));
+      }
+    }
+  }, []);
 
   function clearErrorForSource(source: string): void {
     setError((current) => (current?.source === source ? null : current));
@@ -623,6 +639,28 @@ export default function App() {
     return parts.join(" ");
   }, [form]);
 
+  function pickNextRotatePhone(exclude?: string): string {
+    const phones = listPlanUsers(selectedPlanContent)
+      .map((u) => userActorKey(u))
+      .filter(Boolean);
+    if (phones.length === 0) return "";
+    const candidates = exclude ? phones.filter((k) => k !== exclude) : phones;
+    const pool = candidates.length > 0 ? candidates : phones;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  function onRotateToggle(enabled: boolean) {
+    setRotateEnabled(enabled);
+    localStorage.setItem("sim_rotate_enabled", String(enabled));
+    if (enabled) {
+      const next = pickNextRotatePhone(form.phone || undefined);
+      localStorage.setItem("sim_rotate_phone", next);
+      localStorage.setItem("sim_rotate_count", "0");
+      setRotateCount(0);
+      setForm((prev) => ({ ...prev, phone: next }));
+    }
+  }
+
   async function onStartRun() {
     clearErrorForSource("create-run");
     setIsSubmitting(true);
@@ -644,6 +682,19 @@ export default function App() {
       setRunsTotal(runsPayload.total);
       setSummary(summaryPayload);
       clearErrorForSource("runs-summary");
+      if (rotateEnabled) {
+        const nextCount = rotateCount + 1;
+        if (nextCount >= 3) {
+          const next = pickNextRotatePhone(form.phone || undefined);
+          localStorage.setItem("sim_rotate_phone", next);
+          localStorage.setItem("sim_rotate_count", "0");
+          setRotateCount(0);
+          setForm((prev) => ({ ...prev, phone: next }));
+        } else {
+          localStorage.setItem("sim_rotate_count", String(nextCount));
+          setRotateCount(nextCount);
+        }
+      }
     } catch (err) {
       setErrorForSource("create-run", err, "Failed to start run.");
     } finally {
@@ -998,6 +1049,9 @@ export default function App() {
                     canCancelSelectedRun={Boolean(selectedRun && canStopRun(selectedRun))}
                     planOptions={simulationPlans}
                     planContent={selectedPlanContent}
+                    rotateEnabled={rotateEnabled}
+                    rotateCount={rotateCount}
+                    onRotateToggle={onRotateToggle}
                   />
                   <RunLaunchHelpSidebar
                     focusedFieldId={focusedFieldId}
