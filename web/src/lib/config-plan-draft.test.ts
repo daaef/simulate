@@ -30,6 +30,26 @@ describe("buildNewPlanDraft", () => {
     expect(draft.content).not.toBe(fallbackContent);
   });
 
+  it.each(["[]", "1", "null"])(
+    "falls back to selected content when parsed editor value is invalid object: %s",
+    (editorValue) => {
+      const fallbackContent = {
+        defaults: {
+          store_id: "FZY_926025",
+        },
+        stores: [{ store_id: "FZY_926025" }],
+      };
+
+      const draft = buildNewPlanDraft(editorValue, fallbackContent);
+
+      expect(draft).toEqual({
+        name: "Plan Copy",
+        content: fallbackContent,
+      });
+      expect(draft.content).not.toBe(fallbackContent);
+    },
+  );
+
   it("falls back to selected content when editor JSON is invalid", () => {
     const fallbackContent = {
       defaults: {
@@ -44,6 +64,16 @@ describe("buildNewPlanDraft", () => {
       name: "Copied from selected",
       content: fallbackContent,
     });
-    expect(draft.content).toBe(fallbackContent);
+    expect(draft.content).not.toBe(fallbackContent);
+
+    const draftContent = draft.content as {
+      defaults: { store_id: string };
+      stores: Array<{ store_id: string }>;
+    };
+    draftContent.defaults.store_id = "FZY_MUTATED";
+    draftContent.stores[0]!.store_id = "FZY_MUTATED";
+
+    expect(fallbackContent.defaults.store_id).toBe("FZY_926025");
+    expect(fallbackContent.stores[0]!.store_id).toBe("FZY_926025");
   });
 });

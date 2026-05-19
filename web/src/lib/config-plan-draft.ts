@@ -3,6 +3,10 @@ export type PlanDraft = {
   content: Record<string, unknown>;
 };
 
+function clonePlanContent(content: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(content)) as Record<string, unknown>;
+}
+
 export function buildNewPlanDraft(
   editorValue: string,
   fallbackContent: Record<string, unknown>,
@@ -22,6 +26,6 @@ export function buildNewPlanDraft(
 
   return {
     name: nextName,
-    content: fallbackContent,
+    content: clonePlanContent(fallbackContent),
   };
 }
