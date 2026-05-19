@@ -1,5 +1,6 @@
 import type { FlowCapability, RunCreateRequest, SimulationPlan, SimulationPlanContent } from "./api";
 import { GUIDE_FLAG_ROWS, GUIDE_FLOW_MATRIX } from "./command-guide";
+import { LOAD_PACE_PRESET_INTERVALS } from "./load-mode-controls";
 import {
   buildStoreDetailRows,
   buildUserDetailRows,
@@ -168,7 +169,8 @@ const FIELD_META: Record<
   },
   interval: {
     title: "Interval (sec)",
-    whenToChange: "Load-only: seconds between order attempts per worker.",
+    whenToChange:
+      "Load-only: seconds between order attempts per worker. Pace presets are slow=10, normal=3, fast=1.",
     flagKey: "--interval",
   },
   reject: {
@@ -626,10 +628,29 @@ export function getLauncherFieldHelp(
     }
     case "users":
     case "orders":
-    case "interval":
     case "reject":
     case "continuous":
       constraints.push(...loadOnlyConstraint(context.resolvedMode));
+      break;
+    case "interval":
+      constraints.push(...loadOnlyConstraint(context.resolvedMode));
+      options = [
+        {
+          value: String(LOAD_PACE_PRESET_INTERVALS.slow),
+          label: "slow",
+          description: "Slower pacing: 10 seconds between order attempts.",
+        },
+        {
+          value: String(LOAD_PACE_PRESET_INTERVALS.normal),
+          label: "normal",
+          description: "Balanced pacing: 3 seconds between order attempts.",
+        },
+        {
+          value: String(LOAD_PACE_PRESET_INTERVALS.fast),
+          label: "fast",
+          description: "Aggressive pacing: 1 second between order attempts.",
+        },
+      ];
       break;
     default:
       break;

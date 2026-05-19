@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type {
   FlowCapability,
   RunCreateRequest,
@@ -8,6 +8,11 @@ import type {
   SimulationPlan,
   SimulationPlanContent,
 } from "../../lib/api";
+import {
+  applyLoadPaceSelection,
+  resolveLoadPaceSelection,
+  type LoadPaceSelection,
+} from "../../lib/load-mode-controls";
 import type { LauncherFieldId } from "../../lib/run-launcher-config";
 import LaunchActorSelect from "./LaunchActorSelect";
 import { launcherFieldFocusHandlers, notifyLauncherField } from "./RunLaunchHelpSidebar";
@@ -93,11 +98,13 @@ export default function RunLaunchPanel({
   planContent = null,
 }: RunLaunchPanelProps) {
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
+  const manualLoadIntervalRef = useRef<number | undefined>(undefined);
   const capability = useMemo(() => flowCapabilities[form.flow] || null, [flowCapabilities, form.flow]);
   const suiteOptions = capability?.available_suites || [];
   const scenarioOptions = capability?.available_scenarios || [];
   const isTraceMode = resolvedMode === "trace";
   const isLoadMode = resolvedMode === "load";
+  const loadPaceSelection = resolveLoadPaceSelection(form.interval);
   const focus = (fieldId: LauncherFieldId) => launcherFieldFocusHandlers(fieldId, onFocusField);
   const touch = (fieldId: LauncherFieldId) => notifyLauncherField(fieldId, onFocusField);
 
@@ -171,16 +178,23 @@ export default function RunLaunchPanel({
               </select>
             </label>
           </div>
-          <div className="grid two">
-            <button className="secondary" onClick={() => setAdvancedExpanded((prev) => !prev)}>
-              {advancedExpanded ? "Hide Advanced Mode Overrides" : "Show Advanced Mode Overrides"}
-            </button>
+          {isTraceMode ? (
+            <div className="grid two">
+              <button className="secondary" onClick={() => setAdvancedExpanded((prev) => !prev)}>
+                {advancedExpanded ? "Hide Advanced Mode Overrides" : "Show Advanced Mode Overrides"}
+              </button>
+              <div className="muted" style={{ alignSelf: "center" }}>
+                Resolved mode: <code>{resolvedMode}</code>
+                {hasAdvancedOverrides ? " (overridden)" : ""}
+              </div>
+            </div>
+          ) : (
             <div className="muted" style={{ alignSelf: "center" }}>
               Resolved mode: <code>{resolvedMode}</code>
               {hasAdvancedOverrides ? " (overridden)" : ""}
             </div>
-          </div>
-          {advancedExpanded ? (
+          )}
+          {isTraceMode && advancedExpanded ? (
             <div className="grid two">
               <label {...focus("mode")}>
                 <div>Mode Override</div>
@@ -301,6 +315,35 @@ export default function RunLaunchPanel({
             ) : null}
             {isLoadMode ? (
               <label {...focus("interval")}>
+                <div>Load Pace</div>
+                <select
+                  value={loadPaceSelection}
+                  onChange={(event) => {
+                    touch("interval");
+                    const selected = event.target.value as LoadPaceSelection;
+                    onFormChange((prev) => {
+                      const next = applyLoadPaceSelection({
+                        selected,
+                        currentInterval: prev.interval,
+                        manualInterval: manualLoadIntervalRef.current,
+                      });
+                      manualLoadIntervalRef.current = next.manualInterval;
+                      return {
+                        ...prev,
+                        interval: next.interval,
+                      };
+                    });
+                  }}
+                >
+                  <option value="slow">slow (10s)</option>
+                  <option value="normal">normal (3s)</option>
+                  <option value="fast">fast (1s)</option>
+                  <option value="custom">custom (manual)</option>
+                </select>
+              </label>
+            ) : null}
+            {isLoadMode ? (
+              <label {...focus("interval")}>
                 <div>Interval (sec)</div>
                 <input
                   type="number"
@@ -309,9 +352,13 @@ export default function RunLaunchPanel({
                   value={form.interval ?? ""}
                   onChange={(event) => {
                     touch("interval");
+                    const parsed = event.target.value ? Number(event.target.value) : undefined;
+                    const nextInterval =
+                      parsed === undefined || Number.isFinite(parsed) ? parsed : undefined;
+                    manualLoadIntervalRef.current = nextInterval;
                     onFormChange((prev) => ({
                       ...prev,
-                      interval: event.target.value ? Number(event.target.value) : undefined,
+                      interval: nextInterval,
                     }));
                   }}
                   placeholder="e.g. 3"
