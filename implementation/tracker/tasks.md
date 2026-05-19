@@ -640,11 +640,55 @@ Manual smoke: log in, switch dark/light mode, verify active navigation on nested
   - Notes: Spec captures tabbed Config UX, default `sim_actors` loading fix, `New` clone semantics, load pacing presets, mode-specific UI isolation, round-robin worker policy, and documentation ownership.
   - Completion evidence: `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`.
 
-- [ ] Wait for user review of written design spec
+- [x] Wait for user review of written design spec
   - Dependency: Spec file written and self-reviewed.
   - Notes: Do not start implementation planning or code changes until user reviews the written spec file.
-  - Completion evidence: User confirms spec is approved.
+  - Completion evidence: User approved and requested proceeding, plus accepted additional per-flow docs requirement.
+
+### Phase 33: Config/Load UX + Runtime Alignment Implementation Plan (2026-05-19)
+
+- [x] Write execution-ready implementation plan from approved spec
+  - Dependency: Phase 32 design approval.
+  - Notes: Include tabbed Config, default-plan load fix, load-only launcher controls, pace presets, deterministic all_users assignment, and per-flow docs pack.
+  - Completion evidence: `docs/superpowers/plans/2026-05-19-config-load-ux-and-runtime-alignment.md`.
+
+- [x] Wait for user review of written implementation plan
+  - Dependency: Plan file written and self-reviewed.
+  - Notes: User approved plan via status-review closeout; implementation already underway (Tasks 1–3 committed).
+  - Completion evidence: Plan approved in tracker status review session; inline execution selected.
+
+### Phase 34: Config/Load UX + Runtime Alignment Execution (2026-05-19)
+
+- [x] Task 4: Load-only launcher controls and pace presets
+  - Dependency: Phase 33 plan approval.
+  - Notes: `load-mode-controls.ts`, `RunLaunchPanel.tsx`, `run-launcher-config.ts`.
+  - Completion evidence: Commit `7db14e3`; Vitest 11/11 pass; `npm run build` pass.
+
+- [x] Task 5: Deterministic load worker assignment helper
+  - Dependency: Approved load semantics.
+  - Notes: `load_worker_assignment.py`, `tests/test_load_worker_assignment.py`.
+  - Completion evidence: Commit `89a3442`; `tests.test_load_worker_assignment` 6/6 pass.
+
+- [x] Task 6: Runtime wiring for worker assignment
+  - Dependency: Task 5 helper.
+  - Notes: `__main__.py`, `user_sim.py`, integration test in `tests/test_simulate.py`.
+  - Completion evidence: Commit `91390a5`; `LoadWorkerRuntimeTests` 2/2 pass.
+
+- [x] Task 7: Per-flow operator docs and coverage checker
+  - Dependency: Approved docs pack requirement.
+  - Notes: `docs/flows/*.md`, `scripts/check_flow_docs.py`.
+  - Completion evidence: Commit `98d6747`; `python3 scripts/check_flow_docs.py` -> 16 flow docs present.
+
+- [x] Task 8: Docs ownership merge (README quickstart, SIMULATOR_GUIDE canonical)
+  - Dependency: Task 7 flow docs.
+  - Notes: `README.md`, `SIMULATOR_GUIDE.md`, implementation plan doc.
+  - Completion evidence: Commit `eee047f`; README links to SIMULATOR_GUIDE and docs/flows.
+
+- [x] Task 9: Full verification and tracker closeout
+  - Dependency: Tasks 4–8.
+  - Notes: Backend/frontend tests, flow docs checker, web build, session log update.
+  - Completion evidence: See session log 2026-05-19 03:50; `git diff --check` pass.
 
 ## Next Immediate Task
 
-Ask user to review `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md` before moving to implementation-plan drafting.
+Rebuild and smoke-test Docker stack (`docker compose up -d --build api web`), then run Phase 31 manual smoke (login, dark mode, schedules, archives/retention) against refreshed containers.

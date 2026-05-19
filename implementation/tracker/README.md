@@ -10,7 +10,7 @@ Plan and sequence the redesign of the simulator web GUI into a production-grade 
 
 ## Current Status
 
-In progress (Phase 32 design approved; waiting for user review of the written spec before implementation planning)
+Completed (Phase 34 Config/Load UX alignment — verification recorded; manual GUI smoke pending container rebuild)
 
 ## Scope
 
@@ -58,6 +58,7 @@ In progress (Phase 32 design approved; waiting for user review of the written sp
 - `docs/superpowers/specs/2026-05-06-plan-backed-simulator-config-design.md`
 - `docs/superpowers/plans/2026-05-06-plan-backed-simulator-config.md`
 - `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`
+- `docs/superpowers/plans/2026-05-19-config-load-ux-and-runtime-alignment.md`
 - `api/app/main.py`
 - `tests/test_web_api.py`
 - `.env`
@@ -92,4 +93,4 @@ In progress (Phase 32 design approved; waiting for user review of the written sp
 
 ## Last Updated
 
-2026-05-19 02:24
+2026-05-19 03:50

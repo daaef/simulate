@@ -2554,3 +2554,123 @@ date '+%Y-%m-%d %H:%M %Z'
 
 1. Ask user to review `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`.
 2. After approval, draft implementation plan and begin scoped code changes with tests.
+
+## 2026-05-19 02:31
+
+### Summary
+
+Updated the active design spec after user feedback to require comprehensive per-flow documentation files for every GUI flow option.
+
+### Files Created / Modified
+
+- `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '1,260p' flow_presets.py
+rg -n "docs/flows|Per-flow operator docs" docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md
+```
+
+### Results
+
+- Spec now requires one comprehensive operator document per GUI-selectable flow under `docs/flows/`.
+- Spec now includes a docs-coverage verification rule tied to `/api/v1/flows` parity.
+
+### Issues / Blockers
+
+- Waiting for user confirmation on the preferred content template breadth for each per-flow doc.
+
+### Next Steps
+
+1. Confirm per-flow doc template sections.
+2. Update implementation plan accordingly after spec approval.
+
+## 2026-05-19 02:41
+
+### Summary
+
+Drafted the execution-ready implementation plan from the approved Config/load UX spec and expanded scope to include comprehensive per-flow docs for every GUI flow option.
+
+### Files Created / Modified
+
+- `docs/superpowers/plans/2026-05-19-config-load-ux-and-runtime-alignment.md`
+- `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '1,320p' /Users/mars/.codex/plugins/cache/openai-curated/superpowers/27cd8e32/skills/writing-plans/SKILL.md
+sed -n '1,260p' flow_presets.py
+sed -n '1,620p' docs/superpowers/plans/2026-05-19-config-load-ux-and-runtime-alignment.md
+git status --short
+```
+
+### Results
+
+- Plan file created with explicit TDD tasks, exact file paths, concrete commands, and verification gates.
+- Plan includes deterministic `all_users` semantics as approved:
+  - `N <= plan users` -> first `N` users in plan order.
+  - `N > plan users` -> round-robin repeat.
+- Plan includes docs-pack requirement: one comprehensive `docs/flows/<flow>.md` per GUI flow and a parity checker script.
+
+### Issues / Blockers
+
+- Waiting for user review/approval of the written implementation plan before code execution.
+
+### Next Steps
+
+1. Ask user to review `docs/superpowers/plans/2026-05-19-config-load-ux-and-runtime-alignment.md`.
+2. After approval, execute using selected mode (subagent-driven or inline).
+
+## 2026-05-19 03:50
+
+### Summary
+
+Closed out Phase 34 (Config/Load UX alignment execution): committed Tasks 4–8, added runtime distribution tests, ran full verification suite, updated tracker, and performed API smoke against running Docker stack.
+
+### Files Created / Modified
+
+- `web/src/lib/load-mode-controls.ts`, `web/src/lib/load-mode-controls.test.ts`
+- `web/src/components/runs/RunLaunchPanel.tsx`, `web/src/lib/run-launcher-config.ts`
+- `load_worker_assignment.py`, `tests/test_load_worker_assignment.py`
+- `__main__.py`, `user_sim.py`, `tests/test_simulate.py`
+- `docs/flows/*.md`, `scripts/check_flow_docs.py`
+- `README.md`, `SIMULATOR_GUIDE.md`
+- `docs/superpowers/plans/2026-05-19-config-load-ux-and-runtime-alignment.md`
+- `implementation/tracker/README.md`, `implementation/tracker/tasks.md`, `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+python3 -m unittest tests.test_web_api.SimulationPlansApiTests tests.test_load_worker_assignment tests.test_simulate.LoadWorkerRuntimeTests -v
+python3 scripts/check_flow_docs.py
+cd web && npm run test -- src/lib/config-plan-draft.test.ts src/lib/load-mode-controls.test.ts
+cd web && npm run build
+git diff --check
+curl -s http://localhost:8080/healthz
+curl -s -c /tmp/sim-cookies.txt -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123"}'
+curl -s -b /tmp/sim-cookies.txt http://localhost:8080/api/v1/flows
+```
+
+### Results
+
+- Backend: 16/16 targeted tests pass (SimulationPlansApiTests, load worker assignment, LoadWorkerRuntimeTests).
+- Flow docs checker: `Flow docs check passed: 16 flow docs present.`
+- Frontend Vitest: 11/11 pass; Next.js production build succeeds.
+- Commits: `7db14e3`, `89a3442`, `91390a5`, `98d6747`, `eee047f` (Tasks 4–8).
+- Docker smoke (pre-rebuild): `/healthz` 200, login 200, `/api/v1/flows` returns 16 flows including `load`.
+- Running containers predate latest commits; `GET /api/v1/simulation-plans/sim-actors` returned 404 until rebuild.
+
+### Issues / Blockers
+
+- Docker stack must be rebuilt to smoke Config tabs, load pace UI, and sim-actors load against deployed images.
+
+### Next Steps
+
+1. `docker compose up -d --build api web` then re-smoke Config and Runs load launcher.
+2. Run Phase 31 manual smoke (dark mode, schedules edit, archives/retention pages).
