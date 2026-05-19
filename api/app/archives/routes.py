@@ -10,6 +10,7 @@ from . import service
 router = APIRouter(tags=["archives"])
 
 
+
 @router.get("/api/v1/archives/summary")
 def archives_summary(current_user: dict = Depends(require_permission("archives", "read"))) -> dict[str, Any]:
     return service.summary()
@@ -37,3 +38,35 @@ def list_archived_schedules(current_user: dict = Depends(require_permission("arc
 @router.get("/api/v1/archives/integration-mappings")
 def list_archived_integration_mappings(current_user: dict = Depends(require_permission("archives", "read"))) -> dict[str, Any]:
     return service.list_integration_mappings()
+
+
+@router.post("/api/v1/archives/runs/{run_id}/purge")
+def purge_run(
+    run_id: int,
+    current_user: dict = Depends(require_permission("runs", "delete")),
+) -> dict[str, Any]:
+    return service.purge_run(run_id)
+
+
+@router.post("/api/v1/archives/profiles/{profile_id}/purge")
+def purge_profile(
+    profile_id: int,
+    current_user: dict = Depends(require_permission("runs", "delete")),
+) -> dict[str, Any]:
+    return service.purge_profile(profile_id)
+
+
+@router.post("/api/v1/archives/schedules/{schedule_id}/purge")
+def purge_schedule(
+    schedule_id: int,
+    current_user: dict = Depends(require_permission("runs", "delete")),
+) -> dict[str, Any]:
+    return service.purge_schedule(schedule_id)
+
+
+@router.post("/api/v1/archives/integration-mappings/{mapping_id}/purge")
+def purge_integration_mapping(
+    mapping_id: int,
+    current_user: dict = Depends(require_permission("runs", "delete")),
+) -> dict[str, Any]:
+    return service.purge_integration_mapping(mapping_id)

@@ -4,8 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import AdminSubNav from "../../../../components/AdminSubNav";
 import {
   ApiRequestError,
+  fetchRetentionPolicy,
   fetchSystemTimezones,
+  updateRetentionPolicy,
   updateSystemTimezones,
+  type RetentionPolicySettings,
   type SystemTimezonesPolicy,
   type TimezonePolicyMode,
 } from "../../../../lib/api";
@@ -22,6 +25,7 @@ function groupLabel(value: string): string {
 }
 
 export default function AdminSystemPage() {
+  // Timezone policy
   const [policy, setPolicy] = useState<SystemTimezonesPolicy | null>(null);
   const [mode, setMode] = useState<TimezonePolicyMode>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -29,6 +33,14 @@ export default function AdminSystemPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Retention policy
+  const [retentionPolicy, setRetentionPolicy] = useState<RetentionPolicySettings | null>(null);
+  const [activeDays, setActiveDays] = useState<string>("30");
+  const [archiveDays, setArchiveDays] = useState<string>("180");
+  const [retentionBusy, setRetentionBusy] = useState(false);
+  const [retentionError, setRetentionError] = useState<string | null>(null);
+  const [retentionSavedAt, setRetentionSavedAt] = useState<number | null>(null);
 
   const available = policy?.available_timezones ?? [];
 
@@ -44,6 +56,16 @@ export default function AdminSystemPage() {
       .catch((caught) => {
         if (!active) return;
         setError(toMessage(caught, "Failed to load system settings"));
+      });
+    void fetchRetentionPolicy()
+      .then((payload) => {
+        if (!active) return;
+        setRetentionPolicy(payload);
+        setActiveDays(String(payload.active_days));
+        setArchiveDays(String(payload.archive_days));
+      })
+      .catch(() => {
+        // non-fatal — retention section will show inline error on save
       });
     return () => {
       active = false;
@@ -104,6 +126,42 @@ export default function AdminSystemPage() {
     }
   };
 
+  const retentionActiveParsed = parseInt(activeDays, 10);
+  const retentionArchiveParsed = parseInt(archiveDays, 10);
+  const retentionValidationError =
+    isNaN(retentionActiveParsed) || retentionActiveParsed < 1
+      ? "Active days must be a number ≥ 1."
+      : isNaN(retentionArchiveParsed) || retentionArchiveParsed < 1
+      ? "Archive days must be a number ≥ 1."
+      : retentionArchiveParsed < retentionActiveParsed
+      ? "Archive days must be greater than or equal to active days."
+      : null;
+
+  const retentionDirty =
+    retentionPolicy !== null &&
+    (retentionActiveParsed !== retentionPolicy.active_days ||
+      retentionArchiveParsed !== retentionPolicy.archive_days);
+
+  const saveRetention = async () => {
+    if (retentionValidationError) return;
+    setRetentionBusy(true);
+    try {
+      const payload = await updateRetentionPolicy({
+        active_days: retentionActiveParsed,
+        archive_days: retentionArchiveParsed,
+      });
+      setRetentionPolicy(payload);
+      setActiveDays(String(payload.active_days));
+      setArchiveDays(String(payload.archive_days));
+      setRetentionSavedAt(Date.now());
+      setRetentionError(null);
+    } catch (caught) {
+      setRetentionError(toMessage(caught, "Failed to save retention policy"));
+    } finally {
+      setRetentionBusy(false);
+    }
+  };
+
   return (
     <div className="page-shell">
       <section className="page-header">
@@ -115,6 +173,76 @@ export default function AdminSystemPage() {
 
       {error ? <div className="error-banner" style={{ padding: "12px 16px" }}>{error}</div> : null}
 
+      {/* ── Retention Policy ──────────────────────────────────────────── */}
+      <section className="panel grid" style={{ gap: 16 }}>
+        <div className="grid" style={{ gap: 8 }}>
+          <h2 className="section-title">Retention Policy</h2>
+          <p className="muted" style={{ margin: 0, fontSize: "13px" }}>
+            Controls how long run records stay visible before being auto-archived, and how long
+            archived records are kept before being permanently deleted.
+          </p>
+        </div>
+
+        {retentionError ? (
+          <div className="error-banner" style={{ padding: "8px 12px", fontSize: "13px" }}>
+            {retentionError}
+          </div>
+        ) : null}
+
+        <div className="grid two" style={{ gap: 16 }}>
+          <label className="grid" style={{ gap: 6 }}>
+            <span style={{ fontWeight: 500, fontSize: "14px" }}>Active window (days)</span>
+            <span className="muted" style={{ fontSize: "12px" }}>
+              Runs stay on the Runs page for this many days. After this they are auto-archived.
+              Default: {retentionPolicy?.active_days_default ?? 30}.
+            </span>
+            <input
+              type="number"
+              min={1}
+              max={3650}
+              value={activeDays}
+              onChange={(e) => setActiveDays(e.target.value)}
+              style={{ width: "120px" }}
+            />
+          </label>
+          <label className="grid" style={{ gap: 6 }}>
+            <span style={{ fontWeight: 500, fontSize: "14px" }}>Archive window (days)</span>
+            <span className="muted" style={{ fontSize: "12px" }}>
+              Archived runs are kept for this many days before being permanently deleted.
+              Default: {retentionPolicy?.archive_days_default ?? 180}.
+            </span>
+            <input
+              type="number"
+              min={1}
+              max={3650}
+              value={archiveDays}
+              onChange={(e) => setArchiveDays(e.target.value)}
+              style={{ width: "120px" }}
+            />
+          </label>
+        </div>
+
+        {retentionValidationError ? (
+          <div className="muted" style={{ color: "var(--color-danger, #e53e3e)", fontSize: "13px" }}>
+            {retentionValidationError}
+          </div>
+        ) : null}
+
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <button
+            className="secondary"
+            disabled={retentionBusy || !retentionDirty || !!retentionValidationError}
+            onClick={saveRetention}
+          >
+            Save
+          </button>
+          {retentionSavedAt ? (
+            <span className="muted" style={{ fontSize: "12px" }}>Saved</span>
+          ) : null}
+        </div>
+      </section>
+
+      {/* ── Timezone Policy ───────────────────────────────────────────── */}
       <section className="panel grid" style={{ gap: 16 }}>
         <div className="grid" style={{ gap: 8 }}>
           <h2 className="section-title">Timezone Policy</h2>

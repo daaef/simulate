@@ -33,9 +33,10 @@ export default function DeleteRunModal({ run, onConfirm, onCancel }: DeleteRunMo
           border: "1px solid var(--border-primary)",
         }}
       >
-        <h3 style={{ margin: "0 0 12px 0", color: "var(--text-primary)" }}>Confirm Delete</h3>
+        <h3 style={{ margin: "0 0 12px 0", color: "var(--text-primary)" }}>Archive run #{run.id}?</h3>
         <p style={{ margin: "0 0 20px 0", color: "var(--text-secondary)", fontSize: "14px" }}>
-          Are you sure you want to delete run #{run.id}? This will permanently remove all associated files and cannot be undone.
+          This will archive run #{run.id} — it will be hidden from the runs list but can be restored
+          from the Archives page at any time.
         </p>
         <div style={{ display: "flex", gap: "12px" }}>
           <button
@@ -51,7 +52,7 @@ export default function DeleteRunModal({ run, onConfirm, onCancel }: DeleteRunMo
               fontWeight: 500,
             }}
           >
-            Delete
+            Archive
           </button>
           <button
             onClick={onCancel}

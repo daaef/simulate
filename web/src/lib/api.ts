@@ -838,6 +838,34 @@ export async function updateSystemTimezones(request: {
   );
 }
 
+export type RetentionPolicySettings = {
+  active_days: number;
+  archive_days: number;
+  active_days_default: number;
+  archive_days_default: number;
+};
+
+export async function fetchRetentionPolicy(): Promise<RetentionPolicySettings> {
+  return unwrap<RetentionPolicySettings>(
+    await fetch("/api/v1/system/retention", withSession()),
+    "system-retention"
+  );
+}
+
+export async function updateRetentionPolicy(request: {
+  active_days: number;
+  archive_days: number;
+}): Promise<RetentionPolicySettings> {
+  return unwrap<RetentionPolicySettings>(
+    await fetch("/api/v1/system/retention", {
+      method: "PUT",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "system-retention-update"
+  );
+}
+
 export async function fetchSystemEmailSettings(): Promise<SystemEmailSettings> {
   return unwrap<SystemEmailSettings>(await fetch("/api/v1/system/email", withSession()), "system-email");
 }
@@ -927,6 +955,46 @@ export async function restoreRun(runId: number): Promise<{ run_id: number; resto
       ...withSession(),
     }),
     "restore-run"
+  );
+}
+
+export async function purgeRun(runId: number): Promise<{ run_id: number; purged: boolean; deleted_files?: string[]; missing_files?: string[] }> {
+  return unwrap<{ run_id: number; purged: boolean; deleted_files?: string[]; missing_files?: string[] }>(
+    await fetch(`/api/v1/archives/runs/${runId}/purge`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "purge-run"
+  );
+}
+
+export async function purgeRunProfile(profileId: number): Promise<{ profile_id: number; purged: boolean }> {
+  return unwrap<{ profile_id: number; purged: boolean }>(
+    await fetch(`/api/v1/archives/profiles/${profileId}/purge`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "purge-run-profile"
+  );
+}
+
+export async function purgeSchedule(scheduleId: number): Promise<{ schedule_id: number; purged: boolean }> {
+  return unwrap<{ schedule_id: number; purged: boolean }>(
+    await fetch(`/api/v1/archives/schedules/${scheduleId}/purge`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "purge-schedule"
+  );
+}
+
+export async function purgeIntegrationMapping(mappingId: number): Promise<{ mapping_id: number; purged: boolean }> {
+  return unwrap<{ mapping_id: number; purged: boolean }>(
+    await fetch(`/api/v1/archives/integration-mappings/${mappingId}/purge`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "purge-integration-mapping"
   );
 }
 

@@ -25,6 +25,11 @@ class EmailSettingsPayload(BaseModel):
     email_event_triggers: List[EmailEventTrigger] = Field(default_factory=list)
 
 
+class RetentionPolicyUpdateRequest(BaseModel):
+    active_days: int = Field(default=30, ge=1, le=3650)
+    archive_days: int = Field(default=180, ge=1, le=3650)
+
+
 class EmailSettingsUpdateRequest(BaseModel):
     email_enabled: bool = False
     email_from_email: str = ""

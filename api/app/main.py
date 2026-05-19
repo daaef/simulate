@@ -709,6 +709,8 @@ def _migrate_postgres_schema() -> None:
 
 
 SYSTEM_ALLOWED_TIMEZONES_KEY = "allowed_timezones"
+SYSTEM_RETENTION_ACTIVE_KEY = "retention_active_days"
+SYSTEM_RETENTION_ARCHIVE_KEY = "retention_archive_days"
 
 
 def _available_timezones_sorted() -> list[str]:
@@ -799,6 +801,95 @@ def _set_allowed_timezones_setting(allowed: list[str] | None) -> None:
             """,
             (SYSTEM_ALLOWED_TIMEZONES_KEY, payload, now),
         )
+
+
+def _get_int_setting(key: str, default: int) -> int:
+    """Read a single integer from system_settings, returning *default* if absent or invalid."""
+    try:
+        if USE_POSTGRES:
+            conn = _get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT value FROM system_settings WHERE key = %s", (key,))
+                    row = cursor.fetchone()
+                    if not row:
+                        return default
+                    return int(json.loads(row[0]))
+            finally:
+                conn.close()
+        with DB_LOCK, _db() as conn:
+            row = conn.execute(
+                "SELECT value FROM system_settings WHERE key = ?", (key,)
+            ).fetchone()
+            if row is None:
+                return default
+            return int(json.loads(row["value"]))
+    except Exception:
+        return default
+
+
+def _set_int_setting(key: str, value: int) -> None:
+    """Upsert a single integer into system_settings."""
+    now = _utc_now()
+    payload = json.dumps(value)
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO system_settings (key, value, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (key)
+                    DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+                    """,
+                    (key, payload),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return
+    with DB_LOCK, _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO system_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (key, payload, now),
+        )
+
+
+def _get_active_retention_days() -> int:
+    return _get_int_setting(SYSTEM_RETENTION_ACTIVE_KEY, ACTIVE_RETENTION_DAYS)
+
+
+def _get_archive_retention_days() -> int:
+    return _get_int_setting(SYSTEM_RETENTION_ARCHIVE_KEY, ARCHIVE_RETENTION_DAYS)
+
+
+def _retention_policy_payload() -> dict[str, Any]:
+    return {
+        "active_days": _get_active_retention_days(),
+        "archive_days": _get_archive_retention_days(),
+        "active_days_default": ACTIVE_RETENTION_DAYS,
+        "archive_days_default": ARCHIVE_RETENTION_DAYS,
+    }
+
+
+def _set_retention_policy_logic(active_days: int, archive_days: int) -> dict[str, Any]:
+    if active_days < 1 or active_days > 3650:
+        raise HTTPException(status_code=422, detail="active_days must be between 1 and 3650.")
+    if archive_days < active_days:
+        raise HTTPException(
+            status_code=422,
+            detail="archive_days must be greater than or equal to active_days.",
+        )
+    if archive_days > 3650:
+        raise HTTPException(status_code=422, detail="archive_days must be between 1 and 3650.")
+    _set_int_setting(SYSTEM_RETENTION_ACTIVE_KEY, active_days)
+    _set_int_setting(SYSTEM_RETENTION_ARCHIVE_KEY, archive_days)
+    return _retention_policy_payload()
 
 
 def _system_timezones_payload() -> dict[str, Any]:
@@ -5152,8 +5243,8 @@ def _parse_run_timestamp(value: str | None) -> datetime | None:
 
 def _retention_buckets(runs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     now = datetime.now(timezone.utc)
-    active_cutoff = ACTIVE_RETENTION_DAYS
-    archive_cutoff = ARCHIVE_RETENTION_DAYS
+    active_cutoff = _get_active_retention_days()
+    archive_cutoff = _get_archive_retention_days()
     buckets = {"active": [], "archive": [], "purge": []}
     for run in runs:
         created_at = _parse_run_timestamp(run.get("created_at"))
@@ -5179,9 +5270,9 @@ def _run_age_days(run: dict[str, Any]) -> int | None:
 
 def _run_lifecycle_state(run: dict[str, Any]) -> str:
     age_days = _run_age_days(run)
-    if age_days is None or age_days < ACTIVE_RETENTION_DAYS:
+    if age_days is None or age_days < _get_active_retention_days():
         return "active"
-    if age_days < ARCHIVE_RETENTION_DAYS:
+    if age_days < _get_archive_retention_days():
         return "archive_candidate"
     return "raw_purge_candidate"
 
@@ -5353,7 +5444,7 @@ def _archives_summary_payload() -> dict[str, Any]:
     runs = _list_runs(limit=500)
     buckets = _retention_buckets(runs)
     return {
-        "policy_days": {"active": ACTIVE_RETENTION_DAYS, "archive": ARCHIVE_RETENTION_DAYS},
+        "policy_days": {"active": _get_active_retention_days(), "archive": _get_archive_retention_days()},
         "counts": {
             "active": len(buckets["active"]),
             "archive_ready": len(buckets["archive"]),
@@ -5412,8 +5503,8 @@ def _retention_summary_payload() -> dict[str, Any]:
     raw_artifact_runs = sum(1 for run in runs if any(run.get(field) for field in ARTIFACT_FIELDS) or run.get("log_path"))
     return {
         "policies": {
-            "active_days": ACTIVE_RETENTION_DAYS,
-            "archive_days": ARCHIVE_RETENTION_DAYS,
+            "active_days": _get_active_retention_days(),
+            "archive_days": _get_archive_retention_days(),
         },
         "queue": {
             "archive_ready": len(buckets["archive"]),
@@ -5717,6 +5808,186 @@ def _restore_run_logic(run_id: int) -> dict[str, Any]:
     return {"run_id": run_id, "restored": True, "run": restored}
 
 
+def _purge_run_logic(run_id: int) -> dict[str, Any]:
+    """Permanently delete a run row and its on-disk artifacts."""
+    run = _fetch_run_row(run_id)
+    if not run.get("archived_at"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Run {run_id} must be archived before it can be permanently deleted.",
+        )
+    # Remove disk artifacts
+    artifact_paths = [run.get(f) for f in ("log_path", *ARTIFACT_FIELDS)]
+    deleted_files: list[str] = []
+    missing_files: list[str] = []
+    for path_val in artifact_paths:
+        if not path_val:
+            continue
+        p = Path(path_val)
+        try:
+            if p.exists():
+                p.unlink()
+                deleted_files.append(str(p))
+            else:
+                missing_files.append(str(p))
+        except OSError:
+            missing_files.append(str(path_val))
+    # Hard-delete DB row
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM runs WHERE id = %s", (run_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+    return {
+        "run_id": run_id,
+        "purged": True,
+        "deleted_files": deleted_files,
+        "missing_files": missing_files,
+    }
+
+
+def _purge_run_profile_logic(profile_id: int) -> dict[str, Any]:
+    """Permanently delete an archived run profile row."""
+    profile = _get_run_profile(profile_id, include_archived=True)
+    if profile.get("status") != "archived":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Profile {profile_id} must be archived before it can be permanently deleted.",
+        )
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM run_profiles WHERE id = %s", (profile_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute("DELETE FROM run_profiles WHERE id = ?", (profile_id,))
+    return {"profile_id": profile_id, "purged": True}
+
+
+def _purge_schedule_logic(schedule_id: int) -> dict[str, Any]:
+    """Permanently delete a deleted schedule row."""
+    schedule = _get_schedule(schedule_id)
+    if schedule.get("status") != "deleted":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Schedule {schedule_id} must be deleted (archived) before it can be permanently purged.",
+        )
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM schedules WHERE id = %s", (schedule_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+    return {"schedule_id": schedule_id, "purged": True}
+
+
+def _purge_integration_mapping_logic(mapping_id: int) -> dict[str, Any]:
+    """Permanently delete an archived integration mapping row."""
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    "SELECT * FROM integration_profile_mappings WHERE id = %s", (mapping_id,)
+                )
+                row = cursor.fetchone()
+        finally:
+            conn.close()
+    else:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT * FROM integration_profile_mappings WHERE id = ?", (mapping_id,)
+            ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Integration mapping {mapping_id} not found.")
+    if str(row["status"]).lower() != "archived":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Integration mapping {mapping_id} must be archived before it can be permanently deleted.",
+        )
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM integration_profile_mappings WHERE id = %s", (mapping_id,)
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute(
+                "DELETE FROM integration_profile_mappings WHERE id = ?", (mapping_id,)
+            )
+    return {"mapping_id": mapping_id, "purged": True}
+
+
+def _auto_archive_and_purge_job() -> None:
+    """Auto-archive runs older than active_days; auto-purge runs archived longer than archive_days."""
+    try:
+        now = datetime.now(timezone.utc)
+        archive_cutoff = now - timedelta(days=_get_active_retention_days())
+        purge_cutoff = now - timedelta(days=_get_archive_retention_days())
+        archive_cutoff_str = archive_cutoff.isoformat()
+        purge_cutoff_str = purge_cutoff.isoformat()
+
+        if USE_POSTGRES:
+            conn = _get_db_connection()
+            try:
+                archived_at_now = _utc_now()
+                with conn.cursor(cursor_factory=DictCursor) as cursor:
+                    # Auto-archive: active runs older than 30 days
+                    cursor.execute(
+                        "UPDATE runs SET archived_at = %s WHERE archived_at IS NULL AND created_at < %s",
+                        (archived_at_now, archive_cutoff_str),
+                    )
+                    # Collect run IDs to purge
+                    cursor.execute(
+                        "SELECT id FROM runs WHERE archived_at IS NOT NULL AND created_at < %s",
+                        (purge_cutoff_str,),
+                    )
+                    purge_ids = [row["id"] for row in cursor.fetchall()]
+                conn.commit()
+            finally:
+                conn.close()
+        else:
+            archived_at_now = _utc_now()
+            with DB_LOCK, _db() as conn:
+                conn.execute(
+                    "UPDATE runs SET archived_at = ? WHERE archived_at IS NULL AND created_at < ?",
+                    (archived_at_now, archive_cutoff_str),
+                )
+                rows = conn.execute(
+                    "SELECT id FROM runs WHERE archived_at IS NOT NULL AND created_at < ?",
+                    (purge_cutoff_str,),
+                ).fetchall()
+            purge_ids = [row["id"] for row in rows]
+
+        for run_id in purge_ids:
+            try:
+                _purge_run_logic(run_id)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def _run_autopilot_job() -> None:
     payload = RunCreateRequest(
         flow="doctor",
@@ -5740,6 +6011,13 @@ scheduler.add_job(
     trigger="interval",
     seconds=60,
     id="schedule-runner",
+    replace_existing=True,
+)
+scheduler.add_job(
+    _auto_archive_and_purge_job,
+    trigger="interval",
+    hours=1,
+    id="retention-sweep",
     replace_existing=True,
 )
 if _as_bool(os.getenv("SIM_GUI_ENABLE_DAILY_DOCTOR"), default=False):
@@ -5798,6 +6076,10 @@ configure_archives_runtime(
     list_profiles=lambda: _archives_profiles_payload(),
     list_schedules=lambda: _archives_schedules_payload(),
     list_integration_mappings=lambda: _archives_integration_mappings_payload(),
+    purge_run=lambda run_id: _purge_run_logic(run_id),
+    purge_profile=lambda profile_id: _purge_run_profile_logic(profile_id),
+    purge_schedule=lambda schedule_id: _purge_schedule_logic(schedule_id),
+    purge_integration_mapping=lambda mapping_id: _purge_integration_mapping_logic(mapping_id),
 )
 configure_retention_runtime(
     summary=lambda: _retention_summary_payload(),
@@ -5826,6 +6108,8 @@ configure_system_runtime(
     get_email_settings=lambda: _get_email_settings_payload(),
     set_email_settings=lambda request: _set_email_settings_payload(request),
     send_test_email=lambda: _send_test_email_payload(),
+    get_retention_policy=lambda: _retention_policy_payload(),
+    set_retention_policy=lambda active_days, archive_days: _set_retention_policy_logic(active_days, archive_days),
 )
 configure_integrations_runtime(
     list_mappings=lambda include_archived=False: _list_integration_mappings(include_archived),

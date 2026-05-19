@@ -35,3 +35,19 @@ def list_schedules() -> dict[str, Any]:
 
 def list_integration_mappings() -> dict[str, Any]:
     return _callback("list_integration_mappings")()
+
+
+def purge_run(run_id: int) -> dict[str, Any]:
+    return _callback("purge_run")(run_id)
+
+
+def purge_profile(profile_id: int) -> dict[str, Any]:
+    return _callback("purge_profile")(profile_id)
+
+
+def purge_schedule(schedule_id: int) -> dict[str, Any]:
+    return _callback("purge_schedule")(schedule_id)
+
+
+def purge_integration_mapping(mapping_id: int) -> dict[str, Any]:
+    return _callback("purge_integration_mapping")(mapping_id)

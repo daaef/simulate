@@ -92,7 +92,6 @@ function nextTriggerLabel(schedule: Schedule): string {
   if (schedule.status === "active" && schedule.execution_mode_label === "manual_only") return "Manual only";
   if (schedule.status === "paused") return "Paused";
   if (schedule.status === "disabled") return "Disabled";
-  if (schedule.status === "deleted") return "Deleted";
   return "Not scheduled";
 }
 
@@ -106,7 +105,6 @@ function nextTriggerMeta(schedule: Schedule): string {
   if (schedule.status === "active" && schedule.execution_mode_label === "manual_only") return "Manual-only schedule.";
   if (schedule.status === "paused") return "Resume to recalculate the next trigger.";
   if (schedule.status === "disabled") return "Disabled schedules do not run automatically.";
-  if (schedule.status === "deleted") return "Restore before automatic triggers run.";
   return "No automatic trigger available.";
 }
 
@@ -235,7 +233,7 @@ export default function SchedulesPage() {
     try {
       const [profilePayload, schedulePayload, summaryPayload, timezonePayload] = await Promise.all([
         fetchRunProfiles(),
-        fetchSchedules(true),
+        fetchSchedules(false),
         fetchScheduleSummary(),
         fetchSystemTimezones(),
       ]);
@@ -870,15 +868,13 @@ export default function SchedulesPage() {
               </tr>
             </thead>
             <tbody>
-              {schedules.map((schedule) => (
-                (() => {
-                  const isDeleted = schedule.status === "deleted";
+              {schedules.map((schedule) => {
                   const isDisabled = schedule.status === "disabled";
                   const isPaused = schedule.status === "paused";
-                  const canPause = !isDeleted && !isDisabled && !isPaused;
-                  const canDisable = !isDeleted && !isDisabled;
+                  const canPause = !isDisabled && !isPaused;
+                  const canDisable = !isDisabled;
                   const canEnable = isDisabled;
-                  const canTrigger = !isDeleted && !isDisabled;
+                  const canTrigger = !isDisabled;
                   return (
                     <tr key={schedule.id}>
                       <td>
@@ -923,7 +919,7 @@ export default function SchedulesPage() {
                           <button className="small" disabled={busy || !canTrigger} onClick={() => runAction("trigger schedule", () => triggerSchedule(schedule.id))}>
                             Trigger
                           </button>
-                          <button className="secondary small" disabled={busy || isDeleted} onClick={() => startEditSchedule(schedule)}>
+                          <button className="secondary small" disabled={busy} onClick={() => startEditSchedule(schedule)}>
                             Edit
                           </button>
                           {isPaused ? (
@@ -938,17 +934,12 @@ export default function SchedulesPage() {
                           {canDisable ? (
                             <button className="secondary small" disabled={busy} onClick={() => runAction("disable schedule", () => setScheduleStatus(schedule.id, "disable"))}>Disable</button>
                           ) : null}
-                          {isDeleted ? (
-                            <button className="secondary small" disabled={busy} onClick={() => runAction("restore schedule", () => setScheduleStatus(schedule.id, "restore"))}>Restore</button>
-                          ) : (
-                            <button className="secondary small" disabled={busy} onClick={() => runAction("delete schedule", () => setScheduleStatus(schedule.id, "delete"))}>Delete</button>
-                          )}
+                          <button className="secondary small" disabled={busy} onClick={() => runAction("delete schedule", () => setScheduleStatus(schedule.id, "delete"))}>Delete</button>
                         </div>
                       </td>
                     </tr>
                   );
-                })()
-              ))}
+                })}
               {!schedules.length ? (
                 <tr><td colSpan={8} className="muted">No schedules configured.</td></tr>
               ) : null}

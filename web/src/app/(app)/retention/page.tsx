@@ -17,6 +17,16 @@ function toMessage(error: unknown): string {
   return "Failed to load retention";
 }
 
+function addDays(base: Date, days: number): Date {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatDate(d: Date): string {
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 export default function RetentionPage() {
   const [summary, setSummary] = useState<RetentionSummary | null>(null);
   const [archiveSummary, setArchiveSummary] = useState<ArchiveSummary | null>(null);
@@ -53,8 +63,8 @@ export default function RetentionPage() {
     return {
       lifecycle: [
         { label: "Active", value: lifecycle.active, color: "var(--chart-success)" },
-        { label: "Archive", value: lifecycle.archive_candidate, color: "var(--chart-warning)" },
-        { label: "Raw purge", value: lifecycle.raw_purge_candidate, color: "var(--chart-danger)" },
+        { label: "Archive-ready", value: lifecycle.archive_candidate, color: "var(--chart-warning)" },
+        { label: "Purge-ready", value: lifecycle.raw_purge_candidate, color: "var(--chart-danger)" },
       ],
       queue: [
         { label: "Archive ready", value: summary?.queue.archive_ready ?? 0, color: "var(--chart-warning)" },
@@ -64,67 +74,131 @@ export default function RetentionPage() {
     };
   }, [archiveSummary, summary]);
 
-  const purgeSafety = summary?.purge_safety;
+  const activeDays = summary?.policies.active_days ?? archiveSummary?.policy_days.active ?? 30;
+  const archiveDays = summary?.policies.archive_days ?? archiveSummary?.policy_days.archive ?? 180;
+
+  const now = new Date();
+  const archiveCutoff = addDays(now, -activeDays);
+  const purgeCutoff = addDays(now, -archiveDays);
 
   return (
     <div className="page-shell">
       <section className="page-header">
         <h1 className="page-title">Retention</h1>
-        <p className="page-subtitle">Policy posture, queue pressure, retained summary coverage, and purge safety.</p>
+        <p className="page-subtitle">
+          Policy thresholds, lifecycle distribution, and queue pressure for run data.
+        </p>
       </section>
 
       {error ? <div className="error-banner" style={{ padding: "12px 16px" }}>{error}</div> : null}
 
       <section className="grid four">
         <article className="panel stat">
-          <span className="stat-label">Active Window</span>
-          <strong className="stat-value">{summary?.policies.active_days ?? "--"}d</strong>
+          <span className="stat-label">Runs stay visible for</span>
+          <strong className="stat-value">{activeDays} days</strong>
+          <span className="stat-description muted" style={{ fontSize: "12px" }}>
+            Runs older than this are auto-archived
+          </span>
         </article>
         <article className="panel stat">
-          <span className="stat-label">Archive Window</span>
-          <strong className="stat-value">{summary?.policies.archive_days ?? "--"}d</strong>
+          <span className="stat-label">Archived runs kept for</span>
+          <strong className="stat-value">{archiveDays} days</strong>
+          <span className="stat-description muted" style={{ fontSize: "12px" }}>
+            After this, they are permanently deleted
+          </span>
         </article>
         <article className="panel stat">
-          <span className="stat-label">Archive Queue</span>
+          <span className="stat-label">Pending archive</span>
           <strong className="stat-value">{summary?.queue.archive_ready ?? 0}</strong>
+          <span className="stat-description muted" style={{ fontSize: "12px" }}>
+            Active runs due to be archived soon
+          </span>
         </article>
         <article className="panel stat">
-          <span className="stat-label">Purge Queue</span>
+          <span className="stat-label">Pending deletion</span>
           <strong className="stat-value">{summary?.queue.purge_ready ?? 0}</strong>
+          <span className="stat-description muted" style={{ fontSize: "12px" }}>
+            Archived runs due to be deleted soon
+          </span>
         </article>
+      </section>
+
+      {/* Policy timeline */}
+      <section className="panel">
+        <h2 className="section-title">Policy Timeline</h2>
+        <div style={{ display: "grid", gap: "12px", fontSize: "14px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 12,
+                height: 12,
+                borderRadius: "50%",
+                backgroundColor: "var(--chart-success)",
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>Active</span>
+            <span style={{ color: "var(--text-secondary)" }}>
+              Runs created within the last {activeDays} days (after{" "}
+              <strong>{formatDate(archiveCutoff)}</strong>). Fully visible on the Runs page.
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 12,
+                height: 12,
+                borderRadius: "50%",
+                backgroundColor: "var(--chart-warning)",
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>Archive-ready</span>
+            <span style={{ color: "var(--text-secondary)" }}>
+              Runs created between {activeDays}–{archiveDays} days ago (between{" "}
+              <strong>{formatDate(purgeCutoff)}</strong> and{" "}
+              <strong>{formatDate(archiveCutoff)}</strong>). Auto-archived hourly — hidden from
+              Runs but restorable from the Archives page.
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 12,
+                height: 12,
+                borderRadius: "50%",
+                backgroundColor: "var(--chart-danger)",
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>Purge-ready</span>
+            <span style={{ color: "var(--text-secondary)" }}>
+              Runs created more than {archiveDays} days ago (before{" "}
+              <strong>{formatDate(purgeCutoff)}</strong>). Auto-purged hourly — permanently
+              deleted including all on-disk artifacts. Use the Archives page to manually purge
+              sooner or restore before the cutoff.
+            </span>
+          </div>
+        </div>
       </section>
 
       <section className="chart-grid">
         <article className="panel">
-          <DistributionDonut title="Lifecycle State" data={chartData.lifecycle} emptyLabel="No run lifecycle data" />
+          <DistributionDonut
+            title="Lifecycle Distribution"
+            data={chartData.lifecycle}
+            emptyLabel="No run lifecycle data"
+          />
         </article>
         <article className="panel">
-          <HorizontalBarChart title="Queue Pressure" data={chartData.queue} emptyLabel="No retention pressure" />
-        </article>
-      </section>
-
-      <section className="grid two">
-        <article className="panel">
-          <h2 className="section-title">Purge Safety</h2>
-          <div className="grid" style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
-            <div><strong style={{ color: "var(--text-primary)" }}>Status</strong>: {summary?.status ?? "--"}</div>
-            <div><strong style={{ color: "var(--text-primary)" }}>Mode</strong>: {purgeSafety?.mode ?? "manual-review"}</div>
-            <div><strong style={{ color: "var(--text-primary)" }}>Raw purge enabled</strong>: {purgeSafety?.raw_artifact_purge_enabled ? "yes" : "no"}</div>
-            <div><strong style={{ color: "var(--text-primary)" }}>Retained summary required</strong>: {purgeSafety?.retained_summary_required ? "yes" : "no"}</div>
-          </div>
-        </article>
-
-        <article className="panel">
-          <h2 className="section-title">Retained Summary Fields</h2>
-          {summary?.retained_summary_fields?.length ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-              {summary.retained_summary_fields.map((field) => (
-                <span key={field} className="status-pill status-info">{field}</span>
-              ))}
-            </div>
-          ) : (
-            <div className="chart-empty">Retained summary field list unavailable.</div>
-          )}
+          <HorizontalBarChart
+            title="Queue Pressure"
+            data={chartData.queue}
+            emptyLabel="No retention pressure"
+          />
         </article>
       </section>
     </div>

@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from ..auth.policies import require_permission
-from .models import EmailSettingsUpdateRequest, TimezonePolicyUpdateRequest
+from .models import EmailSettingsUpdateRequest, RetentionPolicyUpdateRequest, TimezonePolicyUpdateRequest
 from . import service
 
 router = APIRouter(tags=["system"])
@@ -40,3 +40,16 @@ def set_email_settings(
 @router.post("/api/v1/system/email/test")
 def send_test_email(current_user: dict = Depends(require_permission("system", "configure"))) -> dict[str, Any]:
     return service.send_test_email()
+
+
+@router.get("/api/v1/system/retention")
+def get_retention_policy(current_user: dict = Depends(require_permission("system", "read"))) -> dict[str, Any]:
+    return service.get_retention_policy()
+
+
+@router.put("/api/v1/system/retention")
+def set_retention_policy(
+    request: RetentionPolicyUpdateRequest,
+    current_user: dict = Depends(require_permission("system", "configure")),
+) -> dict[str, Any]:
+    return service.set_retention_policy(request)
