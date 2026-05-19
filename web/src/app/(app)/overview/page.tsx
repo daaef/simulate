@@ -1,10 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DistributionDonut } from "../../../components/charts/DistributionDonut";
 import { HorizontalBarChart } from "../../../components/charts/HorizontalBarChart";
 import { Sparkline } from "../../../components/charts/Sparkline";
+import { CollapsibleSection } from "../../../components/CollapsibleSection";
+import { ErrorBanner } from "../../../components/ErrorBanner";
+import { LastUpdatedIndicator } from "../../../components/LastUpdatedIndicator";
+import { PageLoadingSkeleton } from "../../../components/PageLoadingSkeleton";
 import LatestRunCommandCenter from "../../../components/overview/LatestRunCommandCenter";
 
 import {
@@ -70,56 +74,60 @@ export default function OverviewPage() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [latestRunOverview, setLatestRunOverview] = useState<LatestRunOverview | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+
+  const loadOverview = useCallback(async () => {
+    try {
+      const [
+        summaryPayload,
+        healthPayload,
+        archivePayload,
+        retentionPayload,
+        schedulePayload,
+        alertsPayload,
+        runsPayload,
+        latestRunPayload,
+      ] = await Promise.all([
+        fetchDashboardSummary(),
+        fetchHealth(),
+        fetchArchiveSummary(),
+        fetchRetentionSummary(),
+        fetchScheduleSummary(),
+        fetchAlerts(),
+        fetchRuns(50, 0),
+        fetchLatestRunOverview(),
+      ]);
+      setSummary(summaryPayload);
+      setHealth(healthPayload);
+      setArchiveSummary(archivePayload);
+      setRetentionSummary(retentionPayload);
+      setScheduleSummary(schedulePayload);
+      setAlerts(alertsPayload);
+      setRecentRuns(runsPayload.runs);
+      setLatestRunOverview(latestRunPayload);
+      setError(null);
+      setLastUpdatedAt(new Date());
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof ApiRequestError
+          ? caughtError.message
+          : caughtError instanceof Error
+            ? caughtError.message
+            : "Failed to load overview";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    const load = async () => {
-      try {
-        const [
-          summaryPayload,
-          healthPayload,
-          archivePayload,
-          retentionPayload,
-          schedulePayload,
-          alertsPayload,
-          runsPayload,
-          latestRunPayload,
-        ] = await Promise.all([
-          fetchDashboardSummary(),
-          fetchHealth(),
-          fetchArchiveSummary(),
-          fetchRetentionSummary(),
-          fetchScheduleSummary(),
-          fetchAlerts(),
-          fetchRuns(50, 0),
-          fetchLatestRunOverview(),
-        ]);
-        if (!active) return;
-        setSummary(summaryPayload);
-        setHealth(healthPayload);
-        setArchiveSummary(archivePayload);
-        setRetentionSummary(retentionPayload);
-        setScheduleSummary(schedulePayload);
-        setAlerts(alertsPayload);
-        setRecentRuns(runsPayload.runs);
-        setLatestRunOverview(latestRunPayload);
-        setError(null);
-      } catch (caughtError) {
-        if (!active) return;
-        const message =
-          caughtError instanceof ApiRequestError
-            ? caughtError.message
-            : caughtError instanceof Error
-              ? caughtError.message
-              : "Failed to load overview";
-        setError(message);
-      }
-    };
-    void load();
-    return () => {
-      active = false;
-    };
-  }, []);
+    void loadOverview();
+    const timer = window.setInterval(() => {
+      void loadOverview();
+    }, 45000);
+    return () => window.clearInterval(timer);
+  }, [loadOverview]);
 
   const cards = [
     { label: "Total Runs", value: summary?.total_runs ?? "--" },
@@ -177,7 +185,10 @@ export default function OverviewPage() {
   return (
     <div className="page-shell">
       <section className="page-header">
-        <h1 className="page-title">Operations Overview</h1>
+        <div className="page-header__meta">
+          <h1 className="page-title">Operations Overview</h1>
+          <LastUpdatedIndicator updatedAt={lastUpdatedAt} onRefresh={() => void loadOverview()} />
+        </div>
         <p className="page-subtitle">
           Live simulator posture, backlog, schedule health, and recent failure pressure. Use the same vocabulary everywhere:{" "}
           <strong>Up</strong> (healthy enough to operate), <strong>Degraded</strong> (partial risk—alerts, backlog, or flaky
@@ -185,13 +196,19 @@ export default function OverviewPage() {
         </p>
       </section>
 
-      {error ? <div className="error-banner" style={{ padding: "12px 16px" }}>{error}</div> : null}
+      {error ? <ErrorBanner message={error} onRetry={() => void loadOverview()} /> : null}
+
+      {isLoading && !summary ? <PageLoadingSkeleton statCount={4} panelCount={2} /> : null}
+
       <LatestRunCommandCenter overview={latestRunOverview} />
 
-      <section id="which-simulation-flow" className="panel" aria-labelledby="which-flow-title">
-        <h2 id="which-flow-title" className="section-title">
-          Which simulation should I run?
-        </h2>
+      <CollapsibleSection
+        title="Which simulation should I run?"
+        defaultExpanded={false}
+        storageKey="overview-which-simulation"
+        className="panel"
+      >
+        <section id="which-simulation-flow" aria-labelledby="which-flow-title">
         <ol style={{ margin: "0 0 12px 1.1rem", lineHeight: 1.55, color: "var(--text-secondary)" }}>
           <li>
             <strong style={{ color: "var(--text-primary)" }}>Is the platform healthy end-to-end?</strong> Run{" "}
@@ -211,7 +228,8 @@ export default function OverviewPage() {
           Plans, flags, and advanced launcher fields are documented in <strong>SIMULATOR_GUIDE.md</strong> (sections{" "}
           <em>Operator observability</em> and <em>Operator GUI (web)</em>) and in the README <em>Configuration Model</em> / CLI sections.
         </p>
-      </section>
+        </section>
+      </CollapsibleSection>
 
       {summary ? (
         <section className="panel" aria-label="Recent run outcomes">

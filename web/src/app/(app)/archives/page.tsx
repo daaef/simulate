@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ErrorBanner } from "../../../components/ErrorBanner";
+import { LastUpdatedIndicator } from "../../../components/LastUpdatedIndicator";
+import { useFocusTrap } from "../../../lib/useFocusTrap";
 import { DistributionDonut } from "../../../components/charts/DistributionDonut";
 import { HorizontalBarChart } from "../../../components/charts/HorizontalBarChart";
 import {
@@ -88,6 +91,8 @@ interface PurgeConfirmState {
   label: string;
 }
 
+const PURGE_CONFIRM_PHRASE = "purge";
+
 function PurgeConfirmModal({
   state,
   onConfirm,
@@ -98,6 +103,11 @@ function PurgeConfirmModal({
   onCancel: () => void;
 }) {
   const count = state.ids.length;
+  const [confirmText, setConfirmText] = useState("");
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(true, panelRef);
+  const canConfirm = confirmText.trim().toLowerCase() === PURGE_CONFIRM_PHRASE;
+
   return (
     <div
       style={{
@@ -112,8 +122,13 @@ function PurgeConfirmModal({
         justifyContent: "center",
         zIndex: 1000,
       }}
+      role="presentation"
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="purge-confirm-title"
         style={{
           backgroundColor: "var(--bg-secondary)",
           padding: "24px",
@@ -122,16 +137,28 @@ function PurgeConfirmModal({
           border: "1px solid var(--border-primary)",
         }}
       >
-        <h3 style={{ margin: "0 0 12px 0", color: "var(--text-primary)" }}>
+        <h3 id="purge-confirm-title" style={{ margin: "0 0 12px 0", color: "var(--text-primary)" }}>
           Permanently delete {count === 1 ? state.label : `${count} items`}?
         </h3>
-        <p style={{ margin: "0 0 20px 0", color: "var(--text-secondary)", fontSize: "14px" }}>
+        <p style={{ margin: "0 0 12px 0", color: "var(--text-secondary)", fontSize: "14px" }}>
           This permanently removes {count === 1 ? "this item" : "these items"} and all associated
           artifacts. It cannot be undone.
         </p>
-        <div style={{ display: "flex", gap: "12px" }}>
+        <label className="muted" style={{ fontSize: "13px", display: "block" }}>
+          Type <strong>{PURGE_CONFIRM_PHRASE}</strong> to confirm
+          <input
+            className="purge-confirm-input"
+            value={confirmText}
+            onChange={(event) => setConfirmText(event.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <div style={{ display: "flex", gap: "12px", marginTop: 16 }}>
           <button
+            type="button"
             onClick={onConfirm}
+            disabled={!canConfirm}
             style={{
               flex: 1,
               padding: "10px 16px",
@@ -139,13 +166,15 @@ function PurgeConfirmModal({
               color: "var(--method-delete-text)",
               border: "1px solid var(--method-delete-border)",
               borderRadius: "6px",
-              cursor: "pointer",
+              cursor: canConfirm ? "pointer" : "not-allowed",
               fontWeight: 500,
+              opacity: canConfirm ? 1 : 0.55,
             }}
           >
             Delete permanently
           </button>
           <button
+            type="button"
             onClick={onCancel}
             className="secondary"
             style={{ flex: 1, padding: "10px 16px", borderRadius: "6px", cursor: "pointer", fontWeight: 500 }}
@@ -226,6 +255,7 @@ export default function ArchivesPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [purgeConfirm, setPurgeConfirm] = useState<PurgeConfirmState | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
 
   // Selection state per section
   const [selectedRunIds, setSelectedRunIds] = useState<Set<number>>(new Set());
@@ -233,36 +263,29 @@ export default function ArchivesPage() {
   const [selectedScheduleIds, setSelectedScheduleIds] = useState<Set<number>>(new Set());
   const [selectedMappingIds, setSelectedMappingIds] = useState<Set<number>>(new Set());
 
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      try {
-        const [summaryPayload, retentionPayload, runsPayload, profilesPayload, schedulesPayload, mappingsPayload] =
-          await Promise.all([
-            fetchArchiveSummary(),
-            fetchRetentionSummary(),
-            fetchArchiveRuns(100, 0),
-            fetchArchivedProfiles(),
-            fetchArchivedSchedules(),
-            fetchArchivedIntegrationMappings(),
-          ]);
-        if (!active) return;
-        setSummary(summaryPayload);
-        setRetentionSummary(retentionPayload);
-        setRuns(runsPayload.runs);
-        setArchivedProfiles(profilesPayload);
-        setArchivedSchedules(schedulesPayload);
-        setArchivedMappings(mappingsPayload);
-        setError(null);
-      } catch (caughtError) {
-        if (active) setError(toMessage(caughtError));
-      }
-    };
-    void load();
-    return () => {
-      active = false;
-    };
+  const loadArchives = useCallback(async () => {
+    const [summaryPayload, retentionPayload, runsPayload, profilesPayload, schedulesPayload, mappingsPayload] =
+      await Promise.all([
+        fetchArchiveSummary(),
+        fetchRetentionSummary(),
+        fetchArchiveRuns(100, 0),
+        fetchArchivedProfiles(),
+        fetchArchivedSchedules(),
+        fetchArchivedIntegrationMappings(),
+      ]);
+    setSummary(summaryPayload);
+    setRetentionSummary(retentionPayload);
+    setRuns(runsPayload.runs);
+    setArchivedProfiles(profilesPayload);
+    setArchivedSchedules(schedulesPayload);
+    setArchivedMappings(mappingsPayload);
+    setError(null);
+    setLastUpdatedAt(new Date());
   }, []);
+
+  useEffect(() => {
+    void loadArchives().catch((caughtError) => setError(toMessage(caughtError)));
+  }, [loadArchives]);
 
   // ── Filtered lists ────────────────────────────────────────────────────────
 
@@ -474,18 +497,17 @@ export default function ArchivesPage() {
       ) : null}
 
       <section className="page-header">
-        <h1 className="page-title">Archives</h1>
+        <div className="page-header__meta">
+          <h1 className="page-title">Archives</h1>
+          <LastUpdatedIndicator updatedAt={lastUpdatedAt} onRefresh={() => void loadArchives()} />
+        </div>
         <p className="page-subtitle">
           Items deleted from their main pages land here. Restore them to bring them back, or delete
           permanently to remove them forever.
         </p>
       </section>
 
-      {error ? (
-        <div className="error-banner" style={{ padding: "12px 16px" }}>
-          {error}
-        </div>
-      ) : null}
+      {error ? <ErrorBanner message={error} onRetry={() => void loadArchives()} /> : null}
 
       {/* Policy at a glance */}
       <section className="grid four">

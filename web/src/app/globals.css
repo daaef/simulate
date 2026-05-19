@@ -2056,3 +2056,338 @@ pre.log {
     display: none;
   }
 }
+
+/* ── Pagination ── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 4px 4px;
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* reset the global width:100% for pagination buttons
+.pagination-controls button,
+.pagination button {
+  width: auto;
+} */
+
+.pagination-button,
+.pagination-page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--button-secondary);
+  color: var(--button-secondary-text);
+  border: 1px solid var(--border-primary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.pagination-button:hover:not(:disabled),
+.pagination-page:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-secondary);
+}
+
+.pagination-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: var(--button-secondary);
+  color: var(--button-secondary-text);
+  border-color: var(--border-primary);
+}
+
+.pagination-page.active {
+  background: var(--focus-ring);
+  color: #fff;
+  border-color: var(--focus-ring);
+}
+
+.pagination-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  pointer-events: none;
+  user-select: none;
+}
+
+.pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* App nav live indicator */
+.app-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-nav-live-badge {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chart-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--chart-success) 35%, transparent);
+  animation: nav-live-pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes nav-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(0.92);
+  }
+}
+
+/* Error banner with retry */
+.error-banner--actionable {
+  padding: 12px 16px;
+}
+
+.error-banner__body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.error-banner__retry {
+  width: auto;
+  flex-shrink: 0;
+}
+
+.error-banner__details {
+  margin-top: 8px;
+}
+
+/* Last updated indicator */
+.last-updated {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.last-updated__refresh {
+  width: auto;
+}
+
+.page-header__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Loading skeletons */
+.page-loading-skeleton {
+  display: grid;
+  gap: 20px;
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-tertiary) 0%,
+    var(--surface-hover) 50%,
+    var(--bg-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-line--short {
+  width: 40%;
+}
+
+.skeleton-line--medium {
+  width: 55%;
+}
+
+.skeleton-line--tall {
+  width: 70%;
+  height: 28px;
+  margin-top: 8px;
+}
+
+.skeleton-stat {
+  min-height: 88px;
+}
+
+.skeleton-panel {
+  min-height: 140px;
+  display: grid;
+  gap: 10px;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Flow planner drawer */
+.flow-planner-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.flow-planner-drawer__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  padding: 0;
+}
+
+.flow-planner-drawer__panel {
+  position: relative;
+  z-index: 1;
+  width: min(920px, 100vw);
+  max-width: 100%;
+  height: 100%;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border-primary);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15);
+}
+
+.flow-planner-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.flow-planner-drawer__body {
+  overflow: auto;
+  padding: 16px 20px 24px;
+}
+
+/* Run detail breadcrumb */
+.run-detail-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.run-detail-breadcrumb a {
+  color: var(--link-color);
+  text-decoration: none;
+}
+
+.run-detail-breadcrumb a:hover {
+  color: var(--link-color-hover);
+  text-decoration: underline;
+}
+
+.run-detail-breadcrumb__sep {
+  color: var(--text-secondary);
+}
+
+/* JSON editor validation */
+.json-editor-error {
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+  background: var(--error-bg);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.json-editor-valid {
+  border: 1px solid var(--status-success-border);
+  color: var(--status-success-text);
+  background: var(--status-success-bg);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+/* Purge confirmation */
+.purge-confirm-input {
+  width: 100%;
+  margin-top: 12px;
+}
+
+/* Compact app header */
+.app-brand {
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 24px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.app-brand__short {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .app-brand__full {
+    display: none;
+  }
+
+  .app-brand__short {
+    display: inline;
+  }
+
+  .app-nav-link {
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-header-inner {
+    padding: 12px 16px !important;
+  }
+}

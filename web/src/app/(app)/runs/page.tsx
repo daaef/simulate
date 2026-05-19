@@ -4,12 +4,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CollapsibleSection } from "../../../components/CollapsibleSection";
-import { ThemeToggle } from "../../../components/ThemeToggle";
-import UserProfile from "../../../components/UserProfile";
+import { ErrorBanner } from "../../../components/ErrorBanner";
+import { PageLoadingSkeleton } from "../../../components/PageLoadingSkeleton";
 import { useRole } from "../../../contexts/RoleContext";
-import AdminDashboard from "../../../components/AdminDashboard";
 import DeleteRunModal from "../../../components/runs/DeleteRunModal";
-import FlowPlannerGuide from "../../../components/runs/FlowPlannerGuide";
+import FlowPlannerDrawer from "../../../components/runs/FlowPlannerDrawer";
 import RecentRunsTable from "../../../components/runs/RecentRunsTable";
 import ActiveRunsStrip from "../../../components/runs/ActiveRunsStrip";
 import RunLaunchHelpSidebar from "../../../components/runs/RunLaunchHelpSidebar";
@@ -388,7 +387,7 @@ function makeUiError(
 }
 
 export default function App() {
-  const { canCreateRuns, isAdmin } = useRole();
+  const { canCreateRuns } = useRole();
   const [flows, setFlows] = useState<string[]>([]);
   const [flowCapabilities, setFlowCapabilities] = useState<Record<string, FlowCapability>>({});
   const [runs, setRuns] = useState<RunRow[]>([]);
@@ -398,6 +397,8 @@ export default function App() {
   const router = useRouter();
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [guideTab, setGuideTab] = useState<GuideTab>("flows");
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isProfileSubmitting, setIsProfileSubmitting] = useState(false);
   const [isProfileLaunching, setIsProfileLaunching] = useState(false);
@@ -417,6 +418,8 @@ export default function App() {
   const [rotateCount, setRotateCount] = useState(0);
   const profilesSectionRef = useRef<HTMLDivElement | null>(null);
   const profileNameInputRef = useRef<HTMLInputElement | null>(null);
+  const liveConsoleRef = useRef<HTMLDivElement | null>(null);
+  const previousActiveCountRef = useRef(0);
   const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
   const backendHealthyRef = useRef<boolean | null>(null);
   const allowedPlanPaths = useMemo(
@@ -533,25 +536,29 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const refreshRunsAndSummary = () => {
+    return Promise.all([fetchRuns(RUNS_PER_PAGE, runsOffset), fetchDashboardSummary()])
+      .then(([runsPayload, summaryPayload]) => {
+        setRuns(runsPayload.runs);
+        setRunsTotal(runsPayload.total);
+        setSummary(summaryPayload);
+        setBackendHealthy(true);
+        clearErrorForSource("runs-summary");
+        if (!selectedRunId && runsPayload.runs[0]) {
+          setSelectedRunId(runsPayload.runs[0].id);
+        }
+      })
+      .catch((err: unknown) =>
+        setErrorForSource("runs-summary", err, "Failed to refresh runs and dashboard summary.")
+      )
+      .finally(() => setIsInitialLoading(false));
+  };
+
   useEffect(() => {
-    const refreshRunsAndSummary = () => {
-      Promise.all([fetchRuns(RUNS_PER_PAGE, runsOffset), fetchDashboardSummary()])
-        .then(([runsPayload, summaryPayload]) => {
-          setRuns(runsPayload.runs);
-          setRunsTotal(runsPayload.total);
-          setSummary(summaryPayload);
-          setBackendHealthy(true);
-          clearErrorForSource("runs-summary");
-          if (!selectedRunId && runsPayload.runs[0]) {
-            setSelectedRunId(runsPayload.runs[0].id);
-          }
-        })
-        .catch((err: unknown) =>
-          setErrorForSource("runs-summary", err, "Failed to refresh runs and dashboard summary.")
-        );
-    };
-    refreshRunsAndSummary();
-    const timer = window.setInterval(refreshRunsAndSummary, 5000);
+    void refreshRunsAndSummary();
+    const timer = window.setInterval(() => {
+      void refreshRunsAndSummary();
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [selectedRunId, runsOffset]);
 
@@ -576,6 +583,17 @@ export default function App() {
       setIsLiveConsoleExpanded(false);
     }
   }, [activeRuns.length]);
+
+  useEffect(() => {
+    const previousCount = previousActiveCountRef.current;
+    if (activeRuns.length > 0 && (activeRuns.length > previousCount || isLiveConsoleExpanded)) {
+      setIsLiveConsoleExpanded(true);
+      window.requestAnimationFrame(() => {
+        liveConsoleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+    previousActiveCountRef.current = activeRuns.length;
+  }, [activeRuns.length, isLiveConsoleExpanded]);
 
   function onSelectActiveRun(runId: number) {
     setSelectedRunId(runId);
@@ -674,6 +692,9 @@ export default function App() {
       });
       setSelectedRunId(created.id);
       setIsLiveConsoleExpanded(true);
+      window.requestAnimationFrame(() => {
+        liveConsoleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
       const [runsPayload, summaryPayload] = await Promise.all([
         fetchRuns(RUNS_PER_PAGE, runsOffset),
         fetchDashboardSummary()
@@ -897,11 +918,15 @@ export default function App() {
       <main className="grid" style={{ gap: 16 }}>
         <div className="panel grid" style={{ gap: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h1 style={{ margin: 0 }}>Fainzy Simulator Web Control</h1>
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-              <ThemeToggle />
-              <UserProfile />
-            </div>
+            <h1 style={{ margin: 0 }}>Runs</h1>
+            <button
+              type="button"
+              className="secondary small"
+              style={{ width: "auto" }}
+              onClick={() => setIsGuideOpen(true)}
+            >
+              View guide
+            </button>
           </div>
           <div className="muted">
             Run simulator flows, monitor progress, inspect stories/reports/events, and track system health.
@@ -928,17 +953,43 @@ export default function App() {
         </div>
 
         {error ? (
-          <div className="panel error-banner">
-            <div>{error.message}</div>
-            {error.details ? (
-              <details>
-                <summary>Details</summary>
-                <pre className="error-details">
-                  <code>{error.details}</code>
-                </pre>
-              </details>
-            ) : null}
-          </div>
+          <ErrorBanner
+            message={error.message}
+            onRetry={() => {
+              if (error.source === "runs-summary") {
+                void refreshRunsAndSummary();
+              } else if (error.source === "healthz") {
+                fetchHealth()
+                  .then(() => {
+                    setBackendHealthy(true);
+                    clearErrorForSource("healthz");
+                  })
+                  .catch((err: unknown) => setErrorForSource("healthz", err, "Backend API is unavailable."));
+              } else if (error.source === "flows") {
+                fetchFlows()
+                  .then((payload: FlowsResponse) => {
+                    setFlows(payload.flows);
+                    setFlowCapabilities(payload.capabilities || {});
+                    clearErrorForSource("flows");
+                  })
+                  .catch((err: unknown) => setErrorForSource("flows", err, "Failed to load simulator flows."));
+              }
+            }}
+            details={
+              error.details ? (
+                <details>
+                  <summary>Details</summary>
+                  <pre className="error-details">
+                    <code>{error.details}</code>
+                  </pre>
+                </details>
+              ) : null
+            }
+          />
+        ) : null}
+
+        {isInitialLoading && summary.total_runs === 0 ? (
+          <PageLoadingSkeleton statCount={3} panelCount={1} />
         ) : null}
 
         <section className="runs-stat-stack" aria-label="Run statistics">
@@ -1009,13 +1060,27 @@ export default function App() {
         </section>
 
         {canCreateRuns ? (
-            <CollapsibleSection title="Start Run" defaultExpanded={true}>
+            <CollapsibleSection title="Start Run" defaultExpanded={true} storageKey="runs-start-run">
               <div className="grid start-run-stack" style={{ gap: 16 }}>
                 <ActiveRunsStrip
                   runs={activeRuns}
                   selectedRunId={selectedRunId}
                   onSelectRun={onSelectActiveRun}
                 />
+                {activeRuns.length > 0 ? (
+                  <button
+                    type="button"
+                    className="secondary small jump-console-button"
+                    style={{ width: "auto" }}
+                    onClick={() => {
+                      setIsLiveConsoleExpanded(true);
+                      liveConsoleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    Jump to live console ({activeRuns.length} active)
+                  </button>
+                ) : null}
+                <div ref={liveConsoleRef}>
                 <RunLiveConsole
                   selectedRun={selectedRun}
                   log={logText}
@@ -1024,6 +1089,7 @@ export default function App() {
                   onToggleExpanded={() => setIsLiveConsoleExpanded(!isLiveConsoleExpanded)}
                   logClassForLine={logClassForLine}
                 />
+                </div>
                 <div className="launch-config-row">
                   <RunLaunchPanel
                     flows={flows}
@@ -1096,17 +1162,6 @@ export default function App() {
         ) : null}
 
 
-        <div id="flow-planner-guide">
-        <CollapsibleSection title="Flow Planner & Command Guide" defaultExpanded={false}>
-          <FlowPlannerGuide
-            guideTab={guideTab}
-            onGuideTabChange={setGuideTab}
-            architectureContent={ARCHITECTURE_CONTENT}
-            simulatorGuideContent={SIMULATOR_GUIDE_CONTENT}
-          />
-        </CollapsibleSection>
-        </div>
-
         <CollapsibleSection title="Recent Runs" defaultExpanded={true}>
           <RecentRunsTable
             runs={runs}
@@ -1121,17 +1176,6 @@ export default function App() {
           />
         </CollapsibleSection>
 
-        {/* Admin Dashboard - Only visible to admins */}
-        {isAdmin && (
-          <CollapsibleSection title="Admin Dashboard" defaultExpanded={false}>
-            <div className="panel grid" style={{ gap: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <h2 style={{ margin: 0 }}>Admin Dashboard</h2>
-              </div>
-              <AdminDashboard />
-            </div>
-          </CollapsibleSection>
-        )}
 
         {/* Delete Confirmation Modal */}
         {deleteConfirmRun ? (
@@ -1144,6 +1188,15 @@ export default function App() {
             onCancel={() => setDeleteConfirmRun(null)}
           />
         ) : null}
+
+        <FlowPlannerDrawer
+          open={isGuideOpen}
+          onClose={() => setIsGuideOpen(false)}
+          guideTab={guideTab}
+          onGuideTabChange={setGuideTab}
+          architectureContent={ARCHITECTURE_CONTENT}
+          simulatorGuideContent={SIMULATOR_GUIDE_CONTENT}
+        />
       </main>
   );
 }

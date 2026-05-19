@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ErrorBanner } from "../../../components/ErrorBanner";
+import { LastUpdatedIndicator } from "../../../components/LastUpdatedIndicator";
 import {
   ApiRequestError,
   createSchedule,
@@ -171,6 +173,7 @@ export default function SchedulesPage() {
   const [stepRepeatCount, setStepRepeatCount] = useState(1);
   const [stepSpacingSeconds, setStepSpacingSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [busy, setBusy] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
   const loadInFlightRef = useRef(false);
@@ -255,6 +258,7 @@ export default function SchedulesPage() {
       if (!options?.silent) {
         setError(null);
       }
+      setLastUpdatedAt(new Date());
     } finally {
       loadInFlightRef.current = false;
     }
@@ -511,11 +515,14 @@ export default function SchedulesPage() {
   return (
     <div className="page-shell">
       <section className="page-header">
-        <h1 className="page-title">Schedules</h1>
+        <div className="page-header__meta">
+          <h1 className="page-title">Schedules</h1>
+          <LastUpdatedIndicator updatedAt={lastUpdatedAt} onRefresh={() => void load()} />
+        </div>
         <p className="page-subtitle">Profile-backed scheduled runs and campaign launches.</p>
       </section>
 
-      {error ? <div className="error-banner" style={{ padding: "12px 16px" }}>{error}</div> : null}
+      {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
       <section className="panel next-trigger-panel">
         <div className="next-trigger-copy">

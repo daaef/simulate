@@ -1,6 +1,8 @@
 "use client";
 
+import { useRef } from "react";
 import type { RunRow } from "../../lib/api";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 
 interface DeleteRunModalProps {
   run: RunRow;
@@ -9,6 +11,9 @@ interface DeleteRunModalProps {
 }
 
 export default function DeleteRunModal({ run, onConfirm, onCancel }: DeleteRunModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(true, panelRef);
+
   return (
     <div
       style={{
@@ -23,8 +28,13 @@ export default function DeleteRunModal({ run, onConfirm, onCancel }: DeleteRunMo
         justifyContent: "center",
         zIndex: 1000,
       }}
+      role="presentation"
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-run-title"
         style={{
           backgroundColor: "var(--bg-secondary)",
           padding: "24px",
@@ -33,13 +43,16 @@ export default function DeleteRunModal({ run, onConfirm, onCancel }: DeleteRunMo
           border: "1px solid var(--border-primary)",
         }}
       >
-        <h3 style={{ margin: "0 0 12px 0", color: "var(--text-primary)" }}>Archive run #{run.id}?</h3>
+        <h3 id="delete-run-title" style={{ margin: "0 0 12px 0", color: "var(--text-primary)" }}>
+          Archive run #{run.id}?
+        </h3>
         <p style={{ margin: "0 0 20px 0", color: "var(--text-secondary)", fontSize: "14px" }}>
           This will archive run #{run.id} — it will be hidden from the runs list but can be restored
           from the Archives page at any time.
         </p>
         <div style={{ display: "flex", gap: "12px" }}>
           <button
+            type="button"
             onClick={onConfirm}
             style={{
               flex: 1,
@@ -55,6 +68,7 @@ export default function DeleteRunModal({ run, onConfirm, onCancel }: DeleteRunMo
             Archive
           </button>
           <button
+            type="button"
             onClick={onCancel}
             className="secondary"
             style={{

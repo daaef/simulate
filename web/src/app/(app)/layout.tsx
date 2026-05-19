@@ -25,6 +25,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           }}
         >
           <div
+            className="app-header-inner"
             style={{
               display: "flex",
               alignItems: "center",
@@ -41,16 +42,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 flexWrap: "wrap",
               }}
             >
-              <Link
-                href="/overview"
-                style={{
-                  color: "var(--text-primary)",
-                  textDecoration: "none",
-                  fontSize: "24px",
-                  fontWeight: 700,
-                }}
-              >
-                Fainzy Simulator
+              <Link href="/overview" className="app-brand">
+                <span className="app-brand__full">Fainzy Simulator</span>
+                <span className="app-brand__short">Fainzy</span>
               </Link>
 
               <AppNav />

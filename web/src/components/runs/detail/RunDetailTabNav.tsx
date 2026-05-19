@@ -12,7 +12,7 @@ interface RunDetailTabNavProps {
 
 const TAB_ROWS: Array<{ value: TabType; label: string; description: string }> = [
   { value: "overview", label: "Overview", description: "Operator summary, metrics, and visual health signals." },
-  { value: "story", label: "Story", description: "Human-readable narrative of what happened." },
+  { value: "story", label: "Plain English", description: "Human-readable narrative of what happened." },
   { value: "report", label: "Technical Report", description: "Full markdown proof document and trace summary." },
   { value: "traffic", label: "Traffic", description: "HTTP and event evidence from recorded artifacts." },
   { value: "console", label: "Console", description: "Raw simulator console output." },

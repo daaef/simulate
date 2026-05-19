@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ErrorBanner } from "../../../components/ErrorBanner";
 import { useRole } from "../../../contexts/RoleContext";
+import { useDebouncedValue } from "../../../lib/useDebouncedValue";
 import {
   ApiRequestError,
   createSimulationPlan,
@@ -165,6 +167,17 @@ export default function ConfigPage() {
     () => plans.find((plan) => plan.id === selectedPlanId) ?? null,
     [plans, selectedPlanId]
   );
+
+  const debouncedEditorValue = useDebouncedValue(editorValue, 300);
+  const jsonValidation = useMemo(() => {
+    try {
+      JSON.parse(debouncedEditorValue);
+      return { valid: true as const, message: "Valid JSON" };
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Invalid JSON";
+      return { valid: false as const, message };
+    }
+  }, [debouncedEditorValue]);
 
   async function loadPlans() {
     setIsLoading(true);
@@ -428,21 +441,29 @@ export default function ConfigPage() {
                 onChange={(event) => setEditorValue(event.target.value)}
                 rows={28}
                 spellCheck={false}
+                aria-invalid={!jsonValidation.valid}
                 style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
               />
             </label>
-            {error ? (
-              <div style={{ border: "1px solid #fca5a5", color: "#991b1b", borderRadius: 6, padding: "10px 12px" }}>
-                {error}
+            {!jsonValidation.valid ? (
+              <div className="json-editor-error" role="alert">
+                Invalid JSON: {jsonValidation.message}
               </div>
-            ) : null}
+            ) : (
+              <div className="json-editor-valid">{jsonValidation.message}</div>
+            )}
+            {error ? <ErrorBanner message={error} onRetry={() => void loadPlans()} /> : null}
             {message ? (
               <div style={{ border: "1px solid #86efac", color: "#166534", borderRadius: 6, padding: "10px 12px" }}>
                 {message}
               </div>
             ) : null}
             <div className="grid two">
-              <button type="button" disabled={isSaving || !planName.trim()} onClick={() => void savePlan()}>
+              <button
+                type="button"
+                disabled={isSaving || !planName.trim() || !jsonValidation.valid}
+                onClick={() => void savePlan()}
+              >
                 {isSaving ? "Saving..." : selectedPlanId ? "Save Plan" : "Create Plan"}
               </button>
               <button type="button" className="secondary" disabled={isSaving || !selectedPlanId} onClick={() => void removePlan()}>

@@ -50,13 +50,15 @@ export function CollapsibleSection({
   return (
     <div className={`collapsible-section ${className}`}>
       {title && (
-        <div 
+        <div
           className={`collapsible-header ${headerClassName}`}
           onClick={toggle}
           role="button"
           tabIndex={0}
+          aria-expanded={isExpanded}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
               toggle();
             }
           }}

@@ -82,18 +82,18 @@ export function Pagination({ total, limit, offset, onPageChange }: PaginationPro
 
   if (totalPages <= 1) {
     return (
-      <div className="pagination">
+      <nav className="pagination" aria-label="Pagination">
         <span className="pagination-info">
-          Showing {startItem}-{endItem} of {total}
+          Showing {startItem}–{endItem} of {total}
         </span>
-      </div>
+      </nav>
     );
   }
 
   return (
-    <div className="pagination">
+    <nav className="pagination" aria-label="Pagination">
       <span className="pagination-info">
-        Showing {startItem}-{endItem} of {total}
+        Showing {startItem}–{endItem} of {total}
       </span>
       
       <div className="pagination-controls">
@@ -149,6 +149,6 @@ export function Pagination({ total, limit, offset, onPageChange }: PaginationPro
           </svg>
         </button>
       </div>
-    </div>
+    </nav>
   );
 }

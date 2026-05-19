@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { fetchDashboardSummary } from "../lib/api";
 
 const navItems = [
   { href: "/overview", label: "Overview" },
@@ -9,29 +11,63 @@ const navItems = [
   { href: "/config", label: "Config" },
   { href: "/schedules", label: "Schedules" },
   { href: "/archives", label: "Archives" },
-  { href: "/admin/users", label: "Admin" },
+  { href: "/admin/users", label: "Admin", title: "Users & system settings" },
 ];
 
 function isActivePath(pathname: string, href: string): boolean {
   if (href === "/overview") return pathname === href || pathname === "/";
+  if (href === "/admin/users") return pathname.startsWith("/admin");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 export function AppNav() {
   const pathname = usePathname() || "/overview";
+  const [activeRunCount, setActiveRunCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refresh = () => {
+      fetchDashboardSummary()
+        .then((summary) => {
+          if (!cancelled) {
+            setActiveRunCount(summary.active_runs ?? 0);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setActiveRunCount(0);
+        });
+    };
+
+    refresh();
+    const timer = window.setInterval(refresh, 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   return (
     <nav className="app-nav" aria-label="Primary navigation">
       {navItems.map((item) => {
         const active = isActivePath(pathname, item.href);
+        const showLiveBadge = item.href === "/runs" && activeRunCount > 0;
         return (
           <Link
             key={item.href}
             href={item.href}
             className={`app-nav-link${active ? " active" : ""}`}
             aria-current={active ? "page" : undefined}
+            title={item.title}
           >
-            {item.label}
+            <span className="app-nav-link__label">{item.label}</span>
+            {showLiveBadge ? (
+              <span
+                className="app-nav-live-badge"
+                aria-label={`${activeRunCount} active run${activeRunCount === 1 ? "" : "s"}`}
+                title={`${activeRunCount} active run${activeRunCount === 1 ? "" : "s"}`}
+              />
+            ) : null}
           </Link>
         );
       })}

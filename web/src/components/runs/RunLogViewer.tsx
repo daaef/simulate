@@ -17,7 +17,7 @@ const RunLogViewer = forwardRef<HTMLPreElement, RunLogViewerProps>(function RunL
   }
 
   return (
-    <pre ref={ref} className="log">
+    <pre ref={ref} className="log" aria-live="polite" aria-relevant="additions text">
       {log.split("\n").map((line, idx) => (
         <span key={`${idx}-${line.length}`} className={logClassForLine(line)}>
           {line}

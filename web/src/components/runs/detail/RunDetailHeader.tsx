@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { RunRow } from "../../../lib/api";
 import { formatRelativeTime, formatRunDuration } from "../../../lib/time-format";
 
@@ -31,8 +32,15 @@ export default function RunDetailHeader({
 
   return (
     <div className="panel grid" style={{ gap: 12 }}>
+      <nav className="run-detail-breadcrumb" aria-label="Breadcrumb">
+        <Link href="/runs">Runs</Link>
+        <span className="run-detail-breadcrumb__sep" aria-hidden="true">
+          /
+        </span>
+        <span>Run #{run.id}</span>
+      </nav>
       <button onClick={onBack} className="secondary" style={{ width: "auto" }}>
-        Back to Runs
+        ← Back to Runs
       </button>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h1>Run #{run.id}</h1>
