@@ -125,6 +125,10 @@ RUN_QUEUED_START_GRACE_SECONDS = 10
 RUN_ORPHAN_LOG_IDLE_SECONDS = 60
 RUN_LOG_ACTIVITY_WINDOW_SECONDS = 30.0
 RUN_STARTUP_LOG_GRACE_SECONDS = 15.0
+# After the CLI exits, the worker thread may still parse stdout before updating the DB.
+RUN_POST_EXIT_FINALIZE_GRACE_SECONDS = 45.0
+_CONSOLE_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_CONSOLE_RICH_TAG_RE = re.compile(r"\[[^\]]*\]")
 ACTIVE_RUN_STATUSES = frozenset({"queued", "pending", "running", "cancelling"})
 ARTIFACT_FIELDS = ("report_path", "story_path", "events_path")
 EVENT_CACHE_LOCK = threading.Lock()
@@ -1619,12 +1623,22 @@ def _should_reconcile_stale_run(run: dict[str, Any], liveness: dict[str, Any]) -
         return (now - created).total_seconds() > RUN_QUEUED_START_GRACE_SECONDS
 
     if status in {"running", "cancelling"}:
-        if not liveness["has_live_process"]:
-            return True
+        if liveness["has_live_process"]:
+            return False
         log_path = _safe_path(run.get("log_path"))
         if log_path is not None and log_path.exists():
+            try:
+                lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                lines = []
+            if _infer_run_outcome_from_log(lines) is not None:
+                return True
             mtime = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc)
-            if (now - mtime).total_seconds() > RUN_ORPHAN_LOG_IDLE_SECONDS:
+            log_age = (now - mtime).total_seconds()
+            # CLI finished but API worker still finalizing — do not mark orphaned failed yet.
+            if log_age < RUN_POST_EXIT_FINALIZE_GRACE_SECONDS:
+                return False
+            if log_age > RUN_ORPHAN_LOG_IDLE_SECONDS:
                 return True
         started = _parse_run_timestamp(run.get("started_at"))
         if started is not None and (now - started).total_seconds() > RUN_ORPHAN_LOG_IDLE_SECONDS:
@@ -1634,13 +1648,24 @@ def _should_reconcile_stale_run(run: dict[str, Any], liveness: dict[str, Any]) -
     return False
 
 
+def _strip_simulator_console_line(line: str) -> str:
+    """Remove Rich/ANSI markup so log markers match plain simulator console output."""
+    plain = _CONSOLE_ANSI_RE.sub("", line)
+    return _CONSOLE_RICH_TAG_RE.sub("", plain)
+
+
 def _infer_run_outcome_from_log(lines: list[str]) -> tuple[str, str | None, int] | None:
     """Return terminal (status, error, exit_code) when simulator log proves completion."""
-    if any("Simulation failed:" in line for line in lines):
+    plain_lines = [_strip_simulator_console_line(line) for line in lines]
+    if any("Simulation failed:" in line for line in plain_lines):
         return "failed", "Simulation exited with error (from log).", 1
-    if any("Simulation stopped." in line for line in lines):
+    if any("Simulation stopped." in line for line in plain_lines):
         return "cancelled", None, 1
-    if any("main: report:" in line.lower() for line in lines):
+    for line in plain_lines:
+        parsed = _parse_artifact_paths(line)
+        if parsed is not None and parsed[0] == "report_path":
+            return "succeeded", None, 0
+    if any("main: report:" in line.lower() for line in plain_lines):
         return "succeeded", None, 0
     return None
 
@@ -2087,10 +2112,11 @@ def _parse_artifact_paths(line: str) -> tuple[str, str] | None:
         ("main: story:", "story_path"),
         ("main: events:", "events_path"),
     )
-    lowered = line.lower()
+    plain = _strip_simulator_console_line(line)
+    lowered = plain.lower()
     for marker, target in markers:
         if marker in lowered:
-            return target, line.split(marker, 1)[1].strip()
+            return target, plain.split(marker, 1)[1].strip()
     return None
 
 
@@ -2299,6 +2325,34 @@ def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
             handle.flush()
             captured_lines.append(line)
     return_code = process.wait()
+    with RUN_LOCK:
+        RUN_PROCESSES.pop(run_id, None)
+
+    # Publish terminal status immediately so GUI polls never see a false orphaned failure
+    # while this thread parses artifacts and identity from captured stdout.
+    finished_at = _utc_now()
+    if run_id in RUN_CANCELLED:
+        RUN_CANCELLED.discard(run_id)
+        _update_run(
+            run_id,
+            status="cancelled",
+            finished_at=finished_at,
+            exit_code=return_code,
+            error=None,
+        )
+    else:
+        terminal_status = "succeeded" if return_code == 0 else "failed"
+        terminal_error = (
+            None if return_code == 0 else f"Simulation exited with status {return_code}."
+        )
+        _update_run(
+            run_id,
+            status=terminal_status,
+            finished_at=finished_at,
+            exit_code=return_code,
+            error=terminal_error,
+        )
+
     artifacts = _capture_artifacts_from_lines(captured_lines)
 
     # Parse actual identity from captured output
@@ -2326,9 +2380,6 @@ def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
                             actual_phone = phone_digits
                     break
 
-    with RUN_LOCK:
-        RUN_PROCESSES.pop(run_id, None)
-
     # Build update fields with store_id and phone
     update_fields: dict[str, Any] = {}
     if actual_store_id:
@@ -2342,28 +2393,12 @@ def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
     if actual_store_name:
         update_fields["store_name"] = actual_store_name
 
-    if run_id in RUN_CANCELLED:
-        RUN_CANCELLED.discard(run_id)
+    if update_fields or artifacts:
         _update_run(
             run_id,
-            status="cancelled",
-            finished_at=_utc_now(),
-            exit_code=return_code,
             **artifacts,
             **update_fields,
         )
-        return
-    status = "succeeded" if return_code == 0 else "failed"
-    error = None if return_code == 0 else f"Simulation exited with status {return_code}."
-    _update_run(
-        run_id,
-        status=status,
-        finished_at=_utc_now(),
-        exit_code=return_code,
-        error=error,
-        **artifacts,
-        **update_fields,
-    )
 
 
 def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dict[str, Any]:

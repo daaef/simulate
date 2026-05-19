@@ -936,6 +936,8 @@ Catalog profiles and catalog-backed schedules are now deletable/archivable. On u
 
 Run rows include a `control` object (`can_stop`, `can_delete`, `actively_running`) so the GUI only enables **Stop** for runs that are `running` with a live process and log activity, and **Delete** for all other runs (including orphaned `running` rows after API restart).
 
+While a CLI run is finishing, the API worker sets terminal status from the subprocess exit code as soon as `wait()` returns, then enriches the row with artifact paths and resolved `store_id` / phone. Orphan reconciliation does not mark a run `failed` during the short post-exit window unless the log is idle; if the log already contains `main: report:` (including Rich-colored console lines), reconciliation finalizes as `succeeded` instead of `orphaned_run_no_live_process`.
+
 Key endpoints:
 
 ```bash

@@ -1193,6 +1193,34 @@ class RunControlTests(unittest.TestCase):
             self.assertEqual(payload.get("store_id"), "FZY_926025")
             self.assertEqual(payload.get("exit_code"), 0)
 
+    def test_infer_run_outcome_strips_rich_console_markup(self) -> None:
+        lines = [
+            "[green]main:[/] report: /tmp/runs/20260519T-free-coupon-FZY_926025-user5609/report.md",
+        ]
+        outcome = web_api._infer_run_outcome_from_log(lines)
+        self.assertEqual(outcome, ("succeeded", None, 0))
+
+    def test_reconcile_waits_while_log_recently_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = pathlib.Path(tmpdir) / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row(flow="free-coupon")
+            run_id = int(run["id"])
+            log_path = log_dir / f"run-{run_id}.log"
+            log_path.write_text("trace: still finalizing\n", encoding="utf-8")
+            web_api._update_run(
+                run_id,
+                status="running",
+                log_path=str(log_path),
+                started_at=web_api._utc_now(),
+            )
+            row = web_api._fetch_run_row(run_id)
+            liveness = web_api._run_liveness(row)
+            self.assertFalse(web_api._should_reconcile_stale_run(row, liveness))
+            reconciled = web_api._reconcile_stale_run(run_id, row)
+            self.assertIsNone(reconciled)
+            self.assertEqual(web_api._fetch_run_row(run_id)["status"], "running")
+
     def test_run_payload_includes_control_flags(self) -> None:
         run = self._create_run_row()
         run_id = int(run["id"])
