@@ -178,6 +178,12 @@ Keep actor and run behavior out of `.env`: do not set `USER_PHONE_NUMBER`, `STOR
 
 Admins can edit GUI-owned plans from `Config`. Use the saved plan path, for example `runs/gui-plans/daily-doctor.json`, in the Runs launcher or with `--plan`.
 
+Simulation plan API reserved-id semantics (`sim-actors`):
+- `GET /api/v1/simulation-plans/sim-actors` returns the default repo plan `sim_actors.json`.
+- The same endpoint returns `404` when `sim_actors.json` is missing or invalid JSON.
+- `POST /api/v1/simulation-plans` and `PUT /api/v1/simulation-plans/{id}` reject the reserved `sim-actors` id (`400`).
+- `GET /api/v1/simulation-plans` dedupes legacy GUI files with id `sim-actors` so the response contains one reserved default entry.
+
 ### Catalog run profiles and schedules
 
 When the API starts and initializes its database, it **idempotently** upserts seven built-in run profiles (stable `catalog_slug` values: `api-sweep-max`, `daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and one catalog schedule per profile.

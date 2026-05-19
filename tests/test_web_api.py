@@ -1744,7 +1744,17 @@ class SimulationPlansApiTests(unittest.TestCase):
         self.assertTrue(delete_response.json()["deleted"])
 
     def test_get_default_sim_actors_plan_by_id(self) -> None:
-        response = self.client.get("/api/v1/simulation-plans/sim-actors")
+        default_plan = {
+            "id": "sim-actors",
+            "name": "sim_actors",
+            "path": "sim_actors.json",
+            "content": {
+                "users": [{"phone": "+2348000001111"}],
+                "stores": [{"store_id": "FZY_123"}],
+            },
+        }
+        with mock.patch.object(web_api, "_default_sim_actors_plan_payload", return_value=default_plan):
+            response = self.client.get("/api/v1/simulation-plans/sim-actors")
 
         self.assertEqual(response.status_code, 200)
         plan = response.json()["plan"]

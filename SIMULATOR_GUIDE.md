@@ -233,6 +233,12 @@ The `Scenarios (trace only)` control in Advanced Mode Overrides is a searchable 
 Trace-context fields in the launcher: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, `enforce_websocket_gates`.
 Load-context fields in the launcher: `users`, `orders`, `interval`, `reject`, `continuous`, `all_users`, plus shared store/phone/provision controls.
 
+Simulation plan API reserved-id semantics (`sim-actors`):
+- `GET /api/v1/simulation-plans/sim-actors` returns the default `sim_actors.json` plan payload.
+- That endpoint returns `404` when the default file is missing or invalid.
+- Creating or updating GUI plans cannot use `sim-actors` as the plan id (`400`).
+- `GET /api/v1/simulation-plans` dedupes legacy GUI plan files whose id resolves to `sim-actors`, so only one reserved default entry appears.
+
 Run scope enforcement is strict to the selected plan:
 - Stores must come from plan `stores[]`.
 - Phones/users must come from plan `users[]`.
