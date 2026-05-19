@@ -326,27 +326,36 @@ export default function ConfigPage() {
 
       <div className="tabs" role="tablist" aria-label="Config sections">
         <button
+          id="config-tab-plans"
           type="button"
           role="tab"
+          tabIndex={0}
           aria-selected={activeTab === "plans"}
+          aria-controls="config-panel-plans"
           className={activeTab === "plans" ? "" : "secondary"}
           onClick={() => setActiveTab("plans")}
         >
           Plans
         </button>
         <button
+          id="config-tab-email"
           type="button"
           role="tab"
+          tabIndex={0}
           aria-selected={activeTab === "email"}
+          aria-controls="config-panel-email"
           className={activeTab === "email" ? "" : "secondary"}
           onClick={() => setActiveTab("email")}
         >
           Email
         </button>
         <button
+          id="config-tab-integration"
           type="button"
           role="tab"
+          tabIndex={0}
           aria-selected={activeTab === "integration"}
+          aria-controls="config-panel-integration"
           className={activeTab === "integration" ? "" : "secondary"}
           onClick={() => setActiveTab("integration")}
         >
@@ -354,8 +363,14 @@ export default function ConfigPage() {
         </button>
       </div>
 
-      {activeTab === "plans" ? (
-        <div className="grid two" style={{ alignItems: "start" }}>
+      <div
+        id="config-panel-plans"
+        role="tabpanel"
+        aria-labelledby="config-tab-plans"
+        hidden={activeTab !== "plans"}
+        className="grid two"
+        style={{ alignItems: "start" }}
+      >
           <section className="panel grid" style={{ gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <h2>Plans</h2>
@@ -432,11 +447,16 @@ export default function ConfigPage() {
               </button>
             </div>
           </section>
-        </div>
-      ) : null}
+      </div>
 
-      {activeTab === "email" ? (
-        <section className="panel grid" style={{ gap: 12 }}>
+      <section
+        id="config-panel-email"
+        role="tabpanel"
+        aria-labelledby="config-tab-email"
+        hidden={activeTab !== "email"}
+        className="panel grid"
+        style={{ gap: 12 }}
+      >
           <h2>Email Notifications</h2>
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input
@@ -522,9 +542,15 @@ export default function ConfigPage() {
             </button>
           </div>
         </section>
-      ) : null}
 
-      {activeTab === "integration" ? <IntegrationMappingsPanel /> : null}
+      <div
+        id="config-panel-integration"
+        role="tabpanel"
+        aria-labelledby="config-tab-integration"
+        hidden={activeTab !== "integration"}
+      >
+        <IntegrationMappingsPanel />
+      </div>
     </div>
   );
 }

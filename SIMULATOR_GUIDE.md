@@ -197,7 +197,7 @@ Sign-in for the web UI; redirects to `/overview` when already authenticated.
 
 ### Email notifications (operators)
 
-Failure emails (`run_failed`, `schedule_launch_failed`) append a short **“How to read this”** footer: failed run = process check failed; `/healthz` = control plane only; pointer to this guide. Configure triggers on **Config → Email Notifications**.
+Failure emails (`run_failed`, `schedule_launch_failed`) append a short **“How to read this”** footer: failed run = process check failed; `/healthz` = control plane only; pointer to this guide. Configure triggers on **Config → Email tab → Email Notifications**.
 
 ## 1) Inputs and Outputs
 
