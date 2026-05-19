@@ -403,6 +403,56 @@ class CookieSessionAuthTests(unittest.TestCase):
         finally:
             viewer_client.close()
 
+    def test_operator_can_delete_schedule_and_profile(self) -> None:
+        self.fake_auth.users["bob"]["role"] = "operator"
+        operator_client = TestClient(web_api.app)
+        try:
+            login = operator_client.post(
+                "/api/v1/auth/login",
+                json={"username": "bob", "password": "secret"},
+            )
+            self.assertEqual(login.status_code, 200)
+
+            profile_response = operator_client.post(
+                "/api/v1/run-profiles",
+                json={
+                    "name": f"operator-profile-{time.time_ns()}",
+                    "flow": "doctor",
+                    "plan": "sim_actors.json",
+                    "timing": "fast",
+                },
+            )
+            self.assertEqual(profile_response.status_code, 200)
+            profile_id = int(profile_response.json()["profile"]["id"])
+
+            schedule_response = operator_client.post(
+                "/api/v1/schedules",
+                json={
+                    "name": f"operator-schedule-{time.time_ns()}",
+                    "schedule_type": "simple",
+                    "profile_id": profile_id,
+                    "anchor_start_at": "2026-05-19T08:00:00Z",
+                    "period": "daily",
+                    "stop_rule": "never",
+                    "repeat": "daily",
+                    "runs_per_period": 1,
+                    "timezone": "UTC",
+                    "run_slots": [{"time": "08:00"}],
+                    "campaign_steps": [{"profile_id": profile_id, "repeat_count": 1, "spacing_seconds": 0, "timeout_seconds": 900, "failure_policy": "continue", "execution_mode": "saved_profile"}],
+                },
+            )
+            self.assertEqual(schedule_response.status_code, 200)
+            schedule_id = int(schedule_response.json()["schedule"]["id"])
+
+            delete_schedule_response = operator_client.post(f"/api/v1/schedules/{schedule_id}/delete")
+            self.assertEqual(delete_schedule_response.status_code, 200)
+            self.assertEqual(delete_schedule_response.json()["schedule"]["status"], "deleted")
+
+            delete_profile_response = operator_client.delete(f"/api/v1/run-profiles/{profile_id}")
+            self.assertEqual(delete_profile_response.status_code, 200)
+        finally:
+            operator_client.close()
+
 
 class RunExecutionSnapshotTests(unittest.TestCase):
     def test_create_run_persists_execution_snapshot(self) -> None:
@@ -615,6 +665,88 @@ class OverviewLatestRunTests(unittest.TestCase):
         self.assertEqual(len(operational_codes), 1)
         self.assertIn("websocket_gate_timeout", operational_codes)
 
+    def test_latest_run_overview_backfills_operational_from_metric_failed_events(self) -> None:
+        run = {"id": 1003, "status": "failed"}
+        events = [
+            {
+                "id": 1,
+                "actor": "user",
+                "action": "place_order",
+                "scenario": "load_burst",
+                "step": "place_order",
+                "method": "POST",
+                "endpoint": "/v1/core/orders/",
+                "http_status": 503,
+                "message": "service unavailable",
+                "ok": False,
+            },
+            {
+                "id": 2,
+                "actor": "user",
+                "category": "decision",
+                "action": "probe_coupons",
+                "status": "failed",
+                "reason_code": "coupon_probe_failed",
+                "message": "coupon list unavailable for profile",
+                "ok": False,
+            },
+            {
+                "id": 3,
+                "actor": "store",
+                "action": "rejected_order",
+                "scenario": "load_burst",
+                "status": "rejected",
+                "ok": False,
+            },
+        ]
+
+        with mock.patch.object(overview_service, "_load_latest_run", return_value=run):
+            with mock.patch.object(overview_service, "_load_events", return_value=(events, [], {})):
+                with mock.patch.object(overview_service, "_load_metrics", return_value=None):
+                    payload = overview_service.latest_run_overview()
+
+        findings = payload["findings"]
+        critical_codes = {item.get("code") for item in findings["critical"]}
+        operational_codes = {item.get("code") for item in findings["operational"]}
+        self.assertIn("place_order", critical_codes)
+        self.assertIn("probe_coupons", operational_codes)
+        self.assertIn("rejected_order", operational_codes)
+        self.assertEqual(payload["metrics"]["failed_events"], 3)
+
+    def test_latest_run_overview_skips_duplicate_operational_when_issue_covers_event(self) -> None:
+        run = {"id": 1004, "status": "failed"}
+        events = [
+            {
+                "id": 10,
+                "actor": "user",
+                "category": "decision",
+                "action": "probe_saved_cards",
+                "status": "failed",
+                "reason_code": "probe_failed",
+                "message": "schema mismatch",
+                "ok": False,
+            },
+        ]
+        artifact_issues = [
+            {
+                "severity": "warning",
+                "code": "probe_failed",
+                "message": "Saved cards probe failed",
+                "related_event_id": 10,
+            },
+        ]
+
+        with mock.patch.object(overview_service, "_load_latest_run", return_value=run):
+            with mock.patch.object(overview_service, "_load_events", return_value=(events, artifact_issues, {})):
+                with mock.patch.object(overview_service, "_load_metrics", return_value=None):
+                    payload = overview_service.latest_run_overview()
+
+        operational = payload["findings"]["operational"]
+        self.assertEqual(len(operational), 1)
+        self.assertEqual(operational[0].get("code"), "probe_failed")
+        operational_codes = {item.get("code") for item in operational}
+        self.assertEqual(len(operational_codes), 1)
+
     def test_latest_run_overview_treats_informational_decisions_as_non_failures(self) -> None:
         run = {"id": 1002, "status": "failed"}
         events = [
@@ -645,7 +777,10 @@ class OverviewLatestRunTests(unittest.TestCase):
                     payload = overview_service.latest_run_overview()
 
         critical_codes = {item.get("code") for item in payload["findings"]["critical"]}
+        operational_codes = {item.get("code") for item in payload["findings"]["operational"]}
         self.assertNotIn("no_customer_id", critical_codes)
+        self.assertNotIn("no_customer_id", operational_codes)
+        self.assertIn("probe_user_active_orders", critical_codes)
         self.assertEqual(payload["metrics"]["failed_events"], 1)
 
     def test_latest_run_overview_tolerates_malformed_issue_payloads(self) -> None:
@@ -725,7 +860,7 @@ class RunDeletionSafetyTests(unittest.TestCase):
             )
         )
 
-    def test_delete_run_removes_only_selected_log_file_and_keeps_shared_log_dir(self) -> None:
+    def test_delete_run_archives_without_removing_logs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             log_dir = pathlib.Path(tmpdir) / "web-gui"
             log_dir.mkdir()
@@ -741,18 +876,18 @@ class RunDeletionSafetyTests(unittest.TestCase):
             try:
                 result = web_api._delete_run_logic(int(first["id"]))
                 self.assertTrue(log_dir.exists())
-                self.assertFalse(first_log.exists())
+                self.assertTrue(first_log.exists())
                 self.assertTrue(second_log.exists())
-                deleted = {os.path.realpath(path) for path in result["deleted_files"]}
-                self.assertIn(os.path.realpath(str(first_log)), deleted)
-                self.assertNotIn(os.path.realpath(str(second_log)), deleted)
+                self.assertTrue(result.get("archived"))
+                archived = web_api._fetch_run_row(int(first["id"]))
+                self.assertIsNotNone(archived.get("archived_at"))
             finally:
                 try:
                     web_api._delete_run_logic(int(second["id"]))
                 except Exception:
                     pass
 
-    def test_delete_run_removes_only_selected_artifact_folder(self) -> None:
+    def test_delete_run_archives_without_removing_artifact_folder(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = pathlib.Path(tmpdir)
             log_dir = root / "web-gui"
@@ -792,7 +927,7 @@ class RunDeletionSafetyTests(unittest.TestCase):
 
             try:
                 web_api._delete_run_logic(int(first["id"]))
-                self.assertFalse(first_artifacts.exists())
+                self.assertTrue(first_artifacts.exists())
                 self.assertTrue(second_artifacts.exists())
                 self.assertTrue(second_report.exists())
                 self.assertTrue(second_story.exists())
@@ -827,9 +962,213 @@ class RunDeletionSafetyTests(unittest.TestCase):
                 encoding="utf-8",
             )
             web_api._update_run(run_id, status="running", log_path=str(log_path))
+            with web_api.RUN_LOCK:
+                web_api.RUN_PROCESSES[run_id] = RunControlTests._FakeProcess()
 
             hydrated = web_api._get_run(run_id)
             self.assertIsNone(hydrated.get("events_path"))
+
+    def test_hydrate_run_artifacts_reassembles_wrapped_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            log_dir = root / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row()
+            run_id = int(run["id"])
+
+            artifacts_dir = root / "artifacts"
+            artifacts_dir.mkdir()
+            events_path = artifacts_dir / "events.json"
+            report_path = artifacts_dir / "report.md"
+            story_path = artifacts_dir / "story.md"
+            events_path.write_text("[]", encoding="utf-8")
+            report_path.write_text("# report\n", encoding="utf-8")
+            story_path.write_text("# story\n", encoding="utf-8")
+
+            log_path = log_dir / f"run-{run_id}.log"
+            wrapped_events = str(events_path).replace(".json", ".")
+            wrapped_report = str(report_path).replace(".md", ".")
+            wrapped_story = str(story_path).replace(".md", ".m")
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "main: events:",
+                        wrapped_events,
+                        "json",
+                        "main: report:",
+                        wrapped_report,
+                        "md",
+                        "main: story:",
+                        wrapped_story,
+                        "d",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            web_api._update_run(
+                run_id,
+                status="succeeded",
+                log_path=str(log_path),
+                events_path=None,
+                report_path=None,
+                story_path=None,
+            )
+
+            with mock.patch.object(web_api, "LOG_DIR", log_dir):
+                hydrated = web_api._get_run(run_id)
+            self.assertEqual(hydrated.get("events_path"), str(events_path))
+            self.assertEqual(hydrated.get("report_path"), str(report_path))
+            self.assertEqual(hydrated.get("story_path"), str(story_path))
+
+
+class RunControlTests(unittest.TestCase):
+    class _FakeProcess:
+        def __init__(self, returncode: int | None = None) -> None:
+            self._returncode = returncode
+
+        def poll(self) -> int | None:
+            return self._returncode
+
+        def terminate(self) -> None:
+            self._returncode = -15
+
+    class _FakeThread:
+        instances: list["RunControlTests._FakeThread"] = []
+
+        def __init__(self, target=None, args=(), daemon=None):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+            self.instances.append(self)
+
+        def start(self) -> None:
+            return None
+
+    def setUp(self) -> None:
+        self.fake_auth = _FakeCookieAuthManager()
+        self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
+        self.auth_enabled_patch.start()
+        self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
+        self.auth_manager_patch.start()
+        self.thread_patch = mock.patch.object(web_api.threading, "Thread", self._FakeThread)
+        self.thread_patch.start()
+        self.client = TestClient(web_api.app)
+        login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
+        assert login.status_code == 200
+
+    def tearDown(self) -> None:
+        with web_api.RUN_LOCK:
+            web_api.RUN_PROCESSES.clear()
+            web_api.RUN_CANCELLED.clear()
+        with web_api.RUN_LOG_STAT_LOCK:
+            web_api.RUN_LOG_STAT.clear()
+        self.thread_patch.stop()
+        self.auth_manager_patch.stop()
+        self.auth_enabled_patch.stop()
+        self._FakeThread.instances.clear()
+        self.client.close()
+
+    def _create_run_row(self, *, flow: str = "doctor") -> dict[str, object]:
+        return web_api._create_run(
+            web_api.RunCreateRequest(
+                flow=flow,
+                plan="sim_actors.json",
+                timing="fast",
+                store_id="FZY_123",
+                phone="+2348000000000",
+                all_users=False,
+                no_auto_provision=False,
+                enforce_websocket_gates=False,
+                post_order_actions=False,
+                extra_args=[],
+            )
+        )
+
+    def test_cancel_run_requires_running_and_live_process(self) -> None:
+        run = self._create_run_row()
+        run_id = int(run["id"])
+        resp = self.client.post(f"/api/v1/runs/{run_id}/cancel")
+        self.assertEqual(resp.status_code, 409)
+
+    def test_cancel_run_terminates_live_process(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = pathlib.Path(tmpdir) / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row()
+            run_id = int(run["id"])
+            log_path = log_dir / f"run-{run_id}.log"
+            log_path.write_text("starting\n", encoding="utf-8")
+            web_api._update_run(run_id, status="running", log_path=str(log_path), started_at=web_api._utc_now())
+            process = self._FakeProcess()
+            with web_api.RUN_LOCK:
+                web_api.RUN_PROCESSES[run_id] = process
+            with mock.patch.object(web_api, "LOG_DIR", log_dir):
+                resp = self.client.post(f"/api/v1/runs/{run_id}/cancel")
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json().get("status"), "cancelling")
+            self.assertIsNotNone(process.poll())
+
+    def test_delete_orphan_running_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = pathlib.Path(tmpdir) / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row()
+            run_id = int(run["id"])
+            log_path = log_dir / f"run-{run_id}.log"
+            log_path.write_text("stale\n", encoding="utf-8")
+            web_api._update_run(run_id, status="running", log_path=str(log_path), started_at=web_api._utc_now())
+            with mock.patch.object(web_api, "LOG_DIR", log_dir):
+                resp = self.client.delete(f"/api/v1/runs/{run_id}")
+            self.assertEqual(resp.status_code, 200)
+            self.assertTrue(resp.json().get("deleted"))
+            active_runs = self.client.get("/api/v1/runs").json().get("runs", [])
+            self.assertFalse(any(int(item.get("id")) == run_id for item in active_runs))
+            archived_runs = self.client.get("/api/v1/runs?include_archived=true").json().get("runs", [])
+            archived_row = next(item for item in archived_runs if int(item.get("id")) == run_id)
+            self.assertIsNotNone(archived_row.get("archived_at"))
+
+    def test_delete_blocked_while_actively_running(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = pathlib.Path(tmpdir) / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row()
+            run_id = int(run["id"])
+            log_path = log_dir / f"run-{run_id}.log"
+            log_path.write_text("line\n", encoding="utf-8")
+            web_api._update_run(run_id, status="running", log_path=str(log_path), started_at=web_api._utc_now())
+            process = self._FakeProcess()
+            with web_api.RUN_LOCK:
+                web_api.RUN_PROCESSES[run_id] = process
+            with mock.patch.object(web_api, "LOG_DIR", log_dir):
+                with web_api.RUN_LOG_STAT_LOCK:
+                    web_api.RUN_LOG_STAT[run_id] = (0, log_path.stat().st_mtime)
+                log_path.write_text("line\nmore\n", encoding="utf-8")
+                resp = self.client.delete(f"/api/v1/runs/{run_id}")
+            self.assertEqual(resp.status_code, 409)
+
+    def test_restore_archived_run(self) -> None:
+        run = self._create_run_row()
+        run_id = int(run["id"])
+        delete_response = self.client.delete(f"/api/v1/runs/{run_id}")
+        self.assertEqual(delete_response.status_code, 200)
+        restore_response = self.client.post(f"/api/v1/runs/{run_id}/restore")
+        self.assertEqual(restore_response.status_code, 200)
+        restored = restore_response.json().get("run", {})
+        self.assertIsNone(restored.get("archived_at"))
+        active_runs = self.client.get("/api/v1/runs").json().get("runs", [])
+        self.assertTrue(any(int(item.get("id")) == run_id for item in active_runs))
+
+    def test_run_payload_includes_control_flags(self) -> None:
+        run = self._create_run_row()
+        run_id = int(run["id"])
+        payload = self.client.get(f"/api/v1/runs/{run_id}").json()
+        run_row = payload["run"] if isinstance(payload.get("run"), dict) else payload
+        control = run_row.get("control") or {}
+        self.assertIn("can_stop", control)
+        self.assertIn("can_delete", control)
+        self.assertFalse(control.get("actively_running"))
 
 
 class RunProfilesApiTests(unittest.TestCase):
@@ -917,6 +1256,19 @@ class RunProfilesApiTests(unittest.TestCase):
         delete_response = self.client.delete(f"/api/v1/run-profiles/{profile_id}")
         self.assertEqual(delete_response.status_code, 200)
         self.assertTrue(delete_response.json()["deleted"])
+
+        list_after_delete = self.client.get("/api/v1/run-profiles")
+        self.assertEqual(list_after_delete.status_code, 200)
+        self.assertFalse(any(item["id"] == profile_id for item in list_after_delete.json()["profiles"]))
+
+        archived_list = self.client.get("/api/v1/run-profiles?include_archived=true")
+        self.assertEqual(archived_list.status_code, 200)
+        archived = next(item for item in archived_list.json()["profiles"] if item["id"] == profile_id)
+        self.assertEqual(archived["status"], "archived")
+
+        restore_response = self.client.post(f"/api/v1/run-profiles/{profile_id}/restore")
+        self.assertEqual(restore_response.status_code, 200)
+        self.assertEqual(restore_response.json()["profile"]["status"], "active")
 
 
 class SchedulesApiTests(unittest.TestCase):
@@ -1079,6 +1431,35 @@ class SchedulesApiTests(unittest.TestCase):
         self.assertEqual(trigger_response.json()["execution"]["status"], "launched")
         self.assertEqual(len(trigger_response.json()["runs"]), 2)
         self.assertTrue(trigger_response.json()["execution"].get("execution_chain_key"))
+
+    def test_schedule_restore_fails_when_profile_is_archived(self) -> None:
+        profile_id = self._create_profile()
+        create_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"archived-profile-schedule-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "anchor_start_at": "2026-05-19T08:00:00Z",
+                "period": "daily",
+                "repeat": "daily",
+                "stop_rule": "never",
+                "runs_per_period": 1,
+                "run_slots": [{"time": "08:00"}],
+                "timezone": "UTC",
+            },
+        )
+        self.assertEqual(create_response.status_code, 200)
+        schedule_id = int(create_response.json()["schedule"]["id"])
+
+        delete_schedule_response = self.client.post(f"/api/v1/schedules/{schedule_id}/delete")
+        self.assertEqual(delete_schedule_response.status_code, 200)
+
+        delete_profile_response = self.client.delete(f"/api/v1/run-profiles/{profile_id}")
+        self.assertEqual(delete_profile_response.status_code, 200)
+
+        restore_response = self.client.post(f"/api/v1/schedules/{schedule_id}/restore")
+        self.assertEqual(restore_response.status_code, 409)
 
     def test_new_contract_schedule_shifts_into_run_window(self) -> None:
         profile_id = self._create_profile()
@@ -1911,6 +2292,75 @@ class IntegrationsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json().get("route_by"), "branch")
 
+    def test_delete_mapping_archives_and_restore_mapping(self) -> None:
+        create_profile = self.client.post(
+            "/api/v1/run-profiles",
+            json={
+                "name": "Archive Mapping Profile",
+                "flow": "doctor",
+                "plan": "sim_actors.json",
+                "timing": "fast",
+            },
+        )
+        self.assertEqual(create_profile.status_code, 200)
+        profile_id = int(create_profile.json()["profile"]["id"])
+
+        create_mapping = self.client.post(
+            "/api/v1/integrations/github/mappings",
+            json={
+                "project": "backend",
+                "environment": f"archive-{time.time_ns()}",
+                "profile_id": profile_id,
+                "enabled": True,
+            },
+        )
+        self.assertEqual(create_mapping.status_code, 200)
+        mapping_id = int(create_mapping.json()["mapping"]["id"])
+
+        delete_response = self.client.delete(f"/api/v1/integrations/github/mappings/{mapping_id}")
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertTrue(delete_response.json().get("deleted"))
+
+        active_mappings = self.client.get("/api/v1/integrations/github/mappings").json().get("mappings", [])
+        self.assertFalse(any(int(item.get("id")) == mapping_id for item in active_mappings))
+
+        archived_mappings = self.client.get("/api/v1/integrations/github/mappings?include_archived=true").json().get("mappings", [])
+        archived_item = next(item for item in archived_mappings if int(item.get("id")) == mapping_id)
+        self.assertEqual(str(archived_item.get("status")).lower(), "archived")
+        self.assertIsNotNone(archived_item.get("archived_at"))
+
+        restore_response = self.client.post(f"/api/v1/integrations/github/mappings/{mapping_id}/restore")
+        self.assertEqual(restore_response.status_code, 200)
+        self.assertEqual(str(restore_response.json()["mapping"].get("status")).lower(), "active")
+
+    def test_archives_endpoint_lists_archived_mappings(self) -> None:
+        create_profile = self.client.post(
+            "/api/v1/run-profiles",
+            json={
+                "name": "Archives Mapping Profile",
+                "flow": "doctor",
+                "plan": "sim_actors.json",
+                "timing": "fast",
+            },
+        )
+        self.assertEqual(create_profile.status_code, 200)
+        profile_id = int(create_profile.json()["profile"]["id"])
+        create_mapping = self.client.post(
+            "/api/v1/integrations/github/mappings",
+            json={
+                "project": "backend",
+                "environment": f"archives-mapping-{time.time_ns()}",
+                "profile_id": profile_id,
+                "enabled": True,
+            },
+        )
+        self.assertEqual(create_mapping.status_code, 200)
+        mapping_id = int(create_mapping.json()["mapping"]["id"])
+        self.assertEqual(self.client.delete(f"/api/v1/integrations/github/mappings/{mapping_id}").status_code, 200)
+        archived_payload = self.client.get("/api/v1/archives/integration-mappings")
+        self.assertEqual(archived_payload.status_code, 200)
+        self.assertTrue(any(int(item.get("id")) == mapping_id for item in archived_payload.json().get("mappings", [])))
+
     def test_deployment_webhook_rejects_non_allowlisted_repository(self) -> None:
         web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST = {"backend": ["org/backend"]}
         web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS = {"backend": "backend-secret"}
@@ -1932,6 +2382,36 @@ class IntegrationsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "rejected")
         self.assertEqual(response.json()["reason"], "repository_not_allowlisted")
+
+    def test_restore_mapping_fails_when_profile_archived(self) -> None:
+        create_profile = self.client.post(
+            "/api/v1/run-profiles",
+            json={
+                "name": "Archived Target Profile",
+                "flow": "doctor",
+                "plan": "sim_actors.json",
+                "timing": "fast",
+            },
+        )
+        self.assertEqual(create_profile.status_code, 200)
+        profile_id = int(create_profile.json()["profile"]["id"])
+        create_mapping = self.client.post(
+            "/api/v1/integrations/github/mappings",
+            json={
+                "project": "backend",
+                "environment": f"restore-conflict-{time.time_ns()}",
+                "profile_id": profile_id,
+                "enabled": True,
+            },
+        )
+        self.assertEqual(create_mapping.status_code, 200)
+        mapping_id = int(create_mapping.json()["mapping"]["id"])
+        self.assertEqual(self.client.delete(f"/api/v1/integrations/github/mappings/{mapping_id}").status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/v1/run-profiles/{profile_id}").status_code, 200)
+
+        restore_response = self.client.post(f"/api/v1/integrations/github/mappings/{mapping_id}/restore")
+        self.assertEqual(restore_response.status_code, 409)
+        self.assertIn("archived profile", str(restore_response.json().get("detail", "")).lower())
 
     def test_deployment_webhook_queues_when_mapping_exists(self) -> None:
         web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST = {"backend": ["org/backend"]}
@@ -2136,6 +2616,57 @@ class IntegrationsApiTests(unittest.TestCase):
 
 
 class CatalogSeedTests(unittest.TestCase):
+    def _reset_catalog_rows(self) -> None:
+        from api.app import catalog_seed
+
+        now = web_api._utc_now()
+        if web_api.USE_POSTGRES:
+            conn = web_api._get_db_connection()
+            try:
+                with conn.cursor() as cursor:
+                    for spec in catalog_seed.PROFILE_SPECS:
+                        cursor.execute(
+                            """
+                            UPDATE run_profiles
+                            SET status = %s, archived_at = %s, catalog_managed = TRUE, updated_at = %s
+                            WHERE catalog_slug = %s
+                            """,
+                            ("active", None, now, spec["catalog_slug"]),
+                        )
+                    for spec in catalog_seed.SCHEDULE_SPECS:
+                        cursor.execute(
+                            """
+                            UPDATE schedules
+                            SET status = %s, catalog_managed = TRUE, updated_at = %s
+                            WHERE catalog_slug = %s
+                            """,
+                            (str(spec.get("status") or "paused"), now, spec["catalog_slug"]),
+                        )
+                conn.commit()
+            finally:
+                conn.close()
+            return
+
+        with web_api.DB_LOCK, web_api._db() as conn:
+            for spec in catalog_seed.PROFILE_SPECS:
+                conn.execute(
+                    """
+                    UPDATE run_profiles
+                    SET status = ?, archived_at = ?, catalog_managed = 1, updated_at = ?
+                    WHERE catalog_slug = ?
+                    """,
+                    ("active", None, now, spec["catalog_slug"]),
+                )
+            for spec in catalog_seed.SCHEDULE_SPECS:
+                conn.execute(
+                    """
+                    UPDATE schedules
+                    SET status = ?, catalog_managed = 1, updated_at = ?
+                    WHERE catalog_slug = ?
+                    """,
+                    (str(spec.get("status") or "paused"), now, spec["catalog_slug"]),
+                )
+
     def setUp(self) -> None:
         self.fake_auth = _FakeCookieAuthManager()
         self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
@@ -2148,6 +2679,9 @@ class CatalogSeedTests(unittest.TestCase):
         self.client = TestClient(web_api.app)
         login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
         assert login.status_code == 200
+        self._reset_catalog_rows()
+        from api.app import catalog_seed
+        catalog_seed.ensure_catalog_seed()
 
     def tearDown(self) -> None:
         self.run_simulation_patch.stop()
@@ -2160,17 +2694,13 @@ class CatalogSeedTests(unittest.TestCase):
 
         profiles = web_api._list_run_profiles()
         by_slug = {p["catalog_slug"]: p for p in profiles if p.get("catalog_slug")}
-        self.assertGreaterEqual(len(by_slug), len(catalog_seed.PROFILE_SPECS))
+        self.assertEqual(len(by_slug), len(catalog_seed.PROFILE_SPECS))
         for spec in catalog_seed.PROFILE_SPECS:
             slug = spec["catalog_slug"]
             self.assertIn(slug, by_slug, msg=f"missing catalog profile {slug}")
             row = by_slug[slug]
             self.assertEqual(row["flow"], spec["flow"])
             self.assertEqual(row.get("suite"), spec.get("suite"))
-            if slug == "gates-on-doctor":
-                self.assertTrue(row["enforce_websocket_gates"])
-            if slug == "daily-doctor":
-                self.assertFalse(row["enforce_websocket_gates"])
             if slug == "bounded-load-smoke":
                 self.assertEqual(row["mode"], "load")
                 self.assertEqual(row["users"], 2)
@@ -2193,7 +2723,7 @@ class CatalogSeedTests(unittest.TestCase):
     def test_catalog_schedules_exist_with_expected_status_and_slots(self) -> None:
         from api.app import catalog_seed
 
-        schedules = web_api._list_schedules()["schedules"]
+        schedules = web_api._list_schedules(include_deleted=True)["schedules"]
         by_slug = {s["catalog_slug"]: s for s in schedules if s.get("catalog_slug")}
         for spec in catalog_seed.SCHEDULE_SPECS:
             sched_slug = spec["catalog_slug"]
@@ -2218,25 +2748,6 @@ class CatalogSeedTests(unittest.TestCase):
             self.assertTrue(steps)
             self.assertEqual(int(steps[0]["profile_id"]), int(prof_id))
 
-    def test_catalog_daily_doctor_command_snapshot(self) -> None:
-        profiles = web_api._list_run_profiles()
-        daily = next(p for p in profiles if p.get("catalog_slug") == "daily-doctor")
-        req = web_api._profile_request_to_run_request(daily)
-        cmd = web_api._build_command(req)
-        self.assertIn("doctor", cmd)
-        self.assertIn("--suite", cmd)
-        idx = cmd.index("--suite")
-        self.assertEqual(cmd[idx + 1], "doctor")
-        self.assertNotIn("--enforce-websocket-gates", cmd)
-
-    def test_catalog_core_trace_command_uses_core_suite(self) -> None:
-        profiles = web_api._list_run_profiles()
-        row = next(p for p in profiles if p.get("catalog_slug") == "core-trace")
-        req = web_api._profile_request_to_run_request(row)
-        cmd = web_api._build_command(req)
-        idx = cmd.index("--suite")
-        self.assertEqual(cmd[idx + 1], "core")
-
     def test_catalog_bounded_load_command(self) -> None:
         profiles = web_api._list_run_profiles()
         row = next(p for p in profiles if p.get("catalog_slug") == "bounded-load-smoke")
@@ -2249,13 +2760,10 @@ class CatalogSeedTests(unittest.TestCase):
         self.assertIn("3", cmd)
         self.assertIn("--bounded-load-smoke-policy", cmd)
         self.assertIn("--bounded-baseline-min-completed", cmd)
-
-    def test_catalog_gates_on_doctor_enforces_websocket_gates_in_command(self) -> None:
-        profiles = web_api._list_run_profiles()
-        row = next(p for p in profiles if p.get("catalog_slug") == "gates-on-doctor")
-        req = web_api._profile_request_to_run_request(row)
-        cmd = web_api._build_command(req)
-        self.assertIn("--enforce-websocket-gates", cmd)
+        self.assertIn("--reject", cmd)
+        reject_idx = cmd.index("--reject")
+        self.assertEqual(cmd[reject_idx + 1], "0.35")
+        self.assertNotIn("--bounded-tail-reject-rate", cmd)
 
     def test_catalog_api_sweep_max_command_uses_full_suite_and_explicit_scenarios(self) -> None:
         profiles = web_api._list_run_profiles()
@@ -2273,17 +2781,36 @@ class CatalogSeedTests(unittest.TestCase):
         self.assertIn("--enforce-websocket-gates", cmd)
         self.assertIn("--post-order-actions", cmd)
 
-    def test_catalog_profile_delete_is_forbidden(self) -> None:
-        profiles = web_api._list_run_profiles()
-        daily = next(p for p in profiles if p.get("catalog_slug") == "daily-doctor")
-        resp = self.client.delete(f"/api/v1/run-profiles/{daily['id']}")
-        self.assertEqual(resp.status_code, 403)
+    def test_catalog_profile_delete_archives_profile(self) -> None:
+        profiles = web_api._list_run_profiles(include_archived=True)
+        catalog = next((p for p in profiles if p.get("catalog_slug")), None)
+        if catalog is None:
+            self.skipTest("No catalog profile found in this test database state.")
+        resp = self.client.delete(f"/api/v1/run-profiles/{catalog['id']}")
+        self.assertEqual(resp.status_code, 200)
+        archived = web_api._get_run_profile(int(catalog["id"]), include_archived=True)
+        self.assertEqual(archived.get("status"), "archived")
+        self.assertFalse(bool(archived.get("catalog_managed")))
 
-    def test_catalog_schedule_soft_delete_is_forbidden(self) -> None:
-        schedules = web_api._list_schedules()["schedules"]
-        cat = next(s for s in schedules if s.get("catalog_slug") == "catalog-daily-doctor-utc-0800")
+    def test_catalog_schedule_soft_delete_is_allowed(self) -> None:
+        schedules = web_api._list_schedules(include_deleted=True)["schedules"]
+        cat = next((s for s in schedules if s.get("catalog_slug")), None)
+        if cat is None:
+            self.skipTest("No catalog schedule found in this test database state.")
         resp = self.client.post(f"/api/v1/schedules/{cat['id']}/delete")
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()["schedule"]
+        self.assertEqual(payload.get("status"), "deleted")
+        self.assertFalse(bool(payload.get("catalog_managed")))
+
+    def test_catalog_seed_respects_detached_rows(self) -> None:
+        profiles = web_api._list_run_profiles(include_archived=True)
+        catalog = next(p for p in profiles if p.get("catalog_slug") == "api-sweep-max")
+        web_api._delete_run_profile(int(catalog["id"]))
+        from api.app import catalog_seed
+        catalog_seed.ensure_catalog_seed()
+        archived = web_api._get_run_profile(int(catalog["id"]), include_archived=True)
+        self.assertEqual(archived.get("status"), "archived")
 
     def test_catalog_seed_skip_requested_honors_env(self) -> None:
         from api.app import catalog_seed

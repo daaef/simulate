@@ -25,6 +25,7 @@ import websockets
 from rich.console import Console
 
 import config
+from failure_policy import classify_http_status
 from interaction_catalog import (
     LEGACY_AVAILABLE_STATUSES,
     MENU_AVAILABLE,
@@ -410,37 +411,64 @@ async def bootstrap_auth(
             "Either USER_LASTMILE_TOKEN or USER_PHONE_NUMBER must be set in .env"
         )
 
-    console.print(f"[dim]user:[/] Requesting OTP for {effective_phone} ...")
-    otp_payload = await _auth_request(
-        client,
-        recorder=recorder,
-        actor="user",
-        action="request_user_otp",
-        method="POST",
-        url=f"{config.LASTMILE_BASE_URL}/v1/auth/otp/send/",
-        endpoint="/v1/auth/otp/send/",
-        scenario=scenario,
-        step="auth_request_user_otp",
-        json_body={"phone_number": effective_phone},
-        response_transform=_otp_response,
-    )
-    otp = api_data(otp_payload)
-    if not otp:
-        raise RuntimeError(f"OTP response did not contain data: {otp_payload}")
-
-    console.print("[dim]user:[/] Verifying OTP ...")
-    verify_payload = await _auth_request(
-        client,
-        recorder=recorder,
-        actor="user",
-        action="verify_user_otp",
-        method="POST",
-        url=f"{config.LASTMILE_BASE_URL}/v1/auth/otp/verify/",
-        endpoint="/v1/auth/otp/verify/",
-        scenario=scenario,
-        step="auth_verify_user_otp",
-        json_body={"phone_number": effective_phone, "otp": str(otp)},
-    )
+    verify_payload = None
+    for attempt in (1, 2):
+        console.print(f"[dim]user:[/] Requesting OTP for {effective_phone} ...")
+        otp_payload = await _auth_request(
+            client,
+            recorder=recorder,
+            actor="user",
+            action="request_user_otp",
+            method="POST",
+            url=f"{config.LASTMILE_BASE_URL}/v1/auth/otp/send/",
+            endpoint="/v1/auth/otp/send/",
+            scenario=scenario,
+            step="auth_request_user_otp",
+            json_body={"phone_number": effective_phone},
+            response_transform=_otp_response,
+        )
+        otp = api_data(otp_payload)
+        if not otp:
+            raise RuntimeError(f"OTP response did not contain data: {otp_payload}")
+        console.print("[dim]user:[/] Verifying OTP ...")
+        try:
+            verify_payload = await _auth_request(
+                client,
+                recorder=recorder,
+                actor="user",
+                action="verify_user_otp",
+                method="POST",
+                url=f"{config.LASTMILE_BASE_URL}/v1/auth/otp/verify/",
+                endpoint="/v1/auth/otp/verify/",
+                scenario=scenario,
+                step="auth_verify_user_otp",
+                json_body={"phone_number": effective_phone, "otp": str(otp)},
+            )
+            break
+        except HttpApiError as exc:
+            if attempt == 1 and exc.status_code == 400:
+                response_text = str(exc.response_text or "").lower()
+                if "invalid otp" in response_text or "expired" in response_text:
+                    if recorder is not None:
+                        recorder.record_decision(
+                            actor="user",
+                            action="verify_user_otp",
+                            status="recovered",
+                            reason="otp_retry_after_invalid_or_expired",
+                            message="OTP verify returned invalid/expired once; retrying send+verify one more time.",
+                            scenario=scenario,
+                            step="auth_verify_user_otp",
+                            reason_code="otp_retry_after_invalid_or_expired",
+                            reason_message="OTP verify returned HTTP 400 invalid/expired.",
+                            next_action="retry_otp_once",
+                            run_continued=True,
+                            failure_class=classify_http_status(exc.status_code),
+                            details={"attempt": attempt, "http_status": exc.status_code},
+                        )
+                    continue
+            raise
+    if verify_payload is None:
+        raise RuntimeError("OTP verify did not return a payload after retry.")
     verify_data = api_data(verify_payload)
     if not isinstance(verify_data, dict):
         raise RuntimeError(f"OTP verify response had an invalid shape: {verify_payload}")
@@ -813,6 +841,62 @@ async def bootstrap_fixtures(
     effective_lat = lat if lat is not None else config.SIM_LAT
     effective_lng = lng if lng is not None else config.SIM_LNG
     effective_subentity_id = subentity_id or config.SUBENTITY_ID
+
+    if effective_lat is None or effective_lng is None:
+        actors = getattr(config, "SIM_ACTORS", {}) or {}
+        defaults = actors.get("defaults", {}) if isinstance(actors, dict) else {}
+        users = actors.get("users", []) if isinstance(actors, dict) else []
+        stores = actors.get("stores", []) if isinstance(actors, dict) else []
+        default_phone = str(defaults.get("user_phone") or "")
+        selected_store_id = str(config.STORE_ID or "")
+
+        default_user = next(
+            (
+                item
+                for item in users
+                if isinstance(item, dict) and str(item.get("phone", "")) == default_phone
+            ),
+            None,
+        )
+        selected_store = next(
+            (
+                item
+                for item in stores
+                if isinstance(item, dict) and str(item.get("store_id", "")) == selected_store_id
+            ),
+            None,
+        )
+
+        fallback_chain = [
+            default_user,
+            next((item for item in users if isinstance(item, dict)), None),
+            selected_store,
+            next((item for item in stores if isinstance(item, dict)), None),
+        ]
+        for candidate in fallback_chain:
+            cand_lat, cand_lng = config.actor_gps(candidate)
+            if cand_lat is None or cand_lng is None:
+                continue
+            effective_lat, effective_lng = cand_lat, cand_lng
+            config.SIM_LAT = cand_lat
+            config.SIM_LNG = cand_lng
+            if recorder is not None:
+                recorder.record_decision(
+                    actor="user",
+                    action="resolve_delivery_gps_fallback",
+                    status="recovered",
+                    reason="delivery_gps_fallback_applied",
+                    message="Primary delivery GPS was missing, so simulator applied fallback coordinates and continued.",
+                    scenario="bootstrap",
+                    step="resolve_delivery_gps",
+                    reason_code="delivery_gps_fallback_applied",
+                    reason_message="Applied fallback SIM_LAT/SIM_LNG from run plan actors.",
+                    next_action="continue_with_fallback_location",
+                    run_continued=True,
+                    failure_class="precondition",
+                    details={"lat": cand_lat, "lng": cand_lng},
+                )
+            break
 
     if effective_lat is None or effective_lng is None:
         raise RuntimeError(
@@ -1493,6 +1577,45 @@ async def fetch_order(
     return _order_payload(result.payload)
 
 
+def _offer_ws_status(status_queue: asyncio.Queue[str], status: str | None) -> None:
+    normalized = str(status or "").strip()
+    if normalized:
+        status_queue.put_nowait(normalized)
+
+
+async def prime_ws_status_from_order(
+    client: httpx.AsyncClient,
+    status_queue: asyncio.Queue[str],
+    *,
+    user_token: str,
+    token_source: str,
+    order_db_id: int,
+    order_ref: str,
+    recorder: RunRecorder,
+) -> str | None:
+    """Seed the per-order websocket queue from the current HTTP order status.
+
+    Load runs can miss early websocket transitions when the store accepts and
+    patches payment_processing before the user worker subscribes.
+    """
+    try:
+        payload = await fetch_order(
+            client,
+            user_token=user_token,
+            token_source=token_source,
+            order_db_id=order_db_id,
+            order_ref=order_ref,
+            recorder=recorder,
+            action="prime_websocket_status",
+            step="prime_websocket_status",
+        )
+    except Exception:
+        return None
+    status = str(payload.get("status") or "").strip()
+    _offer_ws_status(status_queue, status)
+    return status or None
+
+
 async def wait_for_status_ws(
     status_queue: asyncio.Queue[str],
     *,
@@ -1660,6 +1783,15 @@ async def handle_order_payment(
     scenario = str(order.get("scenario") or "load")
 
     timeout = config.USER_DECISION_POLL_INTERVAL_SECONDS * config.USER_DECISION_POLL_MAX_ATTEMPTS
+    await prime_ws_status_from_order(
+        client,
+        status_queue,
+        user_token=user_token,
+        token_source=token_source,
+        order_db_id=order_db_id,
+        order_ref=order_ref,
+        recorder=recorder,
+    )
     status = await wait_for_status_ws(
         status_queue,
         expected_statuses={"payment_processing"},
@@ -1734,6 +1866,15 @@ async def handle_order_payment(
 
     # Wait for terminal status after payment
     terminal_timeout = config.ORDER_PROCESSING_POLL_INTERVAL_SECONDS * config.ORDER_PROCESSING_POLL_MAX_ATTEMPTS
+    await prime_ws_status_from_order(
+        client,
+        status_queue,
+        user_token=user_token,
+        token_source=token_source,
+        order_db_id=order_db_id,
+        order_ref=order_ref,
+        recorder=recorder,
+    )
     terminal_status = await wait_for_status_ws(
         status_queue,
         expected_statuses={"completed"},

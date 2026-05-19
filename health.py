@@ -59,14 +59,27 @@ def _status_group(status: int | None) -> str:
 def _verdict(
     *,
     issue_counts: Counter,
+    failure_class_counts: Counter,
     scenarios: list[dict[str, Any]],
     websocket_expected: int,
     websocket_matched: int,
+    failure_policy: str = "strict",
 ) -> str:
     scenario_verdicts = [
         str(item.get("effective_verdict") or item.get("base_verdict") or "")
         for item in scenarios
     ]
+    if failure_policy == "api_only":
+        if failure_class_counts.get("api_fault", 0):
+            return "failed"
+        if issue_counts.get("warning", 0) or failure_class_counts.get("precondition", 0) or any(
+            verdict in {"blocked", "degraded", "unsupported"} for verdict in scenario_verdicts
+        ):
+            return "degraded"
+        if websocket_expected and websocket_matched < websocket_expected:
+            return "degraded"
+        return "passed"
+
     if issue_counts.get("error", 0) or any(
         verdict in {"blocked", "failed", "error"} for verdict in scenario_verdicts
     ):
@@ -87,6 +100,7 @@ def build_health_summary(
     orders: list[dict[str, Any]],
     events: list[dict[str, Any]],
     issues: list[dict[str, Any]],
+    failure_policy: str = "strict",
 ) -> dict[str, Any]:
     http_events = [
         event
@@ -151,6 +165,7 @@ def build_health_summary(
         if (event.get("websocket_match") or {}).get("matched")
     ]
     issue_counts = Counter(str(issue.get("severity") or "unknown") for issue in issues)
+    failure_class_counts = Counter(str(issue.get("failure_class") or "") for issue in issues if issue.get("failure_class"))
     status_groups = Counter(_status_group(event.get("http_status")) for event in http_events)
     order_statuses = Counter(str(order.get("final_status") or "unknown") for order in orders)
 
@@ -161,6 +176,7 @@ def build_health_summary(
         "order_count": len(orders),
         "event_count": len(events),
         "issue_counts": dict(issue_counts),
+        "failure_class_counts": dict(failure_class_counts),
         "order_final_statuses": dict(order_statuses),
         "http": {
             "count": len(http_events),
@@ -181,8 +197,10 @@ def build_health_summary(
     }
     summary["verdict"] = _verdict(
         issue_counts=issue_counts,
+        failure_class_counts=failure_class_counts,
         scenarios=scenarios,
         websocket_expected=summary["websockets"]["expected"],
         websocket_matched=summary["websockets"]["matched"],
+        failure_policy=failure_policy,
     )
     return summary

@@ -109,11 +109,13 @@ export default function RunDetailOverview({ metrics, runStatus, runError, findin
           title="Critical Findings"
           issues={findings.critical}
           emptyMessage="No critical findings for this run."
+          limit={10}
         />
         <FindingsPanel
           title="Operational Findings"
           issues={findings.operational}
           emptyMessage="No operational findings for this run."
+          limit={25}
         />
       </div>
 

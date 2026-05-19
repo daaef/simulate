@@ -12,93 +12,6 @@ from typing import Any
 
 PROFILE_SPECS: list[dict[str, Any]] = [
     {
-        "catalog_slug": "daily-doctor",
-        "name": "Daily doctor",
-        "description": "Default production health sweep (doctor suite, fast timing). Typical cost: full doctor trace.",
-        "flow": "doctor",
-        "plan": "sim_actors.json",
-        "timing": "fast",
-        "mode": "trace",
-        "suite": "doctor",
-        "scenarios": [],
-        "enforce_websocket_gates": False,
-    },
-    {
-        "catalog_slug": "gates-on-doctor",
-        "name": "Gates-on doctor",
-        "description": "Same coverage as Daily doctor with websocket gates enforced. Higher fidelity, may fail if WS path is degraded.",
-        "flow": "doctor",
-        "plan": "sim_actors.json",
-        "timing": "fast",
-        "mode": "trace",
-        "suite": "doctor",
-        "scenarios": [],
-        "enforce_websocket_gates": True,
-    },
-    {
-        "catalog_slug": "core-trace",
-        "name": "Core trace",
-        "description": "Fast proof of completed, rejected, and cancelled paths (core suite). Lower cost than full doctor.",
-        "flow": "doctor",
-        "plan": "sim_actors.json",
-        "timing": "fast",
-        "mode": "trace",
-        "suite": "core",
-        "scenarios": [],
-        "enforce_websocket_gates": False,
-    },
-    {
-        "catalog_slug": "bounded-load-smoke",
-        "name": "Bounded load smoke",
-        "description": "Low-volume load smoke with guaranteed accepted baseline (>=1 completed) before reject/cancel tail checks.",
-        "flow": "load",
-        "plan": "sim_actors.json",
-        "timing": "fast",
-        "mode": "load",
-        "suite": None,
-        "scenarios": [],
-        "users": 2,
-        "orders": 3,
-        "interval": 2.0,
-        "reject": 0.35,
-        "extra_args": [
-            "--bounded-load-smoke-policy",
-            "--bounded-baseline-min-completed",
-            "1",
-            "--bounded-baseline-max-attempts",
-            "3",
-            "--bounded-tail-reject-rate",
-            "0.35",
-            "--bounded-tail-cancel-rate",
-            "0.15",
-        ],
-        "enforce_websocket_gates": False,
-    },
-    {
-        "catalog_slug": "menu-gates",
-        "name": "Menu gates",
-        "description": "Menu-state trace (available, unavailable, sold out, store closed). Medium cost vs core trace.",
-        "flow": "menus",
-        "plan": "sim_actors.json",
-        "timing": "fast",
-        "mode": "trace",
-        "suite": "menus",
-        "scenarios": [],
-        "enforce_websocket_gates": False,
-    },
-    {
-        "catalog_slug": "weekly-full",
-        "name": "Weekly full",
-        "description": "Broadest standard trace suite (full). Use for weekly depth checks; longest runtime in this catalog.",
-        "flow": "full",
-        "plan": "sim_actors.json",
-        "timing": "fast",
-        "mode": "trace",
-        "suite": "full",
-        "scenarios": [],
-        "enforce_websocket_gates": False,
-    },
-    {
         "catalog_slug": "api-sweep-max",
         "name": "API sweep max",
         "description": "Maximum single-run trace/API sweep: full suite plus explicit completed/rejected/cancelled/auto-cancel scenarios with websocket gates enforced.",
@@ -120,6 +33,31 @@ PROFILE_SPECS: list[dict[str, Any]] = [
         "skip_store_dashboard_probes": False,
         "no_auto_provision": False,
     },
+    {
+        "catalog_slug": "bounded-load-smoke",
+        "name": "Bounded load smoke",
+        "description": "Low-volume load smoke with guaranteed accepted baseline (>=1 completed) before reject/cancel tail checks.",
+        "flow": "load",
+        "plan": "sim_actors.json",
+        "timing": "fast",
+        "mode": "load",
+        "suite": None,
+        "scenarios": [],
+        "users": 2,
+        "orders": 3,
+        "interval": 2.0,
+        "reject": 0.35,
+        "extra_args": [
+            "--bounded-load-smoke-policy",
+            "--bounded-baseline-min-completed",
+            "1",
+            "--bounded-baseline-max-attempts",
+            "3",
+            "--bounded-tail-cancel-rate",
+            "0.15",
+        ],
+        "enforce_websocket_gates": False,
+    },
 ]
 
 # schedule spec keys:
@@ -131,79 +69,9 @@ PROFILE_SPECS: list[dict[str, Any]] = [
 # - status
 SCHEDULE_SPECS: list[dict[str, Any]] = [
     {
-        "catalog_slug": "catalog-daily-doctor-utc-0800",
-        "profile_catalog_slug": "daily-doctor",
-        "title": "Catalog: Daily doctor (08:00 UTC daily, paused)",
-        "description": "Paused template — resume in Schedules to enable automatic runs.",
-        "period": "daily",
-        "repeat": "daily",
-        "stop_rule": "never",
-        "runs_per_period": 1,
-        "all_day": False,
-        "run_slots": [{"time": "08:00"}],
-        "timezone": "UTC",
-        "status": "paused",
-    },
-    {
-        "catalog_slug": "catalog-gates-on-doctor-utc-0800",
-        "profile_catalog_slug": "gates-on-doctor",
-        "title": "Catalog: Gates-on doctor (08:00 UTC daily, paused)",
-        "description": "Paused template — resume in Schedules to enable automatic runs.",
-        "period": "daily",
-        "repeat": "daily",
-        "stop_rule": "never",
-        "runs_per_period": 1,
-        "all_day": False,
-        "run_slots": [{"time": "08:00"}],
-        "timezone": "UTC",
-        "status": "paused",
-    },
-    {
-        "catalog_slug": "catalog-core-trace-utc-0800",
-        "profile_catalog_slug": "core-trace",
-        "title": "Catalog: Core trace (08:00 UTC daily, paused)",
-        "description": "Paused template — resume in Schedules to enable automatic runs.",
-        "period": "daily",
-        "repeat": "daily",
-        "stop_rule": "never",
-        "runs_per_period": 1,
-        "all_day": False,
-        "run_slots": [{"time": "08:00"}],
-        "timezone": "UTC",
-        "status": "paused",
-    },
-    {
         "catalog_slug": "catalog-bounded-load-smoke-utc-0800",
         "profile_catalog_slug": "bounded-load-smoke",
         "title": "Catalog: Bounded load smoke (08:00 UTC daily, paused)",
-        "description": "Paused template — resume in Schedules to enable automatic runs.",
-        "period": "daily",
-        "repeat": "daily",
-        "stop_rule": "never",
-        "runs_per_period": 1,
-        "all_day": False,
-        "run_slots": [{"time": "08:00"}],
-        "timezone": "UTC",
-        "status": "paused",
-    },
-    {
-        "catalog_slug": "catalog-menu-gates-utc-0800",
-        "profile_catalog_slug": "menu-gates",
-        "title": "Catalog: Menu gates (08:00 UTC daily, paused)",
-        "description": "Paused template — resume in Schedules to enable automatic runs.",
-        "period": "daily",
-        "repeat": "daily",
-        "stop_rule": "never",
-        "runs_per_period": 1,
-        "all_day": False,
-        "run_slots": [{"time": "08:00"}],
-        "timezone": "UTC",
-        "status": "paused",
-    },
-    {
-        "catalog_slug": "catalog-weekly-full-utc-0800",
-        "profile_catalog_slug": "weekly-full",
-        "title": "Catalog: Weekly full (08:00 UTC daily, paused)",
         "description": "Paused template — resume in Schedules to enable automatic runs.",
         "period": "daily",
         "repeat": "daily",
@@ -230,6 +98,9 @@ SCHEDULE_SPECS: list[dict[str, Any]] = [
     },
 ]
 
+ACTIVE_CATALOG_PROFILE_SLUGS = {spec["catalog_slug"] for spec in PROFILE_SPECS}
+ACTIVE_CATALOG_SCHEDULE_SLUGS = {spec["catalog_slug"] for spec in SCHEDULE_SPECS}
+
 
 def catalog_seed_skip_requested() -> bool:
     return os.getenv("SIM_SKIP_CATALOG_SEED", "").strip().lower() in {"1", "true", "yes"}
@@ -242,6 +113,9 @@ def _anchor_start_iso() -> str:
 def _profile_row_values(spec: dict[str, Any], now: str) -> dict[str, Any]:
     return {
         "catalog_slug": spec["catalog_slug"],
+        "catalog_managed": 1,
+        "status": "active",
+        "archived_at": None,
         "name": spec["name"],
         "description": spec.get("description"),
         "flow": spec["flow"],
@@ -273,12 +147,15 @@ def _profile_row_values(spec: dict[str, Any], now: str) -> dict[str, Any]:
 def _upsert_profiles_sqlite(conn: Any, now: str) -> None:
     for spec in PROFILE_SPECS:
         slug = spec["catalog_slug"]
-        row = conn.execute("SELECT id FROM run_profiles WHERE catalog_slug = ?", (slug,)).fetchone()
+        row = conn.execute("SELECT id, catalog_managed FROM run_profiles WHERE catalog_slug = ?", (slug,)).fetchone()
         v = _profile_row_values(spec, now)
         if row:
+            if not bool(row["catalog_managed"]):
+                continue
             conn.execute(
                 """
                 UPDATE run_profiles SET
+                    status = ?, archived_at = ?, catalog_managed = ?,
                     name = ?, description = ?, flow = ?, plan = ?, timing = ?, mode = ?, suite = ?, scenarios = ?,
                     store_id = ?, phone = ?, all_users = ?, strict_plan = ?, skip_app_probes = ?,
                     skip_store_dashboard_probes = ?, no_auto_provision = ?, enforce_websocket_gates = ?,
@@ -287,6 +164,9 @@ def _upsert_profiles_sqlite(conn: Any, now: str) -> None:
                 WHERE catalog_slug = ?
                 """,
                 (
+                    v["status"],
+                    v["archived_at"],
+                    v["catalog_managed"],
                     v["name"],
                     v["description"],
                     v["flow"],
@@ -321,8 +201,8 @@ def _upsert_profiles_sqlite(conn: Any, now: str) -> None:
                     user_id, name, description, flow, plan, timing, mode, suite, scenarios, store_id, phone,
                     all_users, strict_plan, skip_app_probes, skip_store_dashboard_probes, no_auto_provision,
                     enforce_websocket_gates, post_order_actions, users, orders, interval, reject, continuous,
-                    extra_args, created_at, updated_at, catalog_slug
-                ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    extra_args, status, archived_at, created_at, updated_at, catalog_slug, catalog_managed
+                ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     v["name"],
@@ -348,9 +228,12 @@ def _upsert_profiles_sqlite(conn: Any, now: str) -> None:
                     v["reject"],
                     v["continuous"],
                     v["extra_args"],
+                    v["status"],
+                    v["archived_at"],
                     v["created_at"],
                     v["updated_at"],
                     slug,
+                    v["catalog_managed"],
                 ),
             )
 
@@ -364,12 +247,15 @@ def _upsert_profiles_postgres(now: str) -> None:
             for spec in PROFILE_SPECS:
                 slug = spec["catalog_slug"]
                 v = _profile_row_values(spec, now)
-                cursor.execute("SELECT id FROM run_profiles WHERE catalog_slug = %s", (slug,))
+                cursor.execute("SELECT id, catalog_managed FROM run_profiles WHERE catalog_slug = %s", (slug,))
                 exists = cursor.fetchone()
                 if exists:
+                    if not bool(exists[1]):
+                        continue
                     cursor.execute(
                         """
                         UPDATE run_profiles SET
+                            status = %s, archived_at = %s, catalog_managed = %s,
                             name = %s, description = %s, flow = %s, plan = %s, timing = %s, mode = %s, suite = %s,
                             scenarios = %s::jsonb, store_id = %s, phone = %s, all_users = %s, strict_plan = %s,
                             skip_app_probes = %s, skip_store_dashboard_probes = %s, no_auto_provision = %s,
@@ -378,6 +264,9 @@ def _upsert_profiles_postgres(now: str) -> None:
                         WHERE catalog_slug = %s
                         """,
                         (
+                            v["status"],
+                            v["archived_at"],
+                            bool(v["catalog_managed"]),
                             v["name"],
                             v["description"],
                             v["flow"],
@@ -412,10 +301,10 @@ def _upsert_profiles_postgres(now: str) -> None:
                             user_id, name, description, flow, plan, timing, mode, suite, scenarios, store_id, phone,
                             all_users, strict_plan, skip_app_probes, skip_store_dashboard_probes, no_auto_provision,
                             enforce_websocket_gates, post_order_actions, users, orders, interval, reject, continuous,
-                            extra_args, created_at, updated_at, catalog_slug
+                            extra_args, status, archived_at, created_at, updated_at, catalog_slug, catalog_managed
                         ) VALUES (
                             NULL, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s::jsonb, %s, %s, %s
+                            %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s
                         )
                         """,
                         (
@@ -442,9 +331,12 @@ def _upsert_profiles_postgres(now: str) -> None:
                             v["reject"],
                             bool(v["continuous"]),
                             v["extra_args"],
+                            v["status"],
+                            v["archived_at"],
                             v["created_at"],
                             v["updated_at"],
                             slug,
+                            bool(v["catalog_managed"]),
                         ),
                     )
         conn.commit()
@@ -452,23 +344,25 @@ def _upsert_profiles_postgres(now: str) -> None:
         conn.close()
 
 
-def _profile_id_for_catalog_slug(m: Any, slug: str) -> int:
+def _profile_id_for_catalog_slug(m: Any, slug: str) -> int | None:
     if m.USE_POSTGRES:
         conn = m._get_db_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM run_profiles WHERE catalog_slug = %s", (slug,))
+                cursor.execute(
+                    "SELECT id FROM run_profiles WHERE catalog_slug = %s AND catalog_managed = TRUE AND status <> %s",
+                    (slug, "archived"),
+                )
                 row = cursor.fetchone()
         finally:
             conn.close()
-        if not row:
-            raise RuntimeError(f"Catalog profile {slug!r} missing after seed upsert.")
-        return int(row[0])
+        return int(row[0]) if row else None
     with m.DB_LOCK, m._db() as conn:
-        row = conn.execute("SELECT id FROM run_profiles WHERE catalog_slug = ?", (slug,)).fetchone()
-    if not row:
-        raise RuntimeError(f"Catalog profile {slug!r} missing after seed upsert.")
-    return int(row["id"])
+        row = conn.execute(
+            "SELECT id FROM run_profiles WHERE catalog_slug = ? AND catalog_managed = 1 AND status <> ?",
+            (slug, "archived"),
+        ).fetchone()
+    return int(row["id"]) if row else None
 
 
 def _schedule_id_for_catalog_slug(m: Any, slug: str) -> int | None:
@@ -495,6 +389,12 @@ def _ensure_schedules(m: Any) -> None:
         prof_slug = str(spec["profile_catalog_slug"])
         profile_id = _profile_id_for_catalog_slug(m, prof_slug)
         existing_id = _schedule_id_for_catalog_slug(m, sched_slug)
+        if existing_id is not None:
+            existing = m._get_schedule(existing_id)
+            if not bool(existing.get("catalog_managed")):
+                continue
+        if profile_id is None:
+            continue
         req = ScheduleUpsertRequest(
             name=str(spec["title"]),
             description=str(spec.get("description") or ""),
@@ -523,6 +423,64 @@ def _ensure_schedules(m: Any) -> None:
             m._set_schedule_status(sid, status)
 
 
+def _prune_retired_catalog(m: Any) -> None:
+    """Retire catalog rows removed from PROFILE_SPECS / SCHEDULE_SPECS."""
+    active_profiles = ACTIVE_CATALOG_PROFILE_SLUGS
+    active_schedules = ACTIVE_CATALOG_SCHEDULE_SLUGS
+    now = m._utc_now()
+
+    if m.USE_POSTGRES:
+        conn = m._get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, catalog_slug FROM run_profiles
+                    WHERE catalog_slug IS NOT NULL AND catalog_managed = TRUE
+                    """
+                )
+                for row_id, slug in cursor.fetchall():
+                    if slug not in active_profiles:
+                        cursor.execute(
+                            "UPDATE run_profiles SET catalog_slug = NULL, updated_at = %s WHERE id = %s",
+                            (now, row_id),
+                        )
+                cursor.execute(
+                    """
+                    SELECT id, catalog_slug FROM schedules
+                    WHERE catalog_slug IS NOT NULL AND catalog_managed = TRUE
+                    """
+                )
+                for row_id, slug in cursor.fetchall():
+                    if slug not in active_schedules:
+                        m._set_schedule_status(int(row_id), "disabled")
+            conn.commit()
+        finally:
+            conn.close()
+        return
+
+    with m.DB_LOCK, m._db() as conn:
+        rows = conn.execute(
+            "SELECT id, catalog_slug FROM run_profiles WHERE catalog_slug IS NOT NULL AND catalog_managed = 1"
+        ).fetchall()
+        for row in rows:
+            slug = row["catalog_slug"]
+            if slug not in active_profiles:
+                conn.execute(
+                    "UPDATE run_profiles SET catalog_slug = NULL, updated_at = ? WHERE id = ?",
+                    (now, row["id"]),
+                )
+        sched_rows = conn.execute(
+            "SELECT id, catalog_slug FROM schedules WHERE catalog_slug IS NOT NULL AND catalog_managed = 1"
+        ).fetchall()
+        conn.commit()
+
+    for row in sched_rows:
+        slug = row["catalog_slug"]
+        if slug not in active_schedules:
+            m._set_schedule_status(int(row["id"]), "disabled")
+
+
 def ensure_catalog_seed() -> None:
     if catalog_seed_skip_requested():
         return
@@ -534,4 +492,6 @@ def ensure_catalog_seed() -> None:
     else:
         with m.DB_LOCK, m._db() as conn:
             _upsert_profiles_sqlite(conn, now)
+            conn.commit()
     _ensure_schedules(m)
+    _prune_retired_catalog(m)

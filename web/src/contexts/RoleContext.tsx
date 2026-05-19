@@ -120,11 +120,18 @@ export const ROLE_PERMISSIONS: RolePermissions = {
     { resource: "runs", action: "create" },
     { resource: "runs", action: "read" },
     { resource: "runs", action: "cancel" },
+    { resource: "runs", action: "delete" },
 
     { resource: "dashboard", action: "read" },
+    { resource: "schedules", action: "create" },
+    { resource: "schedules", action: "read" },
+    { resource: "schedules", action: "update" },
+    { resource: "schedules", action: "delete" },
+    { resource: "schedules", action: "trigger" },
 
     { resource: "archives", action: "read" },
     { resource: "retention", action: "read" },
+    { resource: "alerts", action: "read" },
   ],
 
   runner: [

@@ -2,6 +2,7 @@
 
 import { Pagination } from "../Pagination";
 import type { RunRow } from "../../lib/api";
+import { canDeleteRun, canStopRun } from "../../lib/run-control";
 
 interface RecentRunsTableProps {
   runs: RunRow[];
@@ -13,7 +14,6 @@ interface RecentRunsTableProps {
   onWatchRun?: (runId: number) => void;
   onCancelRun: (runId: number) => void;
   onDeleteRunRequest: (run: RunRow) => void;
-  isActiveStatus: (status: string) => boolean;
 }
 
 export default function RecentRunsTable({
@@ -26,7 +26,6 @@ export default function RecentRunsTable({
   onWatchRun,
   onCancelRun,
   onDeleteRunRequest,
-  isActiveStatus,
 }: RecentRunsTableProps) {
   return (
     <div className="panel">
@@ -101,7 +100,7 @@ export default function RecentRunsTable({
                   ) : null}
                   <button
                     className="small"
-                    disabled={!isActiveStatus(run.status)}
+                    disabled={!canStopRun(run)}
                     onClick={(event) => {
                       event.stopPropagation();
                       onCancelRun(run.id);
@@ -111,7 +110,7 @@ export default function RecentRunsTable({
                   </button>
                   <button
                     className="secondary small"
-                    disabled={isActiveStatus(run.status)}
+                    disabled={!canDeleteRun(run)}
                     onClick={(event) => {
                       event.stopPropagation();
                       onDeleteRunRequest(run);

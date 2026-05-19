@@ -22,3 +22,18 @@ def list_archive_runs(
     current_user: dict = Depends(require_permission("archives", "read")),
 ) -> dict[str, Any]:
     return service.list_runs(limit, offset)
+
+
+@router.get("/api/v1/archives/profiles")
+def list_archived_profiles(current_user: dict = Depends(require_permission("archives", "read"))) -> dict[str, Any]:
+    return service.list_profiles()
+
+
+@router.get("/api/v1/archives/schedules")
+def list_archived_schedules(current_user: dict = Depends(require_permission("archives", "read"))) -> dict[str, Any]:
+    return service.list_schedules()
+
+
+@router.get("/api/v1/archives/integration-mappings")
+def list_archived_integration_mappings(current_user: dict = Depends(require_permission("archives", "read"))) -> dict[str, Any]:
+    return service.list_integration_mappings()

@@ -1,3 +1,4 @@
+import asyncio
 import pathlib
 import os
 import sys
@@ -37,6 +38,12 @@ def _fixtures():
 
 
 class RunPlanTests(unittest.TestCase):
+    def test_flow_alias_accepts_common_robot_typo(self) -> None:
+        resolved = resolve_flow("ronot-complete")
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved["name"], "robot-complete")
+
     def test_loads_json_plan_with_user_gps_and_store_ids(self) -> None:
         from run_plan import load_run_plan
 
@@ -128,6 +135,8 @@ class RunPlanTests(unittest.TestCase):
                   },
                   "rules": {
                     "strict_plan": true,
+                    "failure_policy": "api_only",
+                    "preflight_strategy": "auto_recover",
                     "run_app_probes": false,
                     "run_store_dashboard_probes": false,
                     "run_post_order_actions": true,
@@ -161,6 +170,8 @@ class RunPlanTests(unittest.TestCase):
         self.assertEqual(plan.schema_version, 2)
         self.assertEqual(plan.runtime_defaults["flow"], "full")
         self.assertEqual(plan.rules["strict_plan"], True)
+        self.assertEqual(plan.rules["failure_policy"], "api_only")
+        self.assertEqual(plan.rules["preflight_strategy"], "auto_recover")
         self.assertEqual(plan.fixture_defaults["menu"]["price"], 1200)
         self.assertEqual(plan.payment_defaults["coupon_id"], 301)
         self.assertEqual(plan.review_defaults["comment"], "Plan review")
@@ -202,6 +213,8 @@ class RunPlanTests(unittest.TestCase):
             "REJECT_RATE",
             "SIM_CONTINUOUS",
             "SIM_STRICT_PLAN",
+            "SIM_FAILURE_POLICY",
+            "SIM_PREFLIGHT_STRATEGY",
             "SIM_RUN_APP_PROBES",
             "SIM_RUN_STORE_DASHBOARD_PROBES",
             "SIM_RUN_POST_ORDER_ACTIONS",
@@ -247,6 +260,8 @@ class RunPlanTests(unittest.TestCase):
                   },
                   "rules": {
                     "strict_plan": true,
+                    "failure_policy": "api_only",
+                    "preflight_strategy": "auto_recover",
                     "run_app_probes": false,
                     "run_store_dashboard_probes": false,
                     "run_post_order_actions": true,
@@ -290,6 +305,8 @@ class RunPlanTests(unittest.TestCase):
                 self.assertEqual(config.REJECT_RATE, 0.2)
                 self.assertTrue(config.SIM_CONTINUOUS)
                 self.assertTrue(config.SIM_STRICT_PLAN)
+                self.assertEqual(config.SIM_FAILURE_POLICY, "api_only")
+                self.assertEqual(config.SIM_PREFLIGHT_STRATEGY, "auto_recover")
                 self.assertFalse(config.SIM_RUN_APP_PROBES)
                 self.assertFalse(config.SIM_RUN_STORE_DASHBOARD_PROBES)
                 self.assertTrue(config.SIM_RUN_POST_ORDER_ACTIONS)
@@ -499,6 +516,45 @@ class RunPlanTests(unittest.TestCase):
 
             self.assertEqual(config.SIM_LAT, 1.25)
             self.assertEqual(config.SIM_LNG, 2.5)
+        finally:
+            (
+                config.USER_PHONE_NUMBER,
+                config.STORE_ID,
+                config.SUBENTITY_ID,
+                config.STORE_CURRENCY,
+                config.SIM_LAT,
+                config.SIM_LNG,
+            ) = previous
+
+    def test_selected_user_without_gps_falls_back_to_default_user_gps(self) -> None:
+        import config
+
+        previous = (
+            config.USER_PHONE_NUMBER,
+            config.STORE_ID,
+            config.SUBENTITY_ID,
+            config.STORE_CURRENCY,
+            config.SIM_LAT,
+            config.SIM_LNG,
+        )
+        actors = {
+            "defaults": {"user_phone": "+200"},
+            "users": [
+                {"phone": "+100", "role": "returning"},
+                {"phone": "+200", "role": "returning_default", "lat": 5.0, "lng": 6.0},
+            ],
+            "stores": [{"store_id": "FZY_ASK", "subentity_id": 7}],
+        }
+        try:
+            config.USER_PHONE_NUMBER = "+100"
+            config.STORE_ID = "FZY_ASK"
+            config.SIM_LAT = None
+            config.SIM_LNG = None
+
+            config.apply_actor_selection(actors)
+
+            self.assertEqual(config.SIM_LAT, 5.0)
+            self.assertEqual(config.SIM_LNG, 6.0)
         finally:
             (
                 config.USER_PHONE_NUMBER,
@@ -1194,6 +1250,7 @@ class AppAutopilotTests(unittest.IsolatedAsyncioTestCase):
                 fixtures=_fixtures(),
                 recorder=recorder,
                 timing=trace_runner.resolve_timing_profile("fast"),
+                observer=None,
             )
         finally:
             trace_runner._run_completed = original_run_completed
@@ -1445,6 +1502,44 @@ class HealthSummaryTests(unittest.TestCase):
         self.assertEqual(summary["websockets"]["expected"], 1)
         self.assertEqual(summary["websockets"]["matched"], 1)
         self.assertEqual(summary["websockets"]["match_rate"], 1.0)
+
+    def test_health_summary_api_only_degrades_for_precondition(self) -> None:
+        from health import build_health_summary
+
+        summary = build_health_summary(
+            duration_ms=500,
+            scenarios=[{"name": "coupon", "effective_verdict": "unsupported"}],
+            orders=[],
+            events=[],
+            issues=[
+                {
+                    "severity": "warning",
+                    "failure_class": "precondition",
+                    "code": "coupon_required",
+                }
+            ],
+            failure_policy="api_only",
+        )
+        self.assertEqual(summary["verdict"], "degraded")
+
+    def test_health_summary_api_only_fails_for_api_fault(self) -> None:
+        from health import build_health_summary
+
+        summary = build_health_summary(
+            duration_ms=500,
+            scenarios=[{"name": "payments", "effective_verdict": "degraded"}],
+            orders=[],
+            events=[],
+            issues=[
+                {
+                    "severity": "error",
+                    "failure_class": "api_fault",
+                    "code": "probe_http_server_error",
+                }
+            ],
+            failure_policy="api_only",
+        )
+        self.assertEqual(summary["verdict"], "failed")
 
     def test_ascii_bar_uses_proportional_width(self) -> None:
         from health import ascii_bar
@@ -2117,6 +2212,67 @@ class LoadWorkerRuntimeTests(unittest.TestCase):
         self.assertEqual(counts, {0: 5})
 
 
+class WebsocketStatusPrimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_wait_for_status_ws_succeeds_after_primed_status(self) -> None:
+        import user_sim
+
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        user_sim._offer_ws_status(queue, "payment_processing")
+        status = await user_sim.wait_for_status_ws(
+            queue,
+            expected_statuses={"payment_processing"},
+            timeout_seconds=1.0,
+        )
+        self.assertEqual(status, "payment_processing")
+
+    async def test_prime_ws_status_from_order_enqueues_current_status(self) -> None:
+        import user_sim
+
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        recorder = RunRecorder.bootstrap()
+        with mock.patch.object(
+            user_sim,
+            "fetch_order",
+            mock.AsyncMock(return_value={"status": "completed", "id": 42}),
+        ):
+            observed = await user_sim.prime_ws_status_from_order(
+                httpx.AsyncClient(),
+                queue,
+                user_token="token",
+                token_source="user_login_token",
+                order_db_id=42,
+                order_ref="#42",
+                recorder=recorder,
+            )
+        self.assertEqual(observed, "completed")
+        self.assertEqual(queue.get_nowait(), "completed")
+
+
+class LoadModeTimingTests(unittest.TestCase):
+    def test_fast_timing_profile_uses_sub_second_delays(self) -> None:
+        from scenarios import resolve_timing_profile
+
+        fast = resolve_timing_profile("fast")
+        self.assertLessEqual(fast.store_decision_delay.max_seconds, 1.0)
+        self.assertLessEqual(fast.store_prep_delay.max_seconds, 1.0)
+        for status in (
+            "enroute_pickup",
+            "robot_arrived_for_pickup",
+            "enroute_delivery",
+            "robot_arrived_for_delivery",
+            "completed",
+        ):
+            self.assertLessEqual(fast.robot_delays[status].max_seconds, 1.0)
+
+    def test_robot_lifecycle_statuses_have_timing_entries(self) -> None:
+        import robot_sim
+        from scenarios import resolve_timing_profile
+
+        realistic = resolve_timing_profile("realistic")
+        for status in robot_sim.ROBOT_LIFECYCLE:
+            self.assertIn(status, realistic.robot_delays)
+
+
 class InteractionCatalogueTests(unittest.TestCase):
     def test_menu_add_to_cart_rules(self) -> None:
         self.assertTrue(
@@ -2154,6 +2310,415 @@ class InteractionCatalogueTests(unittest.TestCase):
             resolve_flow("receipt-review")["scenarios"],
             ["receipt_review_reorder"],
         )
+        self.assertEqual(resolve_flow("ronot-complete")["name"], "robot-complete")
+
+
+class FlowReliabilityPolicyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_coupon_retry_skips_api_fault_store_and_continues(self) -> None:
+        import config
+        import trace_runner
+        import user_sim
+        import store_sim
+        from scenarios import resolve_timing_profile
+        from store_sim import HttpApiError
+
+        recorder = RunRecorder.bootstrap()
+        calls: list[str] = []
+        previous = (
+            config.SIM_FAILURE_POLICY,
+            config.SIM_PREFLIGHT_STRATEGY,
+            config.SIM_STORE_EXPLICIT,
+            config.SIM_COUPON_ID,
+            getattr(config, "SIM_ACTORS", None),
+        )
+        original_ensure = trace_runner._ensure_coupon_for_scenario
+        original_candidates = trace_runner._trace_store_candidates
+        original_store_auth = trace_runner._bootstrap_store_auth
+        original_fixtures = trace_runner.user_sim.bootstrap_fixtures
+        original_run_completed = trace_runner._run_completed
+        attempt = {"count": 0}
+
+        async def fake_ensure_coupon(*args, **kwargs):
+            attempt["count"] += 1
+            if attempt["count"] >= 2:
+                config.SIM_COUPON_ID = 301
+                return True
+            return False
+
+        def fake_candidates():
+            return ["FZY_BAD", "FZY_GOOD"]
+
+        async def fake_store_auth(client, recorder, store_id=None):
+            if store_id == "FZY_BAD":
+                raise HttpApiError(
+                    url="https://example.test/v1/entities/store/login",
+                    status_code=500,
+                    response_text="server error",
+                )
+            return store_sim.StoreSession(
+                last_mile_token="store-token",
+                fainzy_token=None,
+                subentity={"id": 2, "setup": True},
+                store_id=2,
+                token_source="test",
+                store_login_id="FZY_GOOD",
+            )
+
+        async def fake_fixtures(*args, **kwargs):
+            calls.append(str(kwargs.get("subentity_id")))
+            return _fixtures()
+
+        async def fake_run_completed(*args, **kwargs):
+            calls.append("completed")
+
+        config.SIM_FAILURE_POLICY = "api_only"
+        config.SIM_PREFLIGHT_STRATEGY = "auto_recover"
+        config.SIM_STORE_EXPLICIT = False
+        config.SIM_COUPON_ID = None
+        config.SIM_ACTORS = {
+            "stores": [{"store_id": "FZY_BAD"}, {"store_id": "FZY_GOOD"}],
+            "users": [{"phone": "+100"}],
+        }
+        trace_runner._ensure_coupon_for_scenario = fake_ensure_coupon
+        trace_runner._trace_store_candidates = fake_candidates
+        trace_runner._bootstrap_store_auth = fake_store_auth
+        trace_runner.user_sim.bootstrap_fixtures = fake_fixtures
+        trace_runner._run_completed = fake_run_completed
+        try:
+            await trace_runner._run_payment_scenario(
+                object(),
+                scenario="returning_paid_with_coupon",
+                user_session=user_sim.UserSession(
+                    token="user-token",
+                    user_id=13,
+                    user={"id": 13},
+                    token_source="test",
+                ),
+                store_session=store_sim.StoreSession(
+                    last_mile_token="store-token",
+                    fainzy_token=None,
+                    subentity={"id": 1, "setup": True},
+                    store_id=1,
+                    token_source="test",
+                    store_login_id="FZY_PRIMARY",
+                ),
+                fixtures=_fixtures(),
+                recorder=recorder,
+                timing=resolve_timing_profile("fast"),
+                observer=None,
+            )
+        finally:
+            trace_runner._ensure_coupon_for_scenario = original_ensure
+            trace_runner._trace_store_candidates = original_candidates
+            trace_runner._bootstrap_store_auth = original_store_auth
+            trace_runner.user_sim.bootstrap_fixtures = original_fixtures
+            trace_runner._run_completed = original_run_completed
+            (
+                config.SIM_FAILURE_POLICY,
+                config.SIM_PREFLIGHT_STRATEGY,
+                config.SIM_STORE_EXPLICIT,
+                config.SIM_COUPON_ID,
+                config.SIM_ACTORS,
+            ) = previous
+
+        api_issues = [
+            item
+            for item in recorder.issues
+            if item.get("code") == "coupon_retry_store_api_error"
+        ]
+        self.assertEqual(len(api_issues), 1)
+        self.assertEqual(api_issues[0]["failure_class"], "api_fault")
+        self.assertIn("completed", calls)
+
+    async def test_coupon_exhaustion_finishes_unsupported_without_raise(self) -> None:
+        import config
+        import trace_runner
+        import user_sim
+        import store_sim
+        from scenarios import resolve_timing_profile
+
+        recorder = RunRecorder.bootstrap()
+        previous = (
+            config.SIM_FAILURE_POLICY,
+            config.SIM_PREFLIGHT_STRATEGY,
+            config.SIM_STORE_EXPLICIT,
+            config.SIM_COUPON_ID,
+        )
+        original_ensure = trace_runner._ensure_coupon_for_scenario
+
+        async def fake_ensure_coupon(*args, **kwargs):
+            return False
+
+        config.SIM_FAILURE_POLICY = "api_only"
+        config.SIM_PREFLIGHT_STRATEGY = "auto_recover"
+        config.SIM_STORE_EXPLICIT = True
+        config.SIM_COUPON_ID = None
+        trace_runner._ensure_coupon_for_scenario = fake_ensure_coupon
+        try:
+            await trace_runner._run_payment_scenario(
+                object(),
+                scenario="returning_paid_with_coupon",
+                user_session=user_sim.UserSession(
+                    token="user-token",
+                    user_id=13,
+                    user={"id": 13},
+                    token_source="test",
+                ),
+                store_session=store_sim.StoreSession(
+                    last_mile_token="store-token",
+                    fainzy_token=None,
+                    subentity={"id": 7, "setup": True},
+                    store_id=7,
+                    token_source="test",
+                ),
+                fixtures=_fixtures(),
+                recorder=recorder,
+                timing=resolve_timing_profile("fast"),
+                observer=None,
+            )
+        finally:
+            trace_runner._ensure_coupon_for_scenario = original_ensure
+            (
+                config.SIM_FAILURE_POLICY,
+                config.SIM_PREFLIGHT_STRATEGY,
+                config.SIM_STORE_EXPLICIT,
+                config.SIM_COUPON_ID,
+            ) = previous
+
+        scenario = recorder.scenarios["returning_paid_with_coupon"]
+        self.assertEqual(scenario["base_verdict"], "unsupported")
+        self.assertEqual(scenario["actual_final_status"], "coupon_missing")
+        self.assertIn("coupon", scenario.get("note", "").lower())
+
+    def test_new_user_already_setup_marks_unsupported(self) -> None:
+        import trace_runner
+        import user_sim
+
+        recorder = RunRecorder.bootstrap()
+        trace_runner._run_new_user_setup(
+            user_session=user_sim.UserSession(
+                token="user-token",
+                user_id=13,
+                user={"id": 13, "email": "existing@example.com"},
+                token_source="user_cached_token",
+            ),
+            fixtures=_fixtures(),
+            recorder=recorder,
+        )
+        scenario = recorder.scenarios["new_user_setup"]
+        self.assertEqual(scenario["base_verdict"], "unsupported")
+        self.assertEqual(scenario["actual_final_status"], "account_already_setup")
+        issue = next(item for item in recorder.issues if item.get("code") == "new_user_not_created")
+        self.assertEqual(issue["failure_class"], "precondition")
+
+    async def test_otp_retry_records_precondition_decision_and_continues(self) -> None:
+        import config
+        import user_sim
+        from user_sim import HttpApiError
+
+        recorder = RunRecorder.bootstrap()
+        previous_phone = getattr(config, "USER_PHONE_NUMBER", None)
+        previous_token = getattr(config, "USER_LASTMILE_TOKEN", None)
+        verify_calls = {"count": 0}
+
+        async def fake_auth_request(client, *, recorder=None, action=None, **kwargs):
+            if action == "request_user_otp":
+                return {"data": "123456"}
+            if action == "verify_user_otp":
+                verify_calls["count"] += 1
+                if verify_calls["count"] == 1:
+                    raise HttpApiError(
+                        url="https://example.test/v1/auth/otp/verify/",
+                        status_code=400,
+                        response_text='{"detail":"invalid otp"}',
+                    )
+                return {
+                    "data": {
+                        "setup_complete": True,
+                        "is_active": True,
+                        "user": {"id": 99},
+                    }
+                }
+            if action == "fetch_user_token":
+                return {"data": {"token": "fresh-token", "user": {"id": 99}}}
+            raise AssertionError(f"unexpected action {action}")
+
+        config.USER_PHONE_NUMBER = "+2348000000099"
+        config.USER_LASTMILE_TOKEN = None
+        try:
+            with mock.patch.object(user_sim, "_auth_request", fake_auth_request):
+                session = await user_sim.bootstrap_auth(object(), recorder, scenario="completed")
+        finally:
+            if previous_phone is None:
+                delattr(config, "USER_PHONE_NUMBER")
+            else:
+                config.USER_PHONE_NUMBER = previous_phone
+            if previous_token is None:
+                delattr(config, "USER_LASTMILE_TOKEN")
+            else:
+                config.USER_LASTMILE_TOKEN = previous_token
+
+        self.assertEqual(verify_calls["count"], 2)
+        self.assertEqual(session.token, "fresh-token")
+        retry_decisions = [
+            item
+            for item in recorder.decisions
+            if item.get("reason_code") == "otp_retry_after_invalid_or_expired"
+        ]
+        self.assertEqual(len(retry_decisions), 1)
+        self.assertEqual(retry_decisions[0]["failure_class"], "precondition")
+        self.assertTrue(retry_decisions[0]["run_continued"])
+
+    def test_artifact_write_preserves_failure_class_and_policy(self) -> None:
+        import config
+        import json
+
+        previous_policy = config.SIM_FAILURE_POLICY
+        config.SIM_FAILURE_POLICY = "api_only"
+        recorder = RunRecorder.bootstrap()
+        recorder.record_issue(
+            severity="warning",
+            code="coupon_required",
+            message="coupon missing",
+            failure_class="precondition",
+            scenario="returning_paid_with_coupon",
+        )
+        recorder.record_decision(
+            action="retry_coupon_with_alternate_store",
+            status="called",
+            reason="coupon_missing_try_next_store",
+            message="trying next store",
+            failure_class="precondition",
+            scenario="returning_paid_with_coupon",
+        )
+        recorder.start_scenario("returning_paid_with_coupon")
+        recorder.finish_scenario(
+            "returning_paid_with_coupon",
+            verdict="unsupported",
+            actual_final_status="coupon_missing",
+        )
+        try:
+            events_path, report_path, _story_path = recorder.write()
+            payload = json.loads(events_path.read_text(encoding="utf-8"))
+            report_text = report_path.read_text(encoding="utf-8")
+        finally:
+            config.SIM_FAILURE_POLICY = previous_policy
+
+        self.assertEqual(payload["run"]["config"]["failure_policy"], "api_only")
+        self.assertEqual(payload["issues"][0]["failure_class"], "precondition")
+        self.assertEqual(payload["decisions"][0]["failure_class"], "precondition")
+        self.assertIn("DEGRADED", report_text.upper())
+
+    def test_health_summary_strict_fails_on_precondition_error(self) -> None:
+        from health import build_health_summary
+
+        summary = build_health_summary(
+            duration_ms=100,
+            scenarios=[{"name": "menus", "effective_verdict": "degraded"}],
+            orders=[],
+            events=[],
+            issues=[
+                {
+                    "severity": "error",
+                    "failure_class": "precondition",
+                    "code": "menu_missing",
+                }
+            ],
+            failure_policy="strict",
+        )
+        self.assertEqual(summary["verdict"], "failed")
+
+    async def test_bootstrap_precondition_degrades_in_api_only(self) -> None:
+        import config
+        import trace_runner
+        import user_sim
+
+        recorder = RunRecorder.bootstrap()
+        previous_policy = config.SIM_FAILURE_POLICY
+        previous_preflight = config.SIM_PREFLIGHT_STRATEGY
+        config.SIM_FAILURE_POLICY = "api_only"
+        config.SIM_PREFLIGHT_STRATEGY = "auto_recover"
+
+        async def failing_auth(*args, **kwargs):
+            raise RuntimeError("fixtures unavailable for planned store")
+
+        originals = trace_runner.user_sim.bootstrap_auth
+        trace_runner.user_sim.bootstrap_auth = failing_auth
+        try:
+            await trace_runner.run(
+                recorder=recorder,
+                suite=None,
+                scenarios=["menu_available"],
+                timing_profile="fast",
+            )
+        finally:
+            trace_runner.user_sim.bootstrap_auth = originals
+            config.SIM_FAILURE_POLICY = previous_policy
+            config.SIM_PREFLIGHT_STRATEGY = previous_preflight
+
+        bootstrap_issues = [
+            item for item in recorder.issues if item.get("code") == "trace_bootstrap_precondition"
+        ]
+        self.assertEqual(len(bootstrap_issues), 1)
+        self.assertEqual(bootstrap_issues[0]["failure_class"], "precondition")
+        scenario = recorder.scenarios["menu_available"]
+        self.assertEqual(scenario["base_verdict"], "unsupported")
+
+    async def test_bootstrap_api_fault_still_raises_in_api_only(self) -> None:
+        import config
+        import trace_runner
+
+        recorder = RunRecorder.bootstrap()
+        previous_policy = config.SIM_FAILURE_POLICY
+        previous_preflight = config.SIM_PREFLIGHT_STRATEGY
+        config.SIM_FAILURE_POLICY = "api_only"
+        config.SIM_PREFLIGHT_STRATEGY = "auto_recover"
+
+        async def failing_auth(*args, **kwargs):
+            raise RuntimeError("connection timed out during bootstrap")
+
+        originals = trace_runner.user_sim.bootstrap_auth
+        trace_runner.user_sim.bootstrap_auth = failing_auth
+        try:
+            with self.assertRaises(RuntimeError):
+                await trace_runner.run(
+                    recorder=recorder,
+                    suite=None,
+                    scenarios=["menu_available"],
+                    timing_profile="fast",
+                )
+        finally:
+            trace_runner.user_sim.bootstrap_auth = originals
+            config.SIM_FAILURE_POLICY = previous_policy
+            config.SIM_PREFLIGHT_STRATEGY = previous_preflight
+
+    async def test_bootstrap_failure_raises_in_strict_mode(self) -> None:
+        import config
+        import trace_runner
+
+        recorder = RunRecorder.bootstrap()
+        previous_policy = config.SIM_FAILURE_POLICY
+        previous_preflight = config.SIM_PREFLIGHT_STRATEGY
+        config.SIM_FAILURE_POLICY = "strict"
+        config.SIM_PREFLIGHT_STRATEGY = "hard_stop"
+
+        async def failing_auth(*args, **kwargs):
+            raise RuntimeError("fixtures unavailable for planned store")
+
+        originals = trace_runner.user_sim.bootstrap_auth
+        trace_runner.user_sim.bootstrap_auth = failing_auth
+        try:
+            with self.assertRaises(RuntimeError):
+                await trace_runner.run(
+                    recorder=recorder,
+                    suite=None,
+                    scenarios=["menu_available"],
+                    timing_profile="fast",
+                )
+        finally:
+            trace_runner.user_sim.bootstrap_auth = originals
+            config.SIM_FAILURE_POLICY = previous_policy
+            config.SIM_PREFLIGHT_STRATEGY = previous_preflight
 
 
 if __name__ == "__main__":

@@ -6,9 +6,22 @@ import { formatRelativeTime, formatRunDuration } from "../../../lib/time-format"
 interface RunDetailHeaderProps {
   run: RunRow;
   onBack: () => void;
+  onStop?: () => void;
+  onDelete?: () => void;
+  canStop?: boolean;
+  canDelete?: boolean;
+  stopPending?: boolean;
 }
 
-export default function RunDetailHeader({ run, onBack }: RunDetailHeaderProps) {
+export default function RunDetailHeader({
+  run,
+  onBack,
+  onStop,
+  onDelete,
+  canStop = false,
+  canDelete = false,
+  stopPending = false,
+}: RunDetailHeaderProps) {
   const statusStyles =
     run.status === "succeeded"
       ? { background: "#dcfce7", color: "#166534", border: "#86efac" }
@@ -21,7 +34,7 @@ export default function RunDetailHeader({ run, onBack }: RunDetailHeaderProps) {
       <button onClick={onBack} className="secondary" style={{ width: "auto" }}>
         Back to Runs
       </button>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h1>Run #{run.id}</h1>
         <span
           style={{
@@ -37,6 +50,28 @@ export default function RunDetailHeader({ run, onBack }: RunDetailHeaderProps) {
         >
           {run.status}
         </span>
+        {onStop ? (
+          <button
+            type="button"
+            className="secondary"
+            style={{ width: "auto" }}
+            disabled={!canStop || stopPending}
+            onClick={onStop}
+          >
+            {stopPending ? "Stopping..." : "Stop Run"}
+          </button>
+        ) : null}
+        {onDelete ? (
+          <button
+            type="button"
+            className="secondary"
+            style={{ width: "auto" }}
+            disabled={!canDelete}
+            onClick={onDelete}
+          >
+            Delete Run
+          </button>
+        ) : null}
       </div>
       <div className="grid three">
         <div className="muted">Flow: <strong>{run.flow}</strong></div>

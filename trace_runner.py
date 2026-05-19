@@ -15,6 +15,7 @@ from rich.console import Console
 
 import config
 import app_probes
+from failure_policy import classify_http_status, classify_issue, is_api_only, is_hard_stop
 from interaction_catalog import (
     MENU_AVAILABLE,
     MENU_SOLD_OUT,
@@ -60,6 +61,8 @@ def _trace_requires_fixtures(scenarios: list[str]) -> bool:
 
 def _trace_store_candidates() -> list[str | None]:
     actors = getattr(config, "SIM_ACTORS", {}) or {}
+    failure_policy = getattr(config, "SIM_FAILURE_POLICY", "api_only")
+    preflight_strategy = getattr(config, "SIM_PREFLIGHT_STRATEGY", "auto_recover")
     actor_store_ids: list[str] = []
     for store in actors.get("stores", []):
         if not isinstance(store, dict):
@@ -69,6 +72,9 @@ def _trace_store_candidates() -> list[str | None]:
             actor_store_ids.append(str(store_id))
 
     if not actor_store_ids:
+        if is_api_only(failure_policy) and not is_hard_stop(preflight_strategy):
+            configured_store = str(getattr(config, "STORE_ID", "") or "").strip()
+            return [configured_store or None]
         raise RuntimeError(
             "No stores were found in the selected plan. "
             "All trace runs now require store selection from plan stores only."
@@ -77,6 +83,8 @@ def _trace_store_candidates() -> list[str | None]:
     if config.SIM_STORE_EXPLICIT:
         explicit_store = config.STORE_ID or ""
         if explicit_store not in actor_store_ids:
+            if is_api_only(failure_policy) and not is_hard_stop(preflight_strategy):
+                return [explicit_store or None]
             raise RuntimeError(
                 f"Explicit store {explicit_store!r} is not present in the selected plan stores."
             )
@@ -192,15 +200,29 @@ async def _bootstrap_trace_store_context(
                         ),
                     )
             last_error = exc
-            recorder.record_issue(
-                severity="error" if config.SIM_STORE_EXPLICIT else "warning",
+            failure_class = classify_issue(
                 code="store_candidate_unusable",
+                message=str(exc),
+                default="precondition",
+            )
+            hard_stop = is_hard_stop(config.SIM_PREFLIGHT_STRATEGY)
+            severity = "warning"
+            if failure_class == "api_fault":
+                severity = "error"
+            elif config.SIM_STORE_EXPLICIT and (
+                hard_stop or not is_api_only(config.SIM_FAILURE_POLICY)
+            ):
+                severity = "error"
+            recorder.record_issue(
+                severity=severity,
+                code="store_candidate_unusable",
+                failure_class=failure_class,
                 actor="trace",
                 scenario="bootstrap",
                 step="auto_select_store",
                 message=f"Store candidate {candidate or config.STORE_ID or 'default'} could not be used: {exc}",
             )
-            if config.SIM_STORE_EXPLICIT:
+            if config.SIM_STORE_EXPLICIT and severity == "error":
                 raise
             console.print(
                 f"[yellow]trace:[/] Store {candidate or 'default'} could not be used: {exc}"
@@ -466,8 +488,9 @@ async def _ensure_coupon_for_scenario(
     )
     if selected is None:
         recorder.record_issue(
-            severity="error",
+            severity="warning",
             code="coupon_unavailable",
+            failure_class="precondition",
             actor="user",
             scenario=scenario,
             step="checkout_coupon",
@@ -851,7 +874,7 @@ async def _fulfill_placed_order(
         return "websocket_gate_failed"
 
     previous_status = "ready"
-    for status, _ in robot_sim.ROBOT_LIFECYCLE:
+    for status in robot_sim.ROBOT_LIFECYCLE:
         if not await _wait_for_ws_gate(
             observer,
             recorder=recorder,
@@ -1472,8 +1495,9 @@ def _run_new_user_setup(
     )
     if user_session.token_source != "user_new_account_create":
         recorder.record_issue(
-            severity="error",
+            severity="warning",
             code="new_user_not_created",
+            failure_class="precondition",
             actor="user",
             scenario=scenario,
             step="setup_account",
@@ -1482,7 +1506,12 @@ def _run_new_user_setup(
                 "not prove the new-user account creation path."
             ),
         )
-        _finish_checked(recorder, scenario, actual_final_status="account_already_setup")
+        recorder.finish_scenario(
+            scenario,
+            verdict="unsupported",
+            actual_final_status="account_already_setup",
+            note="Selected phone is already setup_complete and cannot prove fresh signup.",
+        )
         return
     _finish_checked(recorder, scenario, actual_final_status="location_ready")
 
@@ -1785,6 +1814,106 @@ async def _run_payment_scenario(
 ) -> None:
     saved = _save_payment_config()
     try:
+        effective_store_session = store_session
+        effective_fixtures = fixtures
+
+        async def _recover_coupon_by_store_retry() -> tuple[bool, bool]:
+            nonlocal effective_store_session, effective_fixtures
+            if config.SIM_STORE_EXPLICIT:
+                return False, False
+            if config.SIM_PREFLIGHT_STRATEGY != "auto_recover":
+                return False, False
+            candidate_ids = [
+                candidate
+                for candidate in _trace_store_candidates()
+                if candidate
+                and str(candidate) != str(effective_store_session.store_login_id or config.STORE_ID or "")
+            ]
+            api_fault_seen = False
+            for candidate_id in candidate_ids:
+                recorder.record_decision(
+                    actor="trace",
+                    action="retry_coupon_with_alternate_store",
+                    status="called",
+                    reason="coupon_missing_try_next_store",
+                    message=f"Coupon unavailable on current store context; trying alternate store {candidate_id}.",
+                    scenario=scenario,
+                    step="checkout_coupon",
+                    reason_code="coupon_missing_try_next_store",
+                    reason_message="Attempting alternate store context for coupon flow.",
+                    next_action="bootstrap_next_store",
+                    run_continued=True,
+                    failure_class="precondition",
+                )
+                try:
+                    next_store = await _bootstrap_store_auth(
+                        client,
+                        recorder,
+                        store_id=candidate_id,
+                    )
+                    next_fixtures = await user_sim.bootstrap_fixtures(
+                        client,
+                        session=user_session,
+                        store_token=next_store.last_mile_token,
+                        subentity=next_store.subentity,
+                        recorder=recorder,
+                        subentity_id=next_store.store_id,
+                    )
+                except store_sim.HttpApiError as exc:
+                    failure_class = classify_http_status(exc.status_code)
+                    recorder.record_issue(
+                        severity="error" if failure_class == "api_fault" else "warning",
+                        code="coupon_retry_store_api_error",
+                        failure_class=failure_class,
+                        actor="trace",
+                        scenario=scenario,
+                        step="checkout_coupon",
+                        message=(
+                            f"Alternate store {candidate_id} could not be used during coupon recovery: {exc}"
+                        ),
+                    )
+                    if failure_class == "api_fault":
+                        api_fault_seen = True
+                    continue
+                except RuntimeError as exc:
+                    failure_class = classify_issue(
+                        code="coupon_retry_store_unusable",
+                        message=str(exc),
+                        default="precondition",
+                    )
+                    recorder.record_issue(
+                        severity="error" if failure_class == "api_fault" else "warning",
+                        code="coupon_retry_store_unusable",
+                        failure_class=failure_class,
+                        actor="trace",
+                        scenario=scenario,
+                        step="checkout_coupon",
+                        message=(
+                            f"Alternate store {candidate_id} could not be used during coupon recovery: {exc}"
+                        ),
+                    )
+                    if failure_class == "api_fault":
+                        api_fault_seen = True
+                    continue
+                recorder.set_store_identity(
+                    subentity_id=next_store.store_id,
+                    login_id=next_store.store_login_id or candidate_id,
+                    raw_store=next_store.subentity,
+                )
+                recorder.set_fixtures(next_fixtures)
+                effective_store_session = next_store
+                effective_fixtures = next_fixtures
+                coupon_ready = await _ensure_coupon_for_scenario(
+                    client,
+                    scenario=scenario,
+                    user_session=user_session,
+                    fixtures=effective_fixtures,
+                    recorder=recorder,
+                )
+                if coupon_ready and config.SIM_COUPON_ID is not None:
+                    return True, api_fault_seen
+            return False, api_fault_seen
+
         if scenario == "returning_paid_no_coupon":
             config.SIM_PAYMENT_MODE = "stripe"
             config.SIM_PAYMENT_CASE = "paid_no_coupon"
@@ -1797,24 +1926,43 @@ async def _run_payment_scenario(
                 client,
                 scenario=scenario,
                 user_session=user_session,
-                fixtures=fixtures,
+                fixtures=effective_fixtures,
                 recorder=recorder,
             )
             if not coupon_ready:
-                recorder.start_scenario(scenario, expected_final_status="completed")
-                _finish_checked(recorder, scenario, actual_final_status="coupon_missing")
-                return
+                recovered, api_fault_seen = await _recover_coupon_by_store_retry()
+                if recovered:
+                    coupon_ready = True
+                elif api_fault_seen and is_api_only(config.SIM_FAILURE_POLICY):
+                    raise RuntimeError(
+                        "Coupon recovery encountered API fault on alternate store candidate(s)."
+                    )
+                else:
+                    recorder.start_scenario(scenario, expected_final_status="completed")
+                    recorder.finish_scenario(
+                        scenario,
+                        verdict="unsupported",
+                        actual_final_status="coupon_missing",
+                        note="No coupon available in this context; scenario skipped in api_only mode.",
+                    )
+                    return
             if config.SIM_COUPON_ID is None:
                 recorder.start_scenario(scenario, expected_final_status="completed")
                 recorder.record_issue(
-                    severity="error",
+                    severity="warning",
                     code="coupon_required",
+                    failure_class="precondition",
                     actor="user",
                     scenario=scenario,
                     step="checkout_coupon",
                     message="SIM_COUPON_ID is required for paid coupon checkout.",
                 )
-                _finish_checked(recorder, scenario, actual_final_status="coupon_missing")
+                recorder.finish_scenario(
+                    scenario,
+                    verdict="unsupported",
+                    actual_final_status="coupon_missing",
+                    note="Coupon precondition missing for paid coupon path.",
+                )
                 return
         elif scenario == "returning_free_with_coupon":
             config.SIM_PAYMENT_MODE = "free"
@@ -1824,30 +1972,49 @@ async def _run_payment_scenario(
                 client,
                 scenario=scenario,
                 user_session=user_session,
-                fixtures=fixtures,
+                fixtures=effective_fixtures,
                 recorder=recorder,
             )
             if not coupon_ready:
-                recorder.start_scenario(scenario, expected_final_status="completed")
-                _finish_checked(recorder, scenario, actual_final_status="coupon_missing")
-                return
+                recovered, api_fault_seen = await _recover_coupon_by_store_retry()
+                if recovered:
+                    coupon_ready = True
+                elif api_fault_seen and is_api_only(config.SIM_FAILURE_POLICY):
+                    raise RuntimeError(
+                        "Coupon recovery encountered API fault on alternate store candidate(s)."
+                    )
+                else:
+                    recorder.start_scenario(scenario, expected_final_status="completed")
+                    recorder.finish_scenario(
+                        scenario,
+                        verdict="unsupported",
+                        actual_final_status="coupon_missing",
+                        note="No coupon available in this context; scenario skipped in api_only mode.",
+                    )
+                    return
             if config.SIM_COUPON_ID is None:
                 recorder.start_scenario(scenario, expected_final_status="completed")
                 recorder.record_issue(
-                    severity="error",
+                    severity="warning",
                     code="coupon_required",
+                    failure_class="precondition",
                     actor="user",
                     scenario=scenario,
                     step="checkout_coupon",
                     message="SIM_COUPON_ID is required for free coupon checkout.",
                 )
-                _finish_checked(recorder, scenario, actual_final_status="coupon_missing")
+                recorder.finish_scenario(
+                    scenario,
+                    verdict="unsupported",
+                    actual_final_status="coupon_missing",
+                    note="Coupon precondition missing for free coupon path.",
+                )
                 return
         await _run_completed(
             client,
             user_session=user_session,
-            store_session=store_session,
-            fixtures=fixtures,
+            store_session=effective_store_session,
+            fixtures=effective_fixtures,
             recorder=recorder,
             timing=timing,
             observer=observer,
@@ -1872,53 +2039,105 @@ async def run(
     )
     actors = getattr(config, "SIM_ACTORS", {}) or {}
     actor_users = actors.get("users", [])
+    failure_policy = getattr(config, "SIM_FAILURE_POLICY", "api_only")
+    preflight_strategy = getattr(config, "SIM_PREFLIGHT_STRATEGY", "auto_recover")
     if not actor_users:
-        raise RuntimeError(
-            "No users were found in the selected plan. Trace runs require users defined in plan users[]."
-        )
+        message = "No users were found in the selected plan. Trace runs require users defined in plan users[]."
+        if is_api_only(failure_policy) and not is_hard_stop(preflight_strategy):
+            recorder.record_issue(
+                severity="warning",
+                code="plan_users_missing",
+                failure_class="precondition",
+                actor="system",
+                scenario=resolved[0] if resolved else None,
+                step="plan_validation",
+                message=message,
+            )
+        else:
+            raise RuntimeError(message)
     allowed_phones = {str(user.get("phone")) for user in actor_users if isinstance(user, dict) and user.get("phone")}
     configured_phone = str(getattr(config, "USER_PHONE_NUMBER", "") or "").strip()
     if configured_phone and allowed_phones and configured_phone not in allowed_phones:
-        raise RuntimeError(
-            f"Configured phone {configured_phone!r} is not present in selected plan users[]."
-        )
+        message = f"Configured phone {configured_phone!r} is not present in selected plan users[]."
+        if is_api_only(failure_policy) and not is_hard_stop(preflight_strategy):
+            recorder.record_issue(
+                severity="warning",
+                code="plan_user_phone_mismatch",
+                failure_class="precondition",
+                actor="system",
+                scenario=resolved[0] if resolved else None,
+                step="plan_validation",
+                message=message,
+            )
+        else:
+            raise RuntimeError(message)
 
     console.print("[cyan]trace:[/] Bootstrapping auth for trace sims ...")
     bootstrap_scenario = "new_user_setup" if "new_user_setup" in resolved else None
-    async with httpx.AsyncClient() as bootstrap_client:
-        user_session = await user_sim.bootstrap_auth(
-            bootstrap_client,
-            recorder,
-            scenario=bootstrap_scenario,
-        )
-        user_phone = (
-            user_session.user.get("phone_number")
-            or user_session.user.get("phone")
-            or getattr(config, "USER_PHONE_NUMBER", "")
-        )
-        recorder.set_user_identity(
-            user_id=user_session.user_id,
-            phone=str(user_phone) if user_phone else None,
-            raw_user=user_session.user,
-        )
-        (
-            store_session,
-            fixtures,
-            store_setup_ran_before_fixtures,
-            original_store_status,
-        ) = (
-            await _bootstrap_trace_store_context(
+    try:
+        async with httpx.AsyncClient() as bootstrap_client:
+            user_session = await user_sim.bootstrap_auth(
                 bootstrap_client,
-                user_session=user_session,
-                recorder=recorder,
-                resolved=resolved,
+                recorder,
+                scenario=bootstrap_scenario,
             )
+            user_phone = (
+                user_session.user.get("phone_number")
+                or user_session.user.get("phone")
+                or getattr(config, "USER_PHONE_NUMBER", "")
+            )
+            recorder.set_user_identity(
+                user_id=user_session.user_id,
+                phone=str(user_phone) if user_phone else None,
+                raw_user=user_session.user,
+            )
+            (
+                store_session,
+                fixtures,
+                store_setup_ran_before_fixtures,
+                original_store_status,
+            ) = (
+                await _bootstrap_trace_store_context(
+                    bootstrap_client,
+                    user_session=user_session,
+                    recorder=recorder,
+                    resolved=resolved,
+                )
+            )
+            recorder.set_store_identity(
+                subentity_id=store_session.store_id,
+                login_id=store_session.store_login_id or config.STORE_ID,
+                raw_store=store_session.subentity,
+            )
+    except RuntimeError as exc:
+        hard_stop = is_hard_stop(config.SIM_PREFLIGHT_STRATEGY)
+        failure_class = classify_issue(
+            code="trace_bootstrap_failed",
+            message=str(exc),
+            default="precondition",
         )
-        recorder.set_store_identity(
-            subentity_id=store_session.store_id,
-            login_id=store_session.store_login_id or config.STORE_ID,
-            raw_store=store_session.subentity,
+        if hard_stop or not is_api_only(config.SIM_FAILURE_POLICY) or failure_class == "api_fault":
+            raise
+        recorder.record_issue(
+            severity="warning",
+            code="trace_bootstrap_precondition",
+            failure_class="precondition",
+            actor="trace",
+            scenario="bootstrap",
+            step="bootstrap",
+            message=f"Trace bootstrap precondition prevented full run: {exc}",
         )
+        for name in resolved:
+            if name == "bootstrap":
+                continue
+            recorder.start_scenario(name)
+            recorder.finish_scenario(
+                name,
+                verdict="unsupported",
+                actual_final_status="precondition_unmet",
+                note="Scenario skipped because bootstrap preconditions were not met in api_only mode.",
+            )
+        return
 
     order_scenarios = {
         "completed",

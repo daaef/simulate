@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from failure_policy import normalise_failure_policy, normalise_preflight_strategy
 
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
@@ -76,6 +77,10 @@ SIM_RUN_STORE_DASHBOARD_PROBES: bool = _bool("SIM_RUN_STORE_DASHBOARD_PROBES", T
 SIM_RUN_POST_ORDER_ACTIONS: bool = _bool("SIM_RUN_POST_ORDER_ACTIONS", False)
 SIM_ENFORCE_WEBSOCKET_GATES: bool = _bool("SIM_ENFORCE_WEBSOCKET_GATES", False)
 SIM_STRICT_PLAN: bool = _bool("SIM_STRICT_PLAN", False)
+SIM_FAILURE_POLICY: str = normalise_failure_policy(_str("SIM_FAILURE_POLICY", "api_only"))
+SIM_PREFLIGHT_STRATEGY: str = normalise_preflight_strategy(
+    _str("SIM_PREFLIGHT_STRATEGY", "auto_recover")
+)
 SIM_REVIEW_RATING: int = _int("SIM_REVIEW_RATING", 4)
 SIM_REVIEW_COMMENT: str = _str("SIM_REVIEW_COMMENT", "Simulator review")
 SIM_NEW_USER_FIRST_NAME: str = _str("SIM_NEW_USER_FIRST_NAME", "Fainzy")
@@ -252,6 +257,16 @@ def actor_gps(actor: dict[str, Any] | None) -> tuple[float | None, float | None]
     return float(lat), float(lng)
 
 
+def first_actor_gps(actors: list[dict[str, Any]] | None) -> tuple[float | None, float | None]:
+    for actor in actors or []:
+        if not isinstance(actor, dict):
+            continue
+        lat, lng = actor_gps(actor)
+        if lat is not None and lng is not None:
+            return lat, lng
+    return None, None
+
+
 def _find_actor_user(
     users: list[dict[str, Any]],
     role: str | None,
@@ -327,13 +342,32 @@ def apply_actor_selection(
     elif selected_user and not USER_PHONE_NUMBER:
         USER_PHONE_NUMBER = str(selected_user.get("phone") or USER_PHONE_NUMBER)
 
+    requested_store_id = store_id or STORE_ID or defaults.get("store_id")
+    selected_store = _find_actor_store(stores, str(requested_store_id) if requested_store_id else None)
+
+    # Prefer selected-user GPS, then defaults/first user, then selected-store GPS, then first store GPS.
     user_lat, user_lng = actor_gps(selected_user)
+    if user_lat is None or user_lng is None:
+        if SIM_LAT is not None and SIM_LNG is not None:
+            user_lat, user_lng = SIM_LAT, SIM_LNG
+    if user_lat is None or user_lng is None:
+        default_phone = defaults.get("user_phone")
+        default_user = _find_actor_user(
+            users,
+            None,
+            str(default_phone) if default_phone else None,
+        )
+        user_lat, user_lng = actor_gps(default_user)
+    if user_lat is None or user_lng is None:
+        user_lat, user_lng = first_actor_gps(users)
+    if user_lat is None or user_lng is None:
+        user_lat, user_lng = actor_gps(selected_store)
+    if user_lat is None or user_lng is None:
+        user_lat, user_lng = first_actor_gps(stores)
     if user_lat is not None and user_lng is not None:
         SIM_LAT = user_lat
         SIM_LNG = user_lng
 
-    requested_store_id = store_id or STORE_ID or defaults.get("store_id")
-    selected_store = _find_actor_store(stores, str(requested_store_id) if requested_store_id else None)
     if selected_store:
         STORE_ID = str(selected_store.get("store_id") or STORE_ID)
         if selected_store.get("subentity_id") is not None:
@@ -438,6 +472,8 @@ def apply_plan_defaults(plan: Any, *, preserve: set[str] | None = None) -> None:
         rules,
         {
             "strict_plan": ("SIM_STRICT_PLAN", _plan_bool),
+            "failure_policy": ("SIM_FAILURE_POLICY", normalise_failure_policy),
+            "preflight_strategy": ("SIM_PREFLIGHT_STRATEGY", normalise_preflight_strategy),
             "run_app_probes": ("SIM_RUN_APP_PROBES", _plan_bool),
             "run_store_dashboard_probes": ("SIM_RUN_STORE_DASHBOARD_PROBES", _plan_bool),
             "run_post_order_actions": ("SIM_RUN_POST_ORDER_ACTIONS", _plan_bool),

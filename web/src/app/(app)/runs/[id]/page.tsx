@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
+  cancelRun,
+  deleteRun,
   fetchExecutionSnapshot,
   fetchRunOverview,
   fetchRun,
@@ -14,6 +16,9 @@ import {
   type RunMetrics,
   type RunRow,
 } from "../../../../lib/api";
+import { useRole } from "../../../../contexts/RoleContext";
+import DeleteRunModal from "../../../../components/runs/DeleteRunModal";
+import { canDeleteRun, canStopRun, shouldPollRunLog } from "../../../../lib/run-control";
 import RunArtifactMarkdown from "../../../../components/runs/detail/RunArtifactMarkdown";
 import RunDetailHeader from "../../../../components/runs/detail/RunDetailHeader";
 import RunDetailOverview from "../../../../components/runs/detail/RunDetailOverview";
@@ -31,10 +36,6 @@ const EVENTS_PAGE_SIZE = 100;
 
 const EMPTY_FINDINGS: RunFindings = { critical: [], operational: [] };
 
-function isActiveRunStatus(status: string): boolean {
-  const normalized = status.toLowerCase();
-  return normalized === "running" || normalized === "pending" || normalized === "queued";
-}
 
 function logClassForLine(line: string): string {
   const lowered = line.toLowerCase();
@@ -58,6 +59,7 @@ export default function RunDetailPage() {
   const router = useRouter();
   const params = useParams<PageParams>();
   const runId = parseInt(params.id, 10);
+  const { canCancelRuns, canDeleteRuns } = useRole();
 
   const [run, setRun] = useState<RunRow | null>(null);
   const [metrics, setMetrics] = useState<RunMetrics | null>(null);
@@ -74,6 +76,9 @@ export default function RunDetailPage() {
   const [eventsOffset, setEventsOffset] = useState(0);
   const [reportChunk, setReportChunk] = useState(0);
   const [isReplaying, setIsReplaying] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Fetch run data
   useEffect(() => {
@@ -133,7 +138,7 @@ export default function RunDetailPage() {
   }, [runId]);
 
   const consoleTabActive = activeTab === "console";
-  const shouldPollConsoleLog = Boolean(run && isActiveRunStatus(run.status));
+  const shouldPollConsoleLog = Boolean(run && shouldPollRunLog(run));
   const { log: consoleLog, setLogRef } = useRunLogTail(consoleTabActive ? runId : null, {
     enabled: shouldPollConsoleLog,
     pollMs: 1000,
@@ -188,6 +193,35 @@ export default function RunDetailPage() {
     }
   };
 
+  const refreshRun = async () => {
+    const data = await fetchRun(runId);
+    setRun(data);
+  };
+
+  const handleStop = async () => {
+    if (!run) return;
+    setActionError(null);
+    setIsStopping(true);
+    try {
+      await cancelRun(runId);
+      await refreshRun();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to stop run.");
+    } finally {
+      setIsStopping(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setActionError(null);
+    try {
+      await deleteRun(runId);
+      router.push("/runs");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to delete run.");
+    }
+  };
+
   if (loading) {
     return (
       <main style={{ maxWidth: 1200, margin: "0 auto", padding: 40, textAlign: "center" }}>
@@ -210,7 +244,26 @@ export default function RunDetailPage() {
 
   return (
     <main className="grid" style={{ gap: 16 }}>
-      <RunDetailHeader run={run} onBack={goBack} />
+      <RunDetailHeader
+        run={run}
+        onBack={goBack}
+        onStop={canCancelRuns ? handleStop : undefined}
+        onDelete={canDeleteRuns ? () => setDeleteConfirmOpen(true) : undefined}
+        canStop={canStopRun(run)}
+        canDelete={canDeleteRun(run)}
+        stopPending={isStopping}
+      />
+      {actionError ? <p className="muted" style={{ color: "#b91c1c" }}>{actionError}</p> : null}
+      {deleteConfirmOpen ? (
+        <DeleteRunModal
+          run={run}
+          onConfirm={async () => {
+            setDeleteConfirmOpen(false);
+            await handleDelete();
+          }}
+          onCancel={() => setDeleteConfirmOpen(false)}
+        />
+      ) : null}
 
       <div className="panel grid" style={{ gap: 12 }}>
         <RunDetailTabNav

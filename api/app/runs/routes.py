@@ -20,9 +20,10 @@ def list_flows(current_user: dict = Depends(require_permission("dashboard", "rea
 def list_runs(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    include_archived: bool = Query(default=False),
     current_user: dict = Depends(require_permission("runs", "read")),
 ) -> dict[str, Any]:
-    return service.list_runs(limit, offset)
+    return service.list_runs(limit, offset, include_archived)
 
 
 @router.get("/api/v1/runs/count")
@@ -93,9 +94,20 @@ def delete_run(
     return service.delete_run(run_id)
 
 
+@router.post("/api/v1/runs/{run_id}/restore")
+def restore_run(
+    run_id: int,
+    current_user: dict = Depends(require_permission("runs", "delete")),
+) -> dict[str, Any]:
+    return service.restore_run(run_id)
+
+
 @router.get("/api/v1/run-profiles")
-def list_profiles(current_user: dict = Depends(require_permission("runs", "read"))) -> dict[str, Any]:
-    return service.list_profiles()
+def list_profiles(
+    include_archived: bool = Query(default=False),
+    current_user: dict = Depends(require_permission("runs", "read")),
+) -> dict[str, Any]:
+    return service.list_profiles(include_archived)
 
 
 @router.post("/api/v1/run-profiles")
@@ -121,6 +133,14 @@ def delete_profile(
     current_user: dict = Depends(require_permission("runs", "delete")),
 ) -> dict[str, Any]:
     return service.delete_profile(profile_id)
+
+
+@router.post("/api/v1/run-profiles/{profile_id}/restore")
+def restore_profile(
+    profile_id: int,
+    current_user: dict = Depends(require_permission("runs", "delete")),
+) -> dict[str, Any]:
+    return service.restore_profile(profile_id)
 
 
 @router.post("/api/v1/run-profiles/{profile_id}/launch")

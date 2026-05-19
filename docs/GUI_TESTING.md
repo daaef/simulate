@@ -4,12 +4,12 @@ This document is a **from-the-ground-up manual test checklist** for the authenti
 
 **Roles (what to expect in the UI):**
 
-| Role | `runs` create (Start Run, profiles) | `runs` cancel (Stop) | `runs` delete (Delete completed run) |
-|------|-------------------------------------|----------------------|----------------------------------------|
-| **admin** | Yes | Yes | Yes |
-| **operator** | Yes | Yes | No (API should reject if forced) |
-| **runner** | Yes | **No** permission in `ROLE_PERMISSIONS` | No |
-| **viewer** / **auditor** | No | No | No |
+| Role | `runs` create (Start Run, profiles) | `runs` cancel (Stop) | `runs` delete/archive | profile archive/restore | schedule delete/restore | integration mapping archive/restore |
+|------|-------------------------------------|----------------------|-----------------------|-------------------------|-------------------------|------------------------------------|
+| **admin** | Yes | Yes | Yes | Yes | Yes | Yes |
+| **operator** | Yes | Yes | Yes | Yes | Yes | No |
+| **runner** | Yes | **No** permission in `ROLE_PERMISSIONS` | No | No | No | No |
+| **viewer** / **auditor** | No | No | No | No | No | No |
 
 The **Recent Runs** table always renders **Stop** and **Delete** actions; permission failures appear as errors after the action—verify behavior for non-admin users.
 
@@ -188,7 +188,7 @@ Clear fields and confirm button re-enables.
 | 9.2 | **Load** on a profile | Form repopulates including suite/scenarios/checkboxes/numerics. |
 | 9.3 | **Update Selected Profile** | Persisted changes after edit. |
 | 9.4 | **Launch** | New run created without manually pressing Start Simulation. |
-| 9.5 | **Delete** custom profile | Row removed. Catalog profiles show **Catalog** label and no Delete action. |
+| 9.5 | **Delete** profile | Row removed from active profiles; profile appears under `/archives` → **Archived Profiles** with Restore action. |
 | 9.6 | **Save as profile** (under command preview) | Scrolls to profiles section; focuses profile name input (`onSaveAsProfileShortcut`). |
 
 ---
@@ -200,7 +200,7 @@ Clear fields and confirm button re-enables.
 | 10.1 | Row click / **View** | Navigates to `/runs/{id}`. |
 | 10.2 | **Pagination** | Change page; offset updates; different slice of runs. |
 | 10.3 | Columns **Launch** | Shows `trigger_source`, `trigger_label`, optional `profile_id` context. |
-| 10.4 | **Delete** on completed run (as **admin**) | Modal confirms; run removed. Non-admin: expect error from API. |
+| 10.4 | **Delete** on completed run (as **admin/operator**) | Modal confirms; run removed from active list and appears in `/archives` Archived Runs with Restore action. |
 | 10.5 | **Delete** disabled styling | Active runs: Delete button `disabled` when `isActiveStatus`. |
 
 ---
@@ -236,7 +236,7 @@ Use [SIMULATOR_GUIDE.md](../SIMULATOR_GUIDE.md) **Operator GUI** for screen sema
 | `/overview` | Cards/charts load; latest run hero; link to run detail. |
 | `/config` | List/edit simulation plans; email panel if present; permission `simulation_plans` / config APIs. |
 | `/schedules` | Create draft schedule, preview, pause/resume, manual trigger (as permitted). |
-| `/archives` | Search/browse (read-only for most). |
+| `/archives` | Browse archived runs/profiles/schedules/integration mappings; restore from archive actions. |
 | `/retention` | Policies visible; **operator** read-only vs **admin** `retention` update. |
 | `/admin/users` | **Admin** only: user CRUD. |
 | `/admin/system` | **Admin**: system settings (e.g. allowed timezones). |

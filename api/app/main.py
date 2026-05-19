@@ -27,6 +27,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from flow_presets import FLOW_PRESETS, flow_capabilities
+from .event_failure import is_metric_failed_event
 from .admin.routes import router as admin_router
 from .alerts.routes import router as alerts_router
 from .alerts.service import configure_runtime as configure_alerts_runtime
@@ -118,6 +119,13 @@ DB_LOCK = threading.Lock()
 RUN_PROCESSES: dict[int, subprocess.Popen[str]] = {}
 RUN_CANCELLED: set[int] = set()
 RUN_LOCK = threading.Lock()
+RUN_LOG_STAT: dict[int, tuple[int, float]] = {}
+RUN_LOG_STAT_LOCK = threading.Lock()
+RUN_QUEUED_START_GRACE_SECONDS = 10
+RUN_ORPHAN_LOG_IDLE_SECONDS = 60
+RUN_LOG_ACTIVITY_WINDOW_SECONDS = 30.0
+RUN_STARTUP_LOG_GRACE_SECONDS = 15.0
+ACTIVE_RUN_STATUSES = frozenset({"queued", "pending", "running", "cancelling"})
 ARTIFACT_FIELDS = ("report_path", "story_path", "events_path")
 EVENT_CACHE_LOCK = threading.Lock()
 EVENT_CACHE_MAX_ITEMS = max(4, int(os.getenv("SIM_GUI_EVENT_CACHE_MAX_ITEMS", "24")))
@@ -221,6 +229,7 @@ def _init_db() -> None:
                 story_path TEXT,
                 events_path TEXT,
                 error TEXT,
+                archived_at TEXT,
                 execution_snapshot TEXT,
                 trigger_source TEXT,
                 trigger_label TEXT,
@@ -260,8 +269,12 @@ def _init_db() -> None:
                 reject REAL,
                 continuous INTEGER NOT NULL DEFAULT 0,
                 extra_args TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'active',
+                archived_at TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                catalog_slug TEXT,
+                catalog_managed INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -300,7 +313,9 @@ def _init_db() -> None:
                 next_run_at TEXT,
                 next_run_reason TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                catalog_slug TEXT,
+                catalog_managed INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -335,6 +350,8 @@ def _init_db() -> None:
                 environment TEXT NOT NULL,
                 profile_id INTEGER NOT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'active',
+                archived_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 UNIQUE(project, environment)
@@ -397,6 +414,8 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE runs ADD COLUMN launched_by_user_id INTEGER")
     if "enforce_websocket_gates" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN enforce_websocket_gates INTEGER NOT NULL DEFAULT 0")
+    if "archived_at" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN archived_at TEXT")
     profile_columns = [row[1] for row in conn.execute("PRAGMA table_info(run_profiles)").fetchall()]
     if profile_columns and "description" not in profile_columns:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN description TEXT")
@@ -424,6 +443,12 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN continuous INTEGER NOT NULL DEFAULT 0")
     if profile_columns and "catalog_slug" not in profile_columns:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN catalog_slug TEXT")
+    if profile_columns and "status" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+    if profile_columns and "archived_at" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN archived_at TEXT")
+    if profile_columns and "catalog_managed" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN catalog_managed INTEGER NOT NULL DEFAULT 0")
     schedule_columns = [row[1] for row in conn.execute("PRAGMA table_info(schedules)").fetchall()]
     if schedule_columns and "custom_anchor_at" not in schedule_columns:
         conn.execute("ALTER TABLE schedules ADD COLUMN custom_anchor_at TEXT")
@@ -453,9 +478,15 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE schedules ADD COLUMN run_slots TEXT NOT NULL DEFAULT '[]'")
     if schedule_columns and "catalog_slug" not in schedule_columns:
         conn.execute("ALTER TABLE schedules ADD COLUMN catalog_slug TEXT")
+    if schedule_columns and "catalog_managed" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN catalog_managed INTEGER NOT NULL DEFAULT 0")
     mapping_columns = [row[1] for row in conn.execute("PRAGMA table_info(integration_profile_mappings)").fetchall()]
     if mapping_columns and "enabled" not in mapping_columns:
         conn.execute("ALTER TABLE integration_profile_mappings ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+    if mapping_columns and "status" not in mapping_columns:
+        conn.execute("ALTER TABLE integration_profile_mappings ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+    if mapping_columns and "archived_at" not in mapping_columns:
+        conn.execute("ALTER TABLE integration_profile_mappings ADD COLUMN archived_at TEXT")
     trigger_columns = [row[1] for row in conn.execute("PRAGMA table_info(integration_triggers)").fetchall()]
     if trigger_columns and "deployment_status_id" not in trigger_columns:
         conn.execute("ALTER TABLE integration_triggers ADD COLUMN deployment_status_id TEXT")
@@ -485,6 +516,7 @@ def _migrate_postgres_schema() -> None:
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS integration_trigger_id INTEGER")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS launched_by_user_id INTEGER")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS enforce_websocket_gates BOOLEAN NOT NULL DEFAULT FALSE")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS run_profiles (
@@ -513,9 +545,12 @@ def _migrate_postgres_schema() -> None:
                     reject DOUBLE PRECISION,
                     continuous BOOLEAN NOT NULL DEFAULT FALSE,
                     extra_args JSONB DEFAULT '[]',
+                    status VARCHAR(20) NOT NULL DEFAULT 'active',
+                    archived_at TIMESTAMP WITH TIME ZONE,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    catalog_slug VARCHAR(80)
+                    catalog_slug VARCHAR(80),
+                    catalog_managed BOOLEAN NOT NULL DEFAULT FALSE
                 )
                 """
             )
@@ -530,6 +565,9 @@ def _migrate_postgres_schema() -> None:
             cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS interval DOUBLE PRECISION")
             cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS reject DOUBLE PRECISION")
             cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS continuous BOOLEAN NOT NULL DEFAULT FALSE")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS catalog_managed BOOLEAN NOT NULL DEFAULT FALSE")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schedules (
@@ -566,7 +604,8 @@ def _migrate_postgres_schema() -> None:
                     next_run_reason VARCHAR(64),
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    catalog_slug VARCHAR(80)
+                    catalog_slug VARCHAR(80),
+                    catalog_managed BOOLEAN NOT NULL DEFAULT FALSE
                 )
                 """
             )
@@ -583,6 +622,7 @@ def _migrate_postgres_schema() -> None:
             cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS all_day BOOLEAN NOT NULL DEFAULT FALSE")
             cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS recurrence_config JSONB DEFAULT '{}'::jsonb")
             cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS run_slots JSONB DEFAULT '[]'::jsonb")
+            cursor.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS catalog_managed BOOLEAN NOT NULL DEFAULT FALSE")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schedule_executions (
@@ -615,6 +655,8 @@ def _migrate_postgres_schema() -> None:
                     environment VARCHAR(120) NOT NULL,
                     profile_id INTEGER NOT NULL REFERENCES run_profiles(id) ON DELETE CASCADE,
                     enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    status VARCHAR(20) NOT NULL DEFAULT 'active',
+                    archived_at TIMESTAMP WITH TIME ZONE,
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
                     UNIQUE(project, environment)
@@ -645,6 +687,8 @@ def _migrate_postgres_schema() -> None:
                 """
             )
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE")
+            cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'")
+            cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE")
             cursor.execute("ALTER TABLE integration_triggers ADD COLUMN IF NOT EXISTS deployment_status_id VARCHAR(80)")
             cursor.execute("ALTER TABLE integration_triggers ADD COLUMN IF NOT EXISTS github_status_url TEXT")
             cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS catalog_slug VARCHAR(80)")
@@ -1178,6 +1222,9 @@ def _profile_row_to_dict_any(row) -> dict[str, Any]:
     extra_args = payload.get("extra_args")
     if isinstance(extra_args, str):
         payload["extra_args"] = json.loads(extra_args or "[]")
+    payload["status"] = str(payload.get("status") or "active")
+    payload["catalog_managed"] = bool(payload.get("catalog_managed"))
+    payload["archived_at"] = _jsonable_datetime(payload.get("archived_at"))
     return payload
 
 
@@ -1246,6 +1293,7 @@ def _schedule_row_to_dict_any(row) -> dict[str, Any]:
     if payload.get("next_run_reason") is None:
         payload["next_run_reason"] = "computed" if payload.get("next_run_at") else "no_future_run"
     payload["execution_mode_label"] = "automatic" if _schedule_is_automatic(payload) else "manual_only"
+    payload["catalog_managed"] = bool(payload.get("catalog_managed"))
     return payload
 
 
@@ -1257,50 +1305,107 @@ def _schedule_execution_row_to_dict_any(row) -> dict[str, Any]:
     return payload
 
 
-def _list_runs(limit: int = 100, offset: int = 0, user_id: Optional[int] = None) -> list[dict[str, Any]]:
+def _list_runs(
+    limit: int = 100,
+    offset: int = 0,
+    user_id: Optional[int] = None,
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
     _cleanup_stale_processes()
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
                 if user_id:
-                    cursor.execute(
-                        "SELECT * FROM runs WHERE user_id = %s ORDER BY id DESC LIMIT %s OFFSET %s",
-                        (user_id, limit, offset)
-                    )
+                    if include_archived:
+                        cursor.execute(
+                            "SELECT * FROM runs WHERE user_id = %s ORDER BY id DESC LIMIT %s OFFSET %s",
+                            (user_id, limit, offset),
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT * FROM runs WHERE user_id = %s AND archived_at IS NULL ORDER BY id DESC LIMIT %s OFFSET %s",
+                            (user_id, limit, offset),
+                        )
                 else:
-                    cursor.execute(
-                        "SELECT * FROM runs ORDER BY id DESC LIMIT %s OFFSET %s",
-                        (limit, offset)
-                    )
+                    if include_archived:
+                        cursor.execute(
+                            "SELECT * FROM runs ORDER BY id DESC LIMIT %s OFFSET %s",
+                            (limit, offset),
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT * FROM runs WHERE archived_at IS NULL ORDER BY id DESC LIMIT %s OFFSET %s",
+                            (limit, offset),
+                        )
                 rows = cursor.fetchall()
         finally:
             conn.close()
     else:
         with DB_LOCK, _db() as conn:
-            rows = conn.execute(
-                "SELECT * FROM runs ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)
-            ).fetchall()
+            if include_archived:
+                if user_id:
+                    rows = conn.execute(
+                        "SELECT * FROM runs WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+                        (user_id, limit, offset),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM runs ORDER BY id DESC LIMIT ? OFFSET ?",
+                        (limit, offset),
+                    ).fetchall()
+            else:
+                if user_id:
+                    rows = conn.execute(
+                        "SELECT * FROM runs WHERE user_id = ? AND archived_at IS NULL ORDER BY id DESC LIMIT ? OFFSET ?",
+                        (user_id, limit, offset),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM runs WHERE archived_at IS NULL ORDER BY id DESC LIMIT ? OFFSET ?",
+                        (limit, offset),
+                    ).fetchall()
     
     runs = [_row_to_dict_any(row) for row in rows]
-    return [_hydrate_run_artifacts(run) for run in runs]
+    prepared: list[dict[str, Any]] = []
+    for run in runs:
+        status = str(run.get("status") or "").strip().lower()
+        if status in ACTIVE_RUN_STATUSES:
+            prepared.append(_prepare_run_payload(run, reconcile=True))
+        else:
+            prepared.append(_attach_run_control(_hydrate_run_artifacts(run)))
+    return prepared
 
-def _count_runs(user_id: Optional[int] = None) -> int:
+def _count_runs(user_id: Optional[int] = None, include_archived: bool = False) -> int:
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
             with conn.cursor() as cursor:
                 if user_id:
-                    cursor.execute("SELECT COUNT(*) FROM runs WHERE user_id = %s", (user_id,))
+                    if include_archived:
+                        cursor.execute("SELECT COUNT(*) FROM runs WHERE user_id = %s", (user_id,))
+                    else:
+                        cursor.execute("SELECT COUNT(*) FROM runs WHERE user_id = %s AND archived_at IS NULL", (user_id,))
                 else:
-                    cursor.execute("SELECT COUNT(*) FROM runs")
+                    if include_archived:
+                        cursor.execute("SELECT COUNT(*) FROM runs")
+                    else:
+                        cursor.execute("SELECT COUNT(*) FROM runs WHERE archived_at IS NULL")
                 result = cursor.fetchone()
                 return result[0] if result else 0
         finally:
             conn.close()
     else:
         with DB_LOCK, _db() as conn:
-            result = conn.execute("SELECT COUNT(*) FROM runs").fetchone()
+            if include_archived:
+                result = conn.execute("SELECT COUNT(*) FROM runs").fetchone()
+            elif user_id:
+                result = conn.execute(
+                    "SELECT COUNT(*) FROM runs WHERE user_id = ? AND archived_at IS NULL",
+                    (user_id,),
+                ).fetchone()
+            else:
+                result = conn.execute("SELECT COUNT(*) FROM runs WHERE archived_at IS NULL").fetchone()
             return result[0] if result else 0
 
 
@@ -1319,40 +1424,66 @@ def _resolve_persisted_user_id(user_id: Optional[int]) -> Optional[int]:
     return user_id
 
 
-def _list_run_profiles() -> list[dict[str, Any]]:
+def _list_run_profiles(include_archived: bool = False) -> list[dict[str, Any]]:
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
-                cursor.execute(
-                    """
-                    SELECT * FROM run_profiles
-                    ORDER BY
-                        CASE WHEN catalog_slug = %s THEN 0 ELSE 1 END ASC,
-                        updated_at DESC,
-                        id DESC
-                    """,
-                    ("api-sweep-max",),
-                )
+                if include_archived:
+                    cursor.execute(
+                        """
+                        SELECT * FROM run_profiles
+                        ORDER BY
+                            CASE WHEN catalog_slug = %s THEN 0 ELSE 1 END ASC,
+                            updated_at DESC,
+                            id DESC
+                        """,
+                        ("api-sweep-max",),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT * FROM run_profiles
+                        WHERE status <> %s
+                        ORDER BY
+                            CASE WHEN catalog_slug = %s THEN 0 ELSE 1 END ASC,
+                            updated_at DESC,
+                            id DESC
+                        """,
+                        ("archived", "api-sweep-max"),
+                    )
                 rows = cursor.fetchall()
         finally:
             conn.close()
     else:
         with DB_LOCK, _db() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM run_profiles
-                ORDER BY
-                    CASE WHEN catalog_slug = ? THEN 0 ELSE 1 END ASC,
-                    updated_at DESC,
-                    id DESC
-                """,
-                ("api-sweep-max",),
-            ).fetchall()
+            if include_archived:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM run_profiles
+                    ORDER BY
+                        CASE WHEN catalog_slug = ? THEN 0 ELSE 1 END ASC,
+                        updated_at DESC,
+                        id DESC
+                    """,
+                    ("api-sweep-max",),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM run_profiles
+                    WHERE status <> ?
+                    ORDER BY
+                        CASE WHEN catalog_slug = ? THEN 0 ELSE 1 END ASC,
+                        updated_at DESC,
+                        id DESC
+                    """,
+                    ("archived", "api-sweep-max"),
+                ).fetchall()
     return [_profile_row_to_dict_any(row) for row in rows]
 
 
-def _get_run_profile(profile_id: int) -> dict[str, Any]:
+def _get_run_profile(profile_id: int, include_archived: bool = True) -> dict[str, Any]:
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
@@ -1368,7 +1499,189 @@ def _get_run_profile(profile_id: int) -> dict[str, Any]:
             row = conn.execute("SELECT * FROM run_profiles WHERE id = ?", (profile_id,)).fetchone()
             if row is None:
                 raise HTTPException(status_code=404, detail=f"Run profile {profile_id} not found.")
-    return _profile_row_to_dict_any(row)
+    profile = _profile_row_to_dict_any(row)
+    if not include_archived and profile.get("status") == "archived":
+        raise HTTPException(status_code=404, detail=f"Run profile {profile_id} not found.")
+    return profile
+
+def _fetch_run_row(run_id: int) -> dict[str, Any]:
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute("SELECT * FROM runs WHERE id = %s", (run_id,))
+                row = cursor.fetchone()
+                if row is None:
+                    raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
+                return _row_to_dict_any(row)
+        finally:
+            conn.close()
+    with DB_LOCK, _db() as conn:
+        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
+        return _row_to_dict(row)
+
+
+def _run_has_live_process(run_id: int) -> bool:
+    with RUN_LOCK:
+        process = RUN_PROCESSES.get(run_id)
+    return process is not None and process.poll() is None
+
+
+def _run_log_activity_proof(run: dict[str, Any]) -> tuple[bool, str]:
+    run_id = int(run["id"])
+    log_path = _safe_path(run.get("log_path"))
+    if log_path is None or not log_path.exists():
+        started = _parse_run_timestamp(run.get("started_at"))
+        if started is not None:
+            age = (datetime.now(timezone.utc) - started).total_seconds()
+            if age <= RUN_STARTUP_LOG_GRACE_SECONDS:
+                return False, "log_not_yet_created"
+        return False, "no_log_file"
+
+    stat = log_path.stat()
+    size, mtime = stat.st_size, stat.st_mtime
+    with RUN_LOG_STAT_LOCK:
+        previous = RUN_LOG_STAT.get(run_id)
+        RUN_LOG_STAT[run_id] = (size, mtime)
+
+    if previous is not None:
+        prev_size, prev_mtime = previous
+        if size > prev_size or mtime > prev_mtime:
+            return True, "log_growth"
+
+    started = _parse_run_timestamp(run.get("started_at"))
+    if started is not None:
+        age = (datetime.now(timezone.utc) - started).total_seconds()
+        if age <= RUN_STARTUP_LOG_GRACE_SECONDS and size > 0:
+            return True, "startup_grace_log_present"
+
+    if previous is not None:
+        _, prev_mtime = previous
+        if (mtime - prev_mtime) <= RUN_LOG_ACTIVITY_WINDOW_SECONDS and size == previous[0]:
+            return False, "no_recent_log_activity"
+
+    return False, "no_recent_log_activity"
+
+
+def _run_liveness(run: dict[str, Any]) -> dict[str, Any]:
+    run_id = int(run["id"])
+    status = str(run.get("status") or "").strip().lower()
+    has_live_process = _run_has_live_process(run_id)
+    log_active, log_reason = _run_log_activity_proof(run)
+
+    actively_running = (
+        status == "running"
+        and has_live_process
+        and log_active
+    )
+    if actively_running:
+        liveness_reason = "live_process_and_log_growth"
+    elif status == "running" and has_live_process:
+        liveness_reason = "live_process_awaiting_log_proof"
+    elif status == "running":
+        liveness_reason = "running_without_live_process"
+    elif status == "queued":
+        liveness_reason = "queued"
+    elif status == "cancelling":
+        liveness_reason = "cancelling"
+    else:
+        liveness_reason = status or "unknown"
+
+    can_stop = actively_running
+    can_delete = not actively_running
+
+    return {
+        "actively_running": actively_running,
+        "can_stop": can_stop,
+        "can_delete": can_delete,
+        "has_live_process": has_live_process,
+        "log_activity": log_active,
+        "liveness_reason": liveness_reason,
+    }
+
+
+def _should_reconcile_stale_run(run: dict[str, Any], liveness: dict[str, Any]) -> bool:
+    status = str(run.get("status") or "").strip().lower()
+    if status not in ACTIVE_RUN_STATUSES:
+        return False
+    if liveness["actively_running"]:
+        return False
+    if liveness["has_live_process"]:
+        return False
+
+    now = datetime.now(timezone.utc)
+    if status == "queued":
+        created = _parse_run_timestamp(run.get("created_at"))
+        if created is None:
+            return True
+        return (now - created).total_seconds() > RUN_QUEUED_START_GRACE_SECONDS
+
+    if status in {"running", "cancelling"}:
+        if not liveness["has_live_process"]:
+            return True
+        log_path = _safe_path(run.get("log_path"))
+        if log_path is not None and log_path.exists():
+            mtime = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc)
+            if (now - mtime).total_seconds() > RUN_ORPHAN_LOG_IDLE_SECONDS:
+                return True
+        started = _parse_run_timestamp(run.get("started_at"))
+        if started is not None and (now - started).total_seconds() > RUN_ORPHAN_LOG_IDLE_SECONDS:
+            return True
+        return False
+
+    return False
+
+
+def _reconcile_stale_run(run_id: int, run: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    if run is None:
+        run = _fetch_run_row(run_id)
+    liveness = _run_liveness(run)
+    if not _should_reconcile_stale_run(run, liveness):
+        return None
+
+    status = str(run.get("status") or "").strip().lower()
+    with RUN_LOCK:
+        process = RUN_PROCESSES.pop(run_id, None)
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+
+    if status == "cancelling":
+        _update_run(
+            run_id,
+            status="cancelled",
+            finished_at=_utc_now(),
+            error=None,
+        )
+    else:
+        _update_run(
+            run_id,
+            status="failed",
+            finished_at=_utc_now(),
+            exit_code=-1,
+            error="orphaned_run_no_live_process",
+        )
+    with RUN_LOG_STAT_LOCK:
+        RUN_LOG_STAT.pop(run_id, None)
+    return _fetch_run_row(run_id)
+
+
+def _attach_run_control(run: dict[str, Any]) -> dict[str, Any]:
+    return {**run, "control": _run_liveness(run)}
+
+
+def _prepare_run_payload(run: dict[str, Any], *, reconcile: bool = True) -> dict[str, Any]:
+    run_id = int(run["id"])
+    if reconcile:
+        _reconcile_stale_run(run_id, run)
+        run = _fetch_run_row(run_id)
+    hydrated = _hydrate_run_artifacts(run)
+    return _attach_run_control(hydrated)
+
 
 def _cleanup_stale_processes() -> None:
     """Remove finished processes from RUN_PROCESSES and update their status if needed."""
@@ -1420,23 +1733,8 @@ def _cleanup_stale_processes() -> None:
 
 def _get_run(run_id: int) -> dict[str, Any]:
     _cleanup_stale_processes()
-    if USE_POSTGRES:
-        conn = _get_db_connection()
-        try:
-            with conn.cursor(cursor_factory=DictCursor) as cursor:
-                cursor.execute("SELECT * FROM runs WHERE id = %s", (run_id,))
-                row = cursor.fetchone()
-                if row is None:
-                    raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
-                return _hydrate_run_artifacts(_row_to_dict_any(row))
-        finally:
-            conn.close()
-    else:
-        with DB_LOCK, _db() as conn:
-            row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
-            if row is None:
-                raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
-            return _hydrate_run_artifacts(_row_to_dict(row))
+    run = _fetch_run_row(run_id)
+    return _prepare_run_payload(run, reconcile=True)
 
 def _update_run(run_id: int, **fields: Any) -> None:
     if not fields:
@@ -1698,21 +1996,36 @@ def _looks_like_artifact_path(value: str) -> bool:
 def _capture_artifacts_from_lines(lines: list[str]) -> dict[str, str]:
     artifacts: dict[str, str] = {}
     pending_key: str | None = None
+    pending_parts: list[str] = []
     for line in lines:
         parsed = _parse_artifact_paths(line)
         if parsed:
             key, value = parsed
-            if value:
-                artifacts[key] = value
-                pending_key = None
+            pending_key = None
+            pending_parts = []
+            candidate = value.strip()
+            if candidate and _looks_like_artifact_path(candidate):
+                artifacts[key] = candidate
+            elif candidate:
+                pending_key = key
+                pending_parts = [candidate]
             else:
                 pending_key = key
+                pending_parts = []
             continue
         if pending_key:
             candidate = line.strip()
-            if _looks_like_artifact_path(candidate):
-                artifacts[pending_key] = candidate
+            if not candidate:
+                continue
+            pending_parts.append(candidate)
+            joined = "".join(part.strip() for part in pending_parts)
+            if _looks_like_artifact_path(joined):
+                artifacts[pending_key] = joined
                 pending_key = None
+                pending_parts = []
+            elif len(pending_parts) >= 6:
+                pending_key = None
+                pending_parts = []
     return artifacts
 
 
@@ -1865,8 +2178,6 @@ def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
     )
     with RUN_LOCK:
         RUN_PROCESSES[run_id] = process
-    artifacts: dict[str, str] = {}
-    pending_artifact_key: str | None = None
     captured_lines: list[str] = []  # Collect lines for post-run parsing
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(f"$ {' '.join(command)}\n")
@@ -1875,21 +2186,8 @@ def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
             handle.write(line)
             handle.flush()
             captured_lines.append(line)
-            parsed = _parse_artifact_paths(line)
-            if parsed:
-                key, value = parsed
-                if value:
-                    artifacts[key] = value
-                    pending_artifact_key = None
-                else:
-                    pending_artifact_key = key
-                continue
-            if pending_artifact_key:
-                candidate = line.strip()
-                if _looks_like_artifact_path(candidate):
-                    artifacts[pending_artifact_key] = candidate
-                    pending_artifact_key = None
     return_code = process.wait()
+    artifacts = _capture_artifacts_from_lines(captured_lines)
 
     # Parse actual identity from captured output
     identity = _parse_identity_from_lines(captured_lines)
@@ -2063,8 +2361,8 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
     return _get_run(run_id)
 
 
-def _list_run_profiles_payload() -> dict[str, Any]:
-    return {"profiles": _list_run_profiles()}
+def _list_run_profiles_payload(include_archived: bool = False) -> dict[str, Any]:
+    return {"profiles": _list_run_profiles(include_archived=include_archived)}
 
 
 def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any]:
@@ -2162,7 +2460,9 @@ def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any
 
 
 def _update_run_profile(profile_id: int, request, user_id: Optional[int] = None) -> dict[str, Any]:
-    _get_run_profile(profile_id)
+    profile = _get_run_profile(profile_id, include_archived=False)
+    if profile.get("status") == "archived":
+        raise HTTPException(status_code=409, detail=f"Run profile {profile_id} is archived. Restore it before editing.")
     updated_at = _utc_now()
     fields = {
         "name": request.name,
@@ -2188,6 +2488,9 @@ def _update_run_profile(profile_id: int, request, user_id: Optional[int] = None)
         "reject": request.reject,
         "continuous": request.continuous,
         "extra_args": json.dumps(request.extra_args),
+        "status": "active",
+        "archived_at": None,
+        "catalog_managed": False,
         "updated_at": updated_at,
     }
     persisted_user_id = _resolve_persisted_user_id(user_id)
@@ -2222,22 +2525,127 @@ def _update_run_profile(profile_id: int, request, user_id: Optional[int] = None)
     return {"profile": _profile_row_to_dict_any(row)}
 
 
-def _delete_run_profile(profile_id: int) -> dict[str, Any]:
-    profile = _get_run_profile(profile_id)
-    if profile.get("catalog_slug"):
-        raise HTTPException(status_code=403, detail="Catalog run profiles cannot be deleted.")
+def _archive_profile_dependencies(profile_id: int, archived_at: str) -> None:
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("DELETE FROM run_profiles WHERE id = %s", (profile_id,))
+                cursor.execute(
+                    """
+                    UPDATE integration_profile_mappings
+                    SET enabled = FALSE, updated_at = %s
+                    WHERE profile_id = %s
+                    """,
+                    (archived_at, profile_id),
+                )
+                cursor.execute(
+                    """
+                    UPDATE schedules
+                    SET status = %s, next_run_at = %s, next_run_reason = %s, updated_at = %s, catalog_managed = FALSE
+                    WHERE status <> %s
+                      AND EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements(schedules.campaign_steps) AS step
+                        WHERE (step->>'profile_id')::int = %s
+                      )
+                    """,
+                    ("deleted", None, "no_future_run", archived_at, "deleted", profile_id),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+        return
+    with DB_LOCK, _db() as conn:
+        conn.execute(
+            """
+            UPDATE integration_profile_mappings
+            SET enabled = 0, updated_at = ?
+            WHERE profile_id = ?
+            """,
+            (archived_at, profile_id),
+        )
+        schedule_rows = conn.execute(
+            "SELECT id, campaign_steps, status FROM schedules WHERE status <> ?",
+            ("deleted",),
+        ).fetchall()
+        for row in schedule_rows:
+            steps = _load_json_field(row["campaign_steps"], [])
+            has_profile = any(int(step.get("profile_id", -1)) == int(profile_id) for step in steps if isinstance(step, dict))
+            if has_profile:
+                conn.execute(
+                    """
+                    UPDATE schedules
+                    SET status = ?, next_run_at = ?, next_run_reason = ?, updated_at = ?, catalog_managed = 0
+                    WHERE id = ?
+                    """,
+                    ("deleted", None, "no_future_run", archived_at, int(row["id"])),
+                )
+
+
+def _delete_run_profile(profile_id: int) -> dict[str, Any]:
+    _get_run_profile(profile_id)
+    archived_at = _utc_now()
+    _archive_profile_dependencies(profile_id, archived_at)
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE run_profiles
+                    SET status = %s, archived_at = %s, updated_at = %s, catalog_managed = FALSE
+                    WHERE id = %s
+                    """,
+                    ("archived", archived_at, archived_at, profile_id),
+                )
                 conn.commit()
         finally:
             conn.close()
     else:
         with DB_LOCK, _db() as conn:
-            conn.execute("DELETE FROM run_profiles WHERE id = ?", (profile_id,))
-    return {"profile_id": profile_id, "deleted": True}
+            conn.execute(
+                """
+                UPDATE run_profiles
+                SET status = ?, archived_at = ?, updated_at = ?, catalog_managed = 0
+                WHERE id = ?
+                """,
+                ("archived", archived_at, archived_at, profile_id),
+            )
+    return {"profile_id": profile_id, "deleted": True, "archived": True}
+
+
+def _restore_run_profile(profile_id: int) -> dict[str, Any]:
+    _get_run_profile(profile_id)
+    updated_at = _utc_now()
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    UPDATE run_profiles
+                    SET status = %s, archived_at = %s, updated_at = %s
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    ("active", None, updated_at, profile_id),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            conn.execute(
+                """
+                UPDATE run_profiles
+                SET status = ?, archived_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                ("active", None, updated_at, profile_id),
+            )
+            row = conn.execute("SELECT * FROM run_profiles WHERE id = ?", (profile_id,)).fetchone()
+    return {"profile": _profile_row_to_dict_any(row)}
 
 
 def _launch_run_profile(
@@ -2257,25 +2665,36 @@ def _launch_run_profile(
 def _integration_mapping_row_to_dict_any(row: Any) -> dict[str, Any]:
     payload = dict(row)
     payload["enabled"] = bool(payload.get("enabled"))
+    payload["archived_at"] = _jsonable_datetime(payload.get("archived_at"))
     return payload
 
 
-def _list_integration_mappings() -> dict[str, Any]:
+def _list_integration_mappings(include_archived: bool = False) -> dict[str, Any]:
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
-                cursor.execute(
-                    "SELECT * FROM integration_profile_mappings ORDER BY project ASC, environment ASC, id ASC"
-                )
+                if include_archived:
+                    cursor.execute("SELECT * FROM integration_profile_mappings ORDER BY project ASC, environment ASC, id ASC")
+                else:
+                    cursor.execute(
+                        "SELECT * FROM integration_profile_mappings WHERE status <> %s ORDER BY project ASC, environment ASC, id ASC",
+                        ("archived",),
+                    )
                 rows = cursor.fetchall()
         finally:
             conn.close()
     else:
         with DB_LOCK, _db() as conn:
-            rows = conn.execute(
-                "SELECT * FROM integration_profile_mappings ORDER BY project ASC, environment ASC, id ASC"
-            ).fetchall()
+            if include_archived:
+                rows = conn.execute(
+                    "SELECT * FROM integration_profile_mappings ORDER BY project ASC, environment ASC, id ASC"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM integration_profile_mappings WHERE status <> ? ORDER BY project ASC, environment ASC, id ASC",
+                    ("archived",),
+                ).fetchall()
     from .integrations.routing import webhook_routing_mode
 
     return {
@@ -2286,7 +2705,7 @@ def _list_integration_mappings() -> dict[str, Any]:
 
 def _upsert_integration_mapping(request: IntegrationMappingUpsertRequest, user_id: Optional[int] = None) -> dict[str, Any]:
     _ = user_id
-    _get_run_profile(int(request.profile_id))
+    _get_run_profile(int(request.profile_id), include_archived=False)
     project = request.project.strip().lower()
     environment = request.environment.strip().lower()
     now = _utc_now()
@@ -2299,7 +2718,7 @@ def _upsert_integration_mapping(request: IntegrationMappingUpsertRequest, user_i
                     INSERT INTO integration_profile_mappings (project, environment, profile_id, enabled, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (project, environment)
-                    DO UPDATE SET profile_id = EXCLUDED.profile_id, enabled = EXCLUDED.enabled, updated_at = EXCLUDED.updated_at
+                    DO UPDATE SET profile_id = EXCLUDED.profile_id, enabled = EXCLUDED.enabled, status = 'active', archived_at = NULL, updated_at = EXCLUDED.updated_at
                     RETURNING *
                     """,
                     (project, environment, request.profile_id, request.enabled, now, now),
@@ -2315,7 +2734,7 @@ def _upsert_integration_mapping(request: IntegrationMappingUpsertRequest, user_i
                 INSERT INTO integration_profile_mappings (project, environment, profile_id, enabled, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(project, environment) DO UPDATE
-                SET profile_id = excluded.profile_id, enabled = excluded.enabled, updated_at = excluded.updated_at
+                SET profile_id = excluded.profile_id, enabled = excluded.enabled, status = 'active', archived_at = NULL, updated_at = excluded.updated_at
                 """,
                 (project, environment, request.profile_id, int(request.enabled), now, now),
             )
@@ -2327,20 +2746,99 @@ def _upsert_integration_mapping(request: IntegrationMappingUpsertRequest, user_i
 
 
 def _delete_integration_mapping(mapping_id: int) -> dict[str, Any]:
+    now = _utc_now()
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
-            with conn.cursor() as cursor:
-                cursor.execute("DELETE FROM integration_profile_mappings WHERE id = %s", (mapping_id,))
-                deleted = cursor.rowcount > 0
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    UPDATE integration_profile_mappings
+                    SET status = %s, enabled = FALSE, archived_at = %s, updated_at = %s
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    ("archived", now, now, mapping_id),
+                )
+                row = cursor.fetchone()
+                deleted = row is not None
             conn.commit()
         finally:
             conn.close()
     else:
         with DB_LOCK, _db() as conn:
-            cursor = conn.execute("DELETE FROM integration_profile_mappings WHERE id = ?", (mapping_id,))
-            deleted = cursor.rowcount > 0
+            conn.execute(
+                """
+                UPDATE integration_profile_mappings
+                SET status = ?, enabled = ?, archived_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                ("archived", 0, now, now, mapping_id),
+            )
+            row = conn.execute("SELECT * FROM integration_profile_mappings WHERE id = ?", (mapping_id,)).fetchone()
+            deleted = row is not None
     return {"mapping_id": mapping_id, "deleted": deleted}
+
+
+def _restore_integration_mapping(mapping_id: int) -> dict[str, Any]:
+    now = _utc_now()
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute("SELECT * FROM integration_profile_mappings WHERE id = %s", (mapping_id,))
+                row = cursor.fetchone()
+                if row is None:
+                    raise HTTPException(status_code=404, detail=f"Integration mapping {mapping_id} not found.")
+                mapping = _integration_mapping_row_to_dict_any(row)
+                if str(mapping.get("status") or "").lower() != "archived":
+                    raise HTTPException(status_code=409, detail=f"Integration mapping {mapping_id} is not archived.")
+                profile = _get_run_profile(int(mapping["profile_id"]), include_archived=True)
+                if profile.get("status") == "archived":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Mapping references archived profile {mapping['profile_id']}. Restore profile before mapping.",
+                    )
+                cursor.execute(
+                    """
+                    UPDATE integration_profile_mappings
+                    SET status = %s, enabled = TRUE, archived_at = NULL, updated_at = %s
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    ("active", now, mapping_id),
+                )
+                restored_row = cursor.fetchone()
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            row = conn.execute("SELECT * FROM integration_profile_mappings WHERE id = ?", (mapping_id,)).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail=f"Integration mapping {mapping_id} not found.")
+            mapping = _integration_mapping_row_to_dict_any(row)
+            if str(mapping.get("status") or "").lower() != "archived":
+                raise HTTPException(status_code=409, detail=f"Integration mapping {mapping_id} is not archived.")
+            profile_row = conn.execute("SELECT * FROM run_profiles WHERE id = ?", (int(mapping["profile_id"]),)).fetchone()
+            if profile_row is None:
+                raise HTTPException(status_code=404, detail=f"Run profile {mapping['profile_id']} not found.")
+            profile = _profile_row_to_dict_any(profile_row)
+            if profile.get("status") == "archived":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Mapping references archived profile {mapping['profile_id']}. Restore profile before mapping.",
+                )
+            conn.execute(
+                """
+                UPDATE integration_profile_mappings
+                SET status = ?, enabled = ?, archived_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                ("active", 1, None, now, mapping_id),
+            )
+            restored_row = conn.execute("SELECT * FROM integration_profile_mappings WHERE id = ?", (mapping_id,)).fetchone()
+    return {"mapping": _integration_mapping_row_to_dict_any(restored_row)}
 
 
 def _list_integration_triggers(limit: int, offset: int) -> dict[str, Any]:
@@ -2405,9 +2903,9 @@ def _integration_mapping_for(project: str, environment: str) -> dict[str, Any] |
                 cursor.execute(
                     """
                     SELECT * FROM integration_profile_mappings
-                    WHERE project = %s AND environment = %s
+                    WHERE project = %s AND environment = %s AND status <> %s
                     """,
-                    (project, environment),
+                    (project, environment, "archived"),
                 )
                 row = cursor.fetchone()
         finally:
@@ -2417,9 +2915,9 @@ def _integration_mapping_for(project: str, environment: str) -> dict[str, Any] |
             row = conn.execute(
                 """
                 SELECT * FROM integration_profile_mappings
-                WHERE project = ? AND environment = ?
+                WHERE project = ? AND environment = ? AND status <> ?
                 """,
-                (project, environment),
+                (project, environment, "archived"),
             ).fetchone()
     if row is None:
         return None
@@ -2567,7 +3065,7 @@ def _enqueue_integration_profile_launch(
 ) -> None:
     def _runner() -> None:
         try:
-            profile = _get_run_profile(profile_id)
+            profile = _get_run_profile(profile_id, include_archived=False)
             request = _profile_request_to_run_request(profile)
             request.trigger_source = "github"
             request.trigger_label = f"GitHub integration: {project}/{environment}"
@@ -2961,9 +3459,9 @@ def _validate_schedule_request(request: ScheduleUpsertRequest) -> None:
     if request.schedule_type == "simple" and request.profile_id is None:
         raise HTTPException(status_code=400, detail="Simple schedules require a run profile.")
     if request.schedule_type == "simple" and request.profile_id is not None:
-        _get_run_profile(int(request.profile_id))
+        _get_run_profile(int(request.profile_id), include_archived=False)
     for step in request.campaign_steps:
-        _get_run_profile(int(step.profile_id))
+        _get_run_profile(int(step.profile_id), include_archived=False)
     if request.schedule_type == "campaign" and not request.campaign_steps:
         raise HTTPException(status_code=400, detail="Campaign schedules require at least one campaign step.")
 
@@ -3618,8 +4116,11 @@ def _update_schedule(
     request: ScheduleUpsertRequest,
     user_id: Optional[int] = None,
 ) -> dict[str, Any]:
-    _get_schedule(schedule_id)
+    existing = _get_schedule(schedule_id)
+    if existing.get("status") == "deleted":
+        raise HTTPException(status_code=409, detail=f"Schedule {schedule_id} is archived. Restore it before editing.")
     fields = _schedule_fields_from_request(request, user_id, _utc_now())
+    fields["catalog_managed"] = False
     if USE_POSTGRES:
         conn = _get_db_connection()
         try:
@@ -3656,8 +4157,8 @@ def _persist_schedule_catalog_slug(schedule_id: int, catalog_slug: str) -> None:
         try:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "UPDATE schedules SET catalog_slug = %s, updated_at = %s WHERE id = %s",
-                    (catalog_slug, updated_at, schedule_id),
+                    "UPDATE schedules SET catalog_slug = %s, catalog_managed = %s, updated_at = %s WHERE id = %s",
+                    (catalog_slug, True, updated_at, schedule_id),
                 )
                 conn.commit()
         finally:
@@ -3665,8 +4166,31 @@ def _persist_schedule_catalog_slug(schedule_id: int, catalog_slug: str) -> None:
     else:
         with DB_LOCK, _db() as conn:
             conn.execute(
-                "UPDATE schedules SET catalog_slug = ?, updated_at = ? WHERE id = ?",
-                (catalog_slug, updated_at, schedule_id),
+                "UPDATE schedules SET catalog_slug = ?, catalog_managed = ?, updated_at = ? WHERE id = ?",
+                (catalog_slug, 1, updated_at, schedule_id),
+            )
+
+
+def _schedule_profile_ids(schedule: dict[str, Any]) -> list[int]:
+    profile_ids: list[int] = []
+    for step in schedule.get("campaign_steps") or []:
+        if not isinstance(step, dict):
+            continue
+        raw_profile_id = step.get("profile_id")
+        try:
+            profile_ids.append(int(raw_profile_id))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(profile_ids))
+
+
+def _assert_schedule_profiles_active(schedule: dict[str, Any]) -> None:
+    for profile_id in _schedule_profile_ids(schedule):
+        profile = _get_run_profile(profile_id, include_archived=True)
+        if profile.get("status") == "archived":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Schedule references archived profile {profile_id}. Restore the profile before activating the schedule.",
             )
 
 
@@ -3674,8 +4198,8 @@ def _set_schedule_status(schedule_id: int, status: str) -> dict[str, Any]:
     if status not in {"active", "paused", "disabled", "deleted"}:
         raise HTTPException(status_code=400, detail=f"Unsupported schedule status {status!r}.")
     schedule = _get_schedule(schedule_id)
-    if status == "deleted" and schedule.get("catalog_slug"):
-        raise HTTPException(status_code=403, detail="Catalog schedules cannot be deleted.")
+    if status == "active":
+        _assert_schedule_profiles_active(schedule)
     updated_at = _utc_now()
     if status == "active":
         next_run_at, next_run_reason = _calculate_next_run(schedule, _parse_run_timestamp(updated_at))
@@ -3686,8 +4210,15 @@ def _set_schedule_status(schedule_id: int, status: str) -> dict[str, Any]:
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
                 cursor.execute(
-                    "UPDATE schedules SET status = %s, next_run_at = %s, next_run_reason = %s, updated_at = %s WHERE id = %s RETURNING *",
-                    (status, next_run_at, next_run_reason, updated_at, schedule_id),
+                    "UPDATE schedules SET status = %s, next_run_at = %s, next_run_reason = %s, updated_at = %s, catalog_managed = %s WHERE id = %s RETURNING *",
+                    (
+                        status,
+                        next_run_at,
+                        next_run_reason,
+                        updated_at,
+                        False if status == "deleted" else bool(schedule.get("catalog_managed")),
+                        schedule_id,
+                    ),
                 )
                 row = cursor.fetchone()
                 conn.commit()
@@ -3696,8 +4227,15 @@ def _set_schedule_status(schedule_id: int, status: str) -> dict[str, Any]:
     else:
         with DB_LOCK, _db() as conn:
             conn.execute(
-                "UPDATE schedules SET status = ?, next_run_at = ?, next_run_reason = ?, updated_at = ? WHERE id = ?",
-                (status, next_run_at, next_run_reason, updated_at, schedule_id),
+                "UPDATE schedules SET status = ?, next_run_at = ?, next_run_reason = ?, updated_at = ?, catalog_managed = ? WHERE id = ?",
+                (
+                    status,
+                    next_run_at,
+                    next_run_reason,
+                    updated_at,
+                    0 if status == "deleted" else int(bool(schedule.get("catalog_managed"))),
+                    schedule_id,
+                ),
             )
             row = conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
     return {"schedule": _schedule_row_to_dict_any(row)}
@@ -3827,7 +4365,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
                 repeat_count = int(step.get("repeat_count") or 1)
                 profile_id = int(step["profile_id"])
                 for repeat_index in range(1, repeat_count + 1):
-                    profile = _get_run_profile(profile_id)
+                    profile = _get_run_profile(profile_id, include_archived=False)
                     request = _profile_request_to_run_request(profile)
                     request.trigger_source = "schedule"
                     request.trigger_label = f"Schedule: {schedule.get('name') or schedule_id}"
@@ -3849,7 +4387,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
                     runs.append(launched)
         else:
             profile_id = int(schedule["profile_id"])
-            profile = _get_run_profile(profile_id)
+            profile = _get_run_profile(profile_id, include_archived=False)
             request = _profile_request_to_run_request(profile)
             request.trigger_source = "schedule"
             request.trigger_label = f"Schedule: {schedule.get('name') or schedule_id}"
@@ -3880,7 +4418,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
         elif schedule.get("schedule_type") == "simple" and schedule.get("profile_id") is not None:
             try:
                 failed_profile_id = int(schedule.get("profile_id"))
-                failed_profile_name = str(_get_run_profile(failed_profile_id).get("name") or "") or None
+                failed_profile_name = str(_get_run_profile(failed_profile_id, include_archived=True).get("name") or "") or None
             except Exception:
                 failed_profile_id = int(schedule.get("profile_id")) if schedule.get("profile_id") is not None else None
 
@@ -4564,30 +5102,8 @@ def _event_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         action = str(event.get("action") or "unknown")
         actors[actor] = actors.get(actor, 0) + 1
         actions[action] = actions.get(action, 0) + 1
-        status = str(event.get("status") or "").strip().lower()
-        category = str(event.get("category") or "").strip().lower()
-        http_status = event.get("http_status") or event.get("status_code")
-        http_status_code: int | None = None
-        try:
-            if http_status is not None:
-                http_status_code = int(http_status)
-        except (TypeError, ValueError):
-            http_status_code = None
-
-        if category == "decision":
-            if status in {"failed", "error", "blocked"}:
-                failed_events += 1
-        else:
-            if http_status_code is not None:
-                if http_status_code >= 500:
-                    failed_events += 1
-            else:
-                ok_flag = event.get("ok")
-                if isinstance(ok_flag, bool):
-                    if not ok_flag:
-                        failed_events += 1
-                elif status in {"error", "failed", "failure"}:
-                    failed_events += 1
+        if is_metric_failed_event(event):
+            failed_events += 1
         metadata = event.get("metadata")
         saw_http = False
         if isinstance(metadata, dict) and "http_status" in metadata:
@@ -4700,14 +5216,14 @@ def _archives_summary_payload() -> dict[str, Any]:
 
 
 def _archives_runs_payload(limit: int, offset: int) -> dict[str, Any]:
-    runs = _list_runs(limit=500)
-    buckets = _retention_buckets(runs)
-    archive_runs = buckets["archive"] + buckets["purge"]
+    runs = _list_runs(limit=1000, include_archived=True)
+    archive_runs = [run for run in runs if run.get("archived_at")]
+    archive_runs.sort(key=lambda item: int(item.get("id") or 0), reverse=True)
     page = archive_runs[offset : offset + limit]
     enriched = [
         {
             **run,
-            "lifecycle_state": _run_lifecycle_state(run),
+            "lifecycle_state": "archived",
             "age_days": _run_age_days(run),
             "retained_summary": _retained_run_summary(run),
         }
@@ -4719,6 +5235,28 @@ def _archives_runs_payload(limit: int, offset: int) -> dict[str, Any]:
         "limit": limit,
         "offset": offset,
     }
+
+
+def _archives_profiles_payload() -> dict[str, Any]:
+    profiles = [p for p in _list_run_profiles(include_archived=True) if p.get("status") == "archived"]
+    profiles.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+    return {"profiles": profiles}
+
+
+def _archives_schedules_payload() -> dict[str, Any]:
+    schedules = [s for s in _list_schedules(include_deleted=True)["schedules"] if s.get("status") == "deleted"]
+    schedules.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+    return {"schedules": schedules}
+
+
+def _archives_integration_mappings_payload() -> dict[str, Any]:
+    mappings = [
+        item
+        for item in _list_integration_mappings(include_archived=True).get("mappings", [])
+        if str(item.get("status") or "").lower() == "archived"
+    ]
+    mappings.sort(key=lambda item: int(item.get("id") or 0), reverse=True)
+    return {"mappings": mappings}
 
 
 def _retention_summary_payload() -> dict[str, Any]:
@@ -4897,11 +5435,34 @@ def _run_metrics_payload(run_id: int) -> dict[str, Any]:
 
 
 def _cancel_run_logic(run_id: int) -> dict[str, Any]:
-    _get_run(run_id)
+    _cleanup_stale_processes()
+    run = _fetch_run_row(run_id)
+    _reconcile_stale_run(run_id, run)
+    run = _fetch_run_row(run_id)
+    status = str(run.get("status") or "").strip().lower()
+    liveness = _run_liveness(run)
+    if not liveness["can_stop"]:
+        if status == "queued":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Run {run_id} is queued; wait until it is running before stopping.",
+            )
+        if status in TERMINAL_RUN_STATUSES:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Run {run_id} has already finished ({status}).",
+            )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Run {run_id} is not actively running.",
+        )
     with RUN_LOCK:
         process = RUN_PROCESSES.get(run_id)
-        if process is None:
-            raise HTTPException(status_code=409, detail=f"Run {run_id} is not active.")
+        if process is None or process.poll() is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Run {run_id} is not actively running.",
+            )
         RUN_CANCELLED.add(run_id)
         process.terminate()
     _update_run(run_id, status="cancelling")
@@ -4959,68 +5520,54 @@ def _delete_artifact_paths(
 
 
 def _delete_run_logic(run_id: int) -> dict[str, Any]:
-    run = _get_run(run_id)
-
-    with RUN_LOCK:
-        process = RUN_PROCESSES.get(run_id)
-        if process is not None:
-            if process.poll() is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Run {run_id} is still active. Cancel the run before deleting."
-                )
-            RUN_PROCESSES.pop(run_id, None)
-
-    deleted_files: list[str] = []
-    missing_files: list[str] = []
-
-    log_path = _safe_path(run.get("log_path"))
-    if log_path is not None:
-        try:
-            _delete_expected_file(log_path, deleted_files, missing_files)
-        except Exception as exc:
-            LOGGER.error(f"Failed to delete run log {log_path}: {exc}")
-            raise HTTPException(status_code=500, detail=f"Failed to delete run log: {str(exc)}")
-
-    artifact_paths = [
-        path
-        for field in ARTIFACT_FIELDS
-        if (path := _safe_path(run.get(field))) is not None
-    ]
-    try:
-        _delete_artifact_paths(artifact_paths, deleted_files, missing_files)
-    except Exception as exc:
-        LOGGER.error(f"Failed to delete run artifacts for run {run_id}: {exc}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete run artifacts: {str(exc)}")
-
-    try:
-        if USE_POSTGRES:
-            conn = _get_db_connection()
-            try:
-                with conn.cursor() as cursor:
-                    cursor.execute("DELETE FROM runs WHERE id = %s", (run_id,))
-                conn.commit()
-            finally:
-                conn.close()
-        else:
-            with DB_LOCK, _db() as conn:
-                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
-                conn.commit()
-        LOGGER.info(f"Deleted run {run_id} from database")
-    except Exception as exc:
-        LOGGER.error(f"Failed to delete run {run_id} from database: {exc}")
+    _cleanup_stale_processes()
+    run = _fetch_run_row(run_id)
+    _reconcile_stale_run(run_id, run)
+    run = _fetch_run_row(run_id)
+    if run.get("archived_at"):
+        return {
+            "run_id": run_id,
+            "deleted": True,
+            "archived": True,
+            "message": f"Run {run_id} is already archived.",
+        }
+    liveness = _run_liveness(run)
+    if not liveness["can_delete"]:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete run from database: {str(exc)}"
+            status_code=409,
+            detail=f"Run {run_id} is still actively running. Stop the run before deleting.",
         )
 
+    with RUN_LOCK:
+        process = RUN_PROCESSES.pop(run_id, None)
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+            raise HTTPException(
+                status_code=409,
+                detail=f"Run {run_id} is still actively running. Stop the run before deleting.",
+            )
+    with RUN_LOG_STAT_LOCK:
+        RUN_LOG_STAT.pop(run_id, None)
+    archived_at = _utc_now()
+    _update_run(run_id, archived_at=archived_at)
     return {
         "run_id": run_id,
         "deleted": True,
-        "deleted_files": deleted_files,
-        "missing_files": missing_files,
-        "message": f"Run {run_id} and its available artifacts have been deleted."
+        "archived": True,
+        "message": f"Run {run_id} has been archived."
     }
+
+
+def _restore_run_logic(run_id: int) -> dict[str, Any]:
+    run = _fetch_run_row(run_id)
+    if not run.get("archived_at"):
+        raise HTTPException(status_code=409, detail=f"Run {run_id} is not archived.")
+    _update_run(run_id, archived_at=None)
+    restored = _get_run(run_id)
+    return {"run_id": run_id, "restored": True, "run": restored}
 
 
 def _run_autopilot_job() -> None:
@@ -5071,7 +5618,12 @@ app.add_middleware(
 auth_service.init_auth_system(POSTGRES_URL, USE_POSTGRES)
 configure_runs_runtime(
     list_flows=lambda: _flows_payload(),
-    list_runs=lambda limit, offset: {"runs": _list_runs(limit=limit, offset=offset), "total": _count_runs(), "limit": limit, "offset": offset},
+    list_runs=lambda limit, offset, include_archived=False: {
+        "runs": _list_runs(limit=limit, offset=offset, include_archived=include_archived),
+        "total": _count_runs(include_archived=include_archived),
+        "limit": limit,
+        "offset": offset,
+    },
     count_runs=lambda: {"count": _count_runs()},
     dashboard_summary=lambda: _dashboard_summary_payload(),
     create_run=lambda request, user_id: _create_run(request, user_id),
@@ -5081,10 +5633,12 @@ configure_runs_runtime(
     get_run_metrics=lambda run_id: _run_metrics_payload(run_id),
     cancel_run=lambda run_id: _cancel_run_logic(run_id),
     delete_run=lambda run_id: _delete_run_logic(run_id),
-    list_profiles=lambda: _list_run_profiles_payload(),
+    restore_run=lambda run_id: _restore_run_logic(run_id),
+    list_profiles=lambda include_archived=False: _list_run_profiles_payload(include_archived),
     create_profile=lambda request, user_id: _create_run_profile(request, user_id),
     update_profile=lambda profile_id, request, user_id: _update_run_profile(profile_id, request, user_id),
     delete_profile=lambda profile_id: _delete_run_profile(profile_id),
+    restore_profile=lambda profile_id: _restore_run_profile(profile_id),
     launch_profile=lambda profile_id, user_id, trigger_overlay=None: _launch_run_profile(
         profile_id, user_id, trigger_overlay
     ),
@@ -5094,6 +5648,9 @@ configure_runs_runtime(
 configure_archives_runtime(
     summary=lambda: _archives_summary_payload(),
     list_runs=lambda limit, offset: _archives_runs_payload(limit, offset),
+    list_profiles=lambda: _archives_profiles_payload(),
+    list_schedules=lambda: _archives_schedules_payload(),
+    list_integration_mappings=lambda: _archives_integration_mappings_payload(),
 )
 configure_retention_runtime(
     summary=lambda: _retention_summary_payload(),
@@ -5124,9 +5681,10 @@ configure_system_runtime(
     send_test_email=lambda: _send_test_email_payload(),
 )
 configure_integrations_runtime(
-    list_mappings=lambda: _list_integration_mappings(),
+    list_mappings=lambda include_archived=False: _list_integration_mappings(include_archived),
     upsert_mapping=lambda request, user_id: _upsert_integration_mapping(request, user_id),
     delete_mapping=lambda mapping_id: _delete_integration_mapping(mapping_id),
+    restore_mapping=lambda mapping_id: _restore_integration_mapping(mapping_id),
     list_triggers=lambda limit, offset: _list_integration_triggers(limit, offset),
     process_github_deployment_webhook=lambda body, headers: _process_github_deployment_webhook(body, headers),
 )

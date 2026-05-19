@@ -23,3 +23,15 @@ def summary() -> dict[str, Any]:
 
 def list_runs(limit: int, offset: int) -> dict[str, Any]:
     return _callback("list_runs")(limit, offset)
+
+
+def list_profiles() -> dict[str, Any]:
+    return _callback("list_profiles")()
+
+
+def list_schedules() -> dict[str, Any]:
+    return _callback("list_schedules")()
+
+
+def list_integration_mappings() -> dict[str, Any]:
+    return _callback("list_integration_mappings")()

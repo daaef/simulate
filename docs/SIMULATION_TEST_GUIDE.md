@@ -79,6 +79,22 @@ What it does:
 - forces at least one accepted/completed baseline before applying reject/cancel tail pressure
 - fails with `accepted_baseline_not_met` if baseline cannot be achieved within bound
 
+### 3.4 Named-flow reliability matrix (`api_only`)
+
+Runs all 12 preset flows sequentially and writes a pass/fail summary (requires live LastMile/Fainzy + valid `sim_actors.json`):
+
+```bash
+export PYTHONPATH=.
+export SIM_FAILURE_POLICY=api_only
+export SIM_PREFLIGHT_STRATEGY=auto_recover
+./scripts/run_named_flow_regression.sh
+```
+
+Interpret results:
+- **Exit `0` + verdict `degraded`:** precondition downgrade only (for example new-user phone already registered) — OK under `api_only`.
+- **Exit `1`:** uncaught `RuntimeError`, usually API fault (5xx/timeout); inspect `runs/<stamp>/events.json` and console.
+- **Policy unit tests** (no network): `python3 -m unittest tests.test_simulate.FlowReliabilityPolicyTests -v`
+
 ---
 
 ## 4) Modes, flows, suites, scenarios

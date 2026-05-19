@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import random
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -22,17 +21,18 @@ from rich.console import Console
 
 import config
 from reporting import RunRecorder
+from scenarios import resolve_timing_profile
 from transport import RequestError, api_data, build_auth_proof, request_json
 
 console = Console()
 
-ROBOT_LIFECYCLE = [
-    ("enroute_pickup", (20, 60)),
-    ("robot_arrived_for_pickup", (5, 20)),
-    ("enroute_delivery", (30, 120)),
-    ("robot_arrived_for_delivery", (5, 20)),
-    ("completed", (2, 8)),
-]
+ROBOT_LIFECYCLE = (
+    "enroute_pickup",
+    "robot_arrived_for_pickup",
+    "enroute_delivery",
+    "robot_arrived_for_delivery",
+    "completed",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -425,11 +425,17 @@ async def _deliver_order(
     order_ref = str(order["order_ref"])
     scenario = "load"
     console.print(f"[magenta]robot_sim:[/] Starting delivery for order={order_db_id}")
-    for status, (lo, hi) in ROBOT_LIFECYCLE:
-        delay = random.uniform(lo, hi)
-        console.print(
-            f"[dim]robot_sim:[/] order={order_db_id} waiting {delay:.0f}s before -> {status}"
-        )
+    timing = resolve_timing_profile(config.SIM_TIMING_PROFILE)
+    for status in ROBOT_LIFECYCLE:
+        delay = timing.robot_delay(status)
+        if delay >= 1.0:
+            console.print(
+                f"[dim]robot_sim:[/] order={order_db_id} waiting {delay:.0f}s before -> {status}"
+            )
+        else:
+            console.print(
+                f"[dim]robot_sim:[/] order={order_db_id} brief delay ({delay:.1f}s) before -> {status}"
+            )
         await asyncio.sleep(delay)
         success = await patch_status(
             client,

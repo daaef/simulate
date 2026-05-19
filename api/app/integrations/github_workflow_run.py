@@ -306,20 +306,20 @@ def _lookup_mapping(project: str, environment: str) -> dict[str, Any] | None:
                 """
                 SELECT *
                 FROM integration_profile_mappings
-                WHERE project = %s AND environment = %s
+                WHERE project = %s AND environment = %s AND status <> %s
                 LIMIT 1
                 """,
-                (project, environment),
+                (project, environment, "archived"),
             )
         else:
             cursor.execute(
                 """
                 SELECT *
                 FROM integration_profile_mappings
-                WHERE project = ? AND environment = ?
+                WHERE project = ? AND environment = ? AND status <> ?
                 LIMIT 1
                 """,
-                (project, environment),
+                (project, environment, "archived"),
             )
 
         return _dict_row(cursor.fetchone())

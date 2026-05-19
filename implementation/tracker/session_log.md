@@ -2747,3 +2747,65 @@ npm install --no-save playwright@1.49.0 && node scripts/smoke_gui.mjs
 ### Next Steps
 
 1. Start contract-driven runtime/docs follow-on, or close stale tracker phases 14/351.
+
+## 2026-05-19 — Flow Reliability Hardening (in progress)
+
+### Summary
+
+Completing flow reliability hardening: live regression matrix for 12 named flows, targeted `failure_class` / policy unit tests, strict-mode parity spot-check, and per-flow reliability report.
+
+### Defaults
+
+- `SIM_FAILURE_POLICY=api_only`
+- `SIM_PREFLIGHT_STRATEGY=auto_recover`
+- Plan: `sim_actors.json`, timing: `fast`
+
+### Flows under regression
+
+`menus`, `free-coupon`, `new-user`, `paid-coupon`, `paid-no-coupon`, `payments`, `receipt-review`, `robot-complete`, `store-accept`, `store-dashboard`, `store-reject`, `store-setup` (+ alias `ronot-complete` → `robot-complete`)
+
+### Commands (verification)
+
+```bash
+python3 -m unittest tests.test_simulate.FlowReliabilityPolicyTests tests.test_simulate.TraceBootstrapTests tests.test_simulate.RunPlanTests tests.test_simulate.HealthSummaryTests -v
+python3 -m unittest tests.test_simulate -v
+./scripts/run_named_flow_regression.sh
+SIM_FAILURE_POLICY=strict SIM_PREFLIGHT_STRATEGY=hard_stop python3 -m simulate menus --plan sim_actors.json --timing fast
+```
+
+### Results (implementation)
+
+- `scripts/run_named_flow_regression.sh` + `scripts/run_named_flow_regression.py` (12 flows + `ronot-complete` alias)
+- `FlowReliabilityPolicyTests` (9 tests): coupon exhaustion/retry, new-user unsupported, OTP retry, artifact `failure_class`, strict/bootstrap parity
+- `trace_runner.py`: coupon alternate-store retry catches `HttpApiError`/`RuntimeError`, continues candidates, hard-fails only when all recovery paths hit API faults
+- Docs updated in `README.md`, `SIMULATOR_GUIDE.md`, `docs/SIMULATION_TEST_GUIDE.md`
+
+### Your test commands
+
+```bash
+cd /Users/mars/FAINZY/simulate
+export PYTHONPATH=.
+
+# Unit (no live API)
+python3 -m unittest tests.test_simulate.FlowReliabilityPolicyTests -v
+python3 -m unittest tests.test_simulate -v
+
+# Full named-flow matrix (live backend, ~30+ min)
+export SIM_FAILURE_POLICY=api_only
+export SIM_PREFLIGHT_STRATEGY=auto_recover
+./scripts/run_named_flow_regression.sh
+
+# Single flow smoke
+python3 __main__.py paid-coupon --plan sim_actors.json --timing fast
+
+# Strict parity (expect harder failures on preconditions)
+export SIM_FAILURE_POLICY=strict
+export SIM_PREFLIGHT_STRATEGY=hard_stop
+python3 __main__.py menus --plan sim_actors.json --timing fast
+python3 __main__.py new-user --plan sim_actors.json --timing fast
+```
+
+### Next Steps
+
+1. Run regression script; review `runs/flow-reliability-<date>.md`.
+2. Optionally copy summary to `docs/reports/`.

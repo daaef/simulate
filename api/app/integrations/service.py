@@ -19,8 +19,8 @@ def _callback(name: str) -> Callable[..., Any]:
     return callback
 
 
-def list_mappings() -> dict[str, Any]:
-    return _callback("list_mappings")()
+def list_mappings(include_archived: bool = False) -> dict[str, Any]:
+    return _callback("list_mappings")(include_archived)
 
 
 def upsert_mapping(request: IntegrationMappingUpsertRequest, user_id: int | None) -> dict[str, Any]:
@@ -29,6 +29,10 @@ def upsert_mapping(request: IntegrationMappingUpsertRequest, user_id: int | None
 
 def delete_mapping(mapping_id: int) -> dict[str, Any]:
     return _callback("delete_mapping")(mapping_id)
+
+
+def restore_mapping(mapping_id: int) -> dict[str, Any]:
+    return _callback("restore_mapping")(mapping_id)
 
 
 def list_triggers(limit: int, offset: int) -> dict[str, Any]:
@@ -40,4 +44,3 @@ def process_github_deployment_webhook(
     headers: dict[str, str],
 ) -> dict[str, Any]:
     return _callback("process_github_deployment_webhook")(body, headers)
-

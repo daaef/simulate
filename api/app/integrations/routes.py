@@ -40,8 +40,11 @@ async def github_deployment_complete(request: Request) -> dict[str, Any]:
 
 
 @router.get("/api/v1/integrations/github/mappings")
-def list_mappings(current_user: dict = Depends(require_permission("system", "read"))) -> dict[str, Any]:
-    return service.list_mappings()
+def list_mappings(
+    include_archived: bool = Query(default=False),
+    current_user: dict = Depends(require_permission("system", "read")),
+) -> dict[str, Any]:
+    return service.list_mappings(include_archived)
 
 
 @router.post("/api/v1/integrations/github/mappings")
@@ -58,6 +61,14 @@ def delete_mapping(
     current_user: dict = Depends(require_permission("system", "configure")),
 ) -> dict[str, Any]:
     return service.delete_mapping(mapping_id)
+
+
+@router.post("/api/v1/integrations/github/mappings/{mapping_id}/restore")
+def restore_mapping(
+    mapping_id: int,
+    current_user: dict = Depends(require_permission("system", "configure")),
+) -> dict[str, Any]:
+    return service.restore_mapping(mapping_id)
 
 
 @router.get("/api/v1/integrations/github/triggers")

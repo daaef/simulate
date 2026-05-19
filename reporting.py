@@ -178,6 +178,8 @@ class RunRecorder:
             "auto_select_store": config.SIM_AUTO_SELECT_STORE,
             "auto_select_coupon": config.SIM_AUTO_SELECT_COUPON,
             "auto_provision_fixtures": config.SIM_AUTO_PROVISION_FIXTURES,
+            "failure_policy": config.SIM_FAILURE_POLICY,
+            "preflight_strategy": config.SIM_PREFLIGHT_STRATEGY,
             "mutate_store_setup": config.SIM_MUTATE_STORE_SETUP,
             "mutate_menu_setup": config.SIM_MUTATE_MENU_SETUP,
             "users": config.N_USERS,
@@ -426,6 +428,7 @@ class RunRecorder:
         reason_message: str | None = None,
         next_action: str | None = None,
         run_continued: bool | None = None,
+        failure_class: str | None = None,
     ) -> dict[str, Any]:
         event: dict[str, Any] = {
             "id": self._next_event_id,
@@ -491,6 +494,8 @@ class RunRecorder:
             event["next_action"] = next_action
         if run_continued is not None:
             event["run_continued"] = run_continued
+        if failure_class is not None:
+            event["failure_class"] = failure_class
 
         self.events.append(event)
         if scenario is not None:
@@ -509,6 +514,7 @@ class RunRecorder:
         severity: str,
         code: str,
         message: str,
+        failure_class: str | None = None,
         actor: str | None = None,
         scenario: str | None = None,
         step: str | None = None,
@@ -540,6 +546,8 @@ class RunRecorder:
             issue["order_ref"] = order_ref
         if related_event_id is not None:
             issue["related_event_id"] = related_event_id
+        if failure_class is not None:
+            issue["failure_class"] = failure_class
         if details:
             issue["details"] = _json_safe(details)
         self.issues.append(issue)
@@ -561,6 +569,7 @@ class RunRecorder:
         reason_message: str | None = None,
         next_action: str | None = None,
         run_continued: bool | None = None,
+        failure_class: str | None = None,
     ) -> dict[str, Any]:
         decision = {
             "id": len(self.decisions) + 1,
@@ -574,6 +583,7 @@ class RunRecorder:
             "message": message,
             "next_action": next_action,
             "run_continued": run_continued,
+            "failure_class": failure_class,
             "identity": self._identity_snapshot(),
         }
         if actor is not None:
@@ -607,8 +617,10 @@ class RunRecorder:
                 "reason_message": decision["reason_message"],
                 "next_action": next_action,
                 "run_continued": run_continued,
+                "failure_class": failure_class,
                 **(details or {}),
             },
+            failure_class=failure_class,
             track_order=False,
         )
         return decision
@@ -745,6 +757,26 @@ class RunRecorder:
         if base == "passed" and expected and actual != expected:
             return "blocked"
         issues = self._issues_for_scenario(scenario)
+        failure_policy = str(self.config_snapshot.get("failure_policy") or "strict")
+        if failure_policy == "api_only":
+            api_fault_errors = [
+                item
+                for item in issues
+                if item.get("severity") == "error"
+                and str(item.get("failure_class") or "precondition") == "api_fault"
+            ]
+            preconditions = [
+                item
+                for item in issues
+                if str(item.get("failure_class") or "precondition") == "precondition"
+            ]
+            if api_fault_errors:
+                return "blocked"
+            if preconditions:
+                return "unsupported" if base == "unsupported" else "degraded"
+            if base in {"blocked", "failed", "error"}:
+                return "degraded"
+            return base
         if any(item.get("severity") == "error" for item in issues):
             return "blocked"
         if any(item.get("severity") == "warning" for item in issues):
@@ -1314,6 +1346,7 @@ class RunRecorder:
             orders=list(self.orders.values()),
             events=self.events,
             issues=self.issues,
+            failure_policy=str(self.config_snapshot.get("failure_policy") or "strict"),
         )
 
     def _render_health_sections(self) -> list[str]:

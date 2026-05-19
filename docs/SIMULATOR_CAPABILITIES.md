@@ -125,6 +125,7 @@ Passing an alias normalizes to the canonical preset name (`normalise_flow` → `
 | `store_accept` | `store-accept` |
 | `store_reject` | `store-reject` |
 | `robot` | `robot-complete` |
+| `ronot-complete` | `robot-complete` |
 | `daily` | `doctor` |
 | `doctor` | `doctor` |
 | `receipt_review` | `receipt-review` |
@@ -329,6 +330,8 @@ Sensitive keys containing `secret`, `token`, `password`, `api_key`, or `private_
 | Plan key | Config global |
 |----------|----------------|
 | `strict_plan` | `SIM_STRICT_PLAN` (also influences validation path via `_planned_strict_value`) |
+| `failure_policy` | `SIM_FAILURE_POLICY` (`api_only` or `strict`) |
+| `preflight_strategy` | `SIM_PREFLIGHT_STRATEGY` (`auto_recover`, `skip_warn`, `hard_stop`) |
 | `run_app_probes` | `SIM_RUN_APP_PROBES` |
 | `run_store_dashboard_probes` | `SIM_RUN_STORE_DASHBOARD_PROBES` |
 | `run_post_order_actions` | `SIM_RUN_POST_ORDER_ACTIONS` |
@@ -432,6 +435,8 @@ Values load from `.env` via `python-dotenv`. **README guidance:** keep normal si
 | `SIM_RUN_POST_ORDER_ACTIONS` | false |
 | `SIM_ENFORCE_WEBSOCKET_GATES` | false |
 | `SIM_STRICT_PLAN` | false |
+| `SIM_FAILURE_POLICY` | `api_only` |
+| `SIM_PREFLIGHT_STRATEGY` | `auto_recover` |
 
 ### Autopilot / provisioning / store status
 

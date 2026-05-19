@@ -24,6 +24,7 @@ from rich.console import Console
 import config
 from interaction_catalog import MENU_STATUSES, WORKING_DAYS
 from reporting import RunRecorder
+from scenarios import resolve_timing_profile
 from transport import RequestError, api_data, build_auth_proof, request_json
 
 console = Console()
@@ -1186,6 +1187,42 @@ async def fetch_order(
     return _order_payload(result.payload)
 
 
+def _offer_ws_status(status_queue: asyncio.Queue[str], status: str | None) -> None:
+    normalized = str(status or "").strip()
+    if normalized:
+        status_queue.put_nowait(normalized)
+
+
+async def prime_ws_status_from_order(
+    client: httpx.AsyncClient,
+    status_queue: asyncio.Queue[str],
+    *,
+    store_token: str,
+    token_source: str,
+    order_db_id: int,
+    order_ref: str,
+    recorder: RunRecorder,
+) -> str | None:
+    """Seed the per-order websocket queue from the current HTTP order status."""
+    try:
+        payload = await fetch_order(
+            client,
+            store_token=store_token,
+            token_source=token_source,
+            order_db_id=order_db_id,
+            order_ref=order_ref,
+            recorder=recorder,
+            action="prime_websocket_status",
+            step="prime_websocket_status",
+            scenario="load",
+        )
+    except Exception:
+        return None
+    status = str(payload.get("status") or "").strip()
+    _offer_ws_status(status_queue, status)
+    return status or None
+
+
 async def wait_for_status_ws(
     status_queue: asyncio.Queue[str],
     *,
@@ -1222,8 +1259,14 @@ async def _handle_order(
     scenario = "load"
 
     status_queue = watcher.subscribe(order_db_id)
+    timing = resolve_timing_profile(config.SIM_TIMING_PROFILE)
     try:
-        await asyncio.sleep(random.uniform(3, 12))
+        decision_delay = timing.store_decision_delay.pick()
+        if decision_delay >= 1.0:
+            console.print(
+                f"[dim]store_sim:[/] order={order_db_id} waiting {decision_delay:.0f}s before accept/reject ..."
+            )
+        await asyncio.sleep(decision_delay)
 
         if random.random() < config.REJECT_RATE:
             console.print(
@@ -1268,6 +1311,15 @@ async def _handle_order(
 
         # Wait for order_processing via websocket
         timeout = config.ORDER_PROCESSING_POLL_INTERVAL_SECONDS * config.ORDER_PROCESSING_POLL_MAX_ATTEMPTS
+        await prime_ws_status_from_order(
+            client,
+            status_queue,
+            store_token=store_token,
+            token_source=token_source,
+            order_db_id=order_db_id,
+            order_ref=order_ref,
+            recorder=recorder,
+        )
         status = await wait_for_status_ws(
             status_queue,
             expected_statuses={"order_processing"},
@@ -1300,10 +1352,15 @@ async def _handle_order(
             )
             return
 
-        prep_time = random.uniform(20, 90)
-        console.print(
-            f"[yellow]store_sim:[/] Preparing order={order_db_id} (~{prep_time:.0f}s) ..."
-        )
+        prep_time = timing.store_prep_delay.pick()
+        if prep_time >= 1.0:
+            console.print(
+                f"[yellow]store_sim:[/] Preparing order={order_db_id} (~{prep_time:.0f}s) ..."
+            )
+        else:
+            console.print(
+                f"[dim]store_sim:[/] Preparing order={order_db_id} (brief, ~{prep_time:.1f}s) ..."
+            )
         await asyncio.sleep(prep_time)
 
         if not await patch_status(

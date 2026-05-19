@@ -58,12 +58,14 @@ ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
         ("runs", "create"),
         ("runs", "read"),
         ("runs", "cancel"),
+        ("runs", "delete"),
 
         ("dashboard", "read"),
 
         ("schedules", "create"),
         ("schedules", "read"),
         ("schedules", "update"),
+        ("schedules", "delete"),
         ("schedules", "trigger"),
 
         ("archives", "read"),

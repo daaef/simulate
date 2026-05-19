@@ -6,10 +6,15 @@ from typing import Any, Literal
 
 from decision_reasons import is_informational_decision_reason
 from session_flow_labels import flow_label_for
+from ..event_failure import is_metric_failed_event
 from ..runs import service as runs_service
 
 
 FindingBucket = Literal["critical", "operational"]
+
+CRITICAL_FINDINGS_CAP = 10
+OPERATIONAL_FINDINGS_CAP = 25
+ARTIFACT_ISSUES_SCAN_LIMIT = 24
 
 ACTOR_KEYS = ("user", "store", "robot")
 CRITICAL_ISSUE_CODES = frozenset(
@@ -660,6 +665,20 @@ def _build_lifecycle(events: list[dict[str, Any]], run: dict[str, Any]) -> list[
     return lifecycle
 
 
+def _event_id(event: dict[str, Any]) -> int | None:
+    try:
+        return int(event.get("id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _related_event_id(issue: dict[str, Any]) -> int | None:
+    try:
+        return int(issue.get("related_event_id"))
+    except (TypeError, ValueError):
+        return None
+
+
 def _build_findings(
     events: list[dict[str, Any]],
     artifact_issues: list[dict[str, Any]],
@@ -668,16 +687,18 @@ def _build_findings(
     critical: list[dict[str, Any]] = []
     operational: list[dict[str, Any]] = []
     event_by_id: dict[int, dict[str, Any]] = {}
+    represented_event_ids: set[int] = set()
 
     for event in events:
-        try:
-            event_id = int(event.get("id"))
+        event_id = _event_id(event)
+        if event_id is not None:
             event_by_id[event_id] = event
-        except (TypeError, ValueError):
-            continue
 
-    for issue in artifact_issues[:24]:
+    for issue in artifact_issues[:ARTIFACT_ISSUES_SCAN_LIMIT]:
         try:
+            related_id = _related_event_id(issue)
+            if related_id is not None:
+                represented_event_ids.add(related_id)
             row = _issue_row_from_artifact(issue, event_by_id, events)
             if _finding_bucket_issue(issue) == "critical":
                 critical.append(row)
@@ -687,12 +708,34 @@ def _build_findings(
             continue
 
     for event in events:
-        if len(critical) >= 10:
+        if len(critical) >= CRITICAL_FINDINGS_CAP:
             break
+        event_id = _event_id(event)
+        if event_id is not None and event_id in represented_event_ids:
+            continue
         try:
             if not _is_server_api_failure_event(event):
                 continue
             critical.append(_issue_row_from_event(event, events))
+            if event_id is not None:
+                represented_event_ids.add(event_id)
+        except Exception:
+            continue
+
+    for event in events:
+        if len(operational) >= OPERATIONAL_FINDINGS_CAP:
+            break
+        event_id = _event_id(event)
+        if event_id is not None and event_id in represented_event_ids:
+            continue
+        try:
+            if not is_metric_failed_event(event):
+                continue
+            if _is_server_api_failure_event(event):
+                continue
+            operational.append(_issue_row_from_event(event, events))
+            if event_id is not None:
+                represented_event_ids.add(event_id)
         except Exception:
             continue
 
@@ -716,8 +759,8 @@ def _build_findings(
         )
 
     return {
-        "critical": critical[:10],
-        "operational": operational[:12],
+        "critical": critical[:CRITICAL_FINDINGS_CAP],
+        "operational": operational[:OPERATIONAL_FINDINGS_CAP],
     }
 
 
@@ -727,7 +770,7 @@ def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]],
 
 
 def _derived_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
-    failed = [event for event in events if _is_server_api_failure_event(event)]
+    failed = [event for event in events if is_metric_failed_event(event)]
     http_events = [event for event in events if _is_http_event(event)]
     websocket_events = [event for event in events if _is_websocket_event(event)]
 

@@ -1,3 +1,12 @@
+export type RunControl = {
+  actively_running: boolean;
+  can_stop: boolean;
+  can_delete: boolean;
+  has_live_process?: boolean;
+  log_activity?: boolean;
+  liveness_reason?: string;
+};
+
 export type RunRow = {
   id: number;
   flow: string;
@@ -25,6 +34,7 @@ export type RunRow = {
   story_path: string | null;
   events_path: string | null;
   error: string | null;
+  archived_at?: string | null;
   execution_snapshot?: Record<string, unknown> | null;
   trigger_source?: "manual" | "profile" | "schedule" | "github" | "replay" | string | null;
   trigger_label?: string | null;
@@ -33,6 +43,7 @@ export type RunRow = {
   schedule_id?: number | null;
   integration_trigger_id?: number | null;
   launched_by_user_id?: number | null;
+  control?: RunControl;
 };
 
 export type RunCreateRequest = {
@@ -85,9 +96,12 @@ export type RunProfile = {
   reject: number | null;
   continuous: boolean;
   extra_args: string[];
+  status: "active" | "archived";
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
   catalog_slug?: string | null;
+  catalog_managed?: boolean;
 };
 
 export type RunProfileUpsertRequest = {
@@ -195,7 +209,7 @@ export type RetainedRunSummary = {
 };
 
 export type ArchiveRun = RunRow & {
-  lifecycle_state?: "active" | "archive_candidate" | "raw_purge_candidate";
+  lifecycle_state?: "active" | "archive_candidate" | "raw_purge_candidate" | "archived";
   age_days?: number | null;
   retained_summary?: RetainedRunSummary;
 };
@@ -249,6 +263,7 @@ export type Schedule = {
   status: ScheduleStatus;
   profile_id: number | null;
   catalog_slug?: string | null;
+  catalog_managed?: boolean;
   anchor_start_at: string | null;
   period: SchedulePeriod | null;
   stop_rule: ScheduleStopRule | null;
@@ -507,6 +522,8 @@ export type IntegrationMapping = {
   created_by?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
+  status?: "active" | "archived" | string;
+  archived_at?: string | null;
   [key: string]: unknown;
 };
 
@@ -664,9 +681,13 @@ export async function fetchFlows(): Promise<FlowsResponse> {
   return unwrap<FlowsResponse>(await fetch("/api/v1/flows", withSession()), "flows");
 }
 
-export async function fetchRuns(limit: number = 50, offset: number = 0): Promise<{ runs: RunRow[]; total: number; limit: number; offset: number }> {
+export async function fetchRuns(
+  limit: number = 50,
+  offset: number = 0,
+  includeArchived: boolean = false
+): Promise<{ runs: RunRow[]; total: number; limit: number; offset: number }> {
   const payload = await unwrap<{ runs: RunRow[]; total: number; limit: number; offset: number }>(
-    await fetch(`/api/v1/runs?limit=${limit}&offset=${offset}`, withSession()),
+    await fetch(`/api/v1/runs?limit=${limit}&offset=${offset}&include_archived=${includeArchived ? "true" : "false"}`, withSession()),
     "runs"
   );
   return payload;
@@ -708,6 +729,22 @@ export async function fetchArchiveRuns(limit: number = 50, offset: number = 0): 
     await fetch(`/api/v1/archives/runs?limit=${limit}&offset=${offset}`, withSession()),
     "archives-runs"
   );
+}
+
+export async function fetchArchivedProfiles(): Promise<RunProfile[]> {
+  const payload = await unwrap<{ profiles: RunProfile[] }>(
+    await fetch("/api/v1/archives/profiles", withSession()),
+    "archives-profiles"
+  );
+  return payload.profiles;
+}
+
+export async function fetchArchivedSchedules(): Promise<Schedule[]> {
+  const payload = await unwrap<{ schedules: Schedule[] }>(
+    await fetch("/api/v1/archives/schedules", withSession()),
+    "archives-schedules"
+  );
+  return payload.schedules;
 }
 
 export async function fetchRetentionSummary(): Promise<RetentionSummary> {
@@ -862,15 +899,17 @@ export async function cancelRun(runId: number): Promise<void> {
 export async function deleteRun(runId: number): Promise<{
   run_id: number;
   deleted: boolean;
-  deleted_files: string[];
-  missing_files: string[];
+  archived?: boolean;
+  deleted_files?: string[];
+  missing_files?: string[];
   message: string;
 }> {
   return unwrap<{
     run_id: number;
     deleted: boolean;
-    deleted_files: string[];
-    missing_files: string[];
+    archived?: boolean;
+    deleted_files?: string[];
+    missing_files?: string[];
     message: string;
   }>(
     await fetch(`/api/v1/runs/${runId}`, {
@@ -881,8 +920,21 @@ export async function deleteRun(runId: number): Promise<{
   );
 }
 
-export async function fetchRunProfiles(): Promise<RunProfile[]> {
-  const payload = await unwrap<{ profiles: RunProfile[] }>(await fetch("/api/v1/run-profiles", withSession()), "run-profiles");
+export async function restoreRun(runId: number): Promise<{ run_id: number; restored: boolean; run: RunRow }> {
+  return unwrap<{ run_id: number; restored: boolean; run: RunRow }>(
+    await fetch(`/api/v1/runs/${runId}/restore`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "restore-run"
+  );
+}
+
+export async function fetchRunProfiles(includeArchived: boolean = false): Promise<RunProfile[]> {
+  const payload = await unwrap<{ profiles: RunProfile[] }>(
+    await fetch(`/api/v1/run-profiles?include_archived=${includeArchived ? "true" : "false"}`, withSession()),
+    "run-profiles"
+  );
   return payload.profiles;
 }
 
@@ -918,6 +970,17 @@ export async function deleteRunProfile(profileId: number): Promise<{ profile_id:
     }),
     "delete-run-profile"
   );
+}
+
+export async function restoreRunProfile(profileId: number): Promise<RunProfile> {
+  const payload = await unwrap<{ profile: RunProfile }>(
+    await fetch(`/api/v1/run-profiles/${profileId}/restore`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "restore-run-profile"
+  );
+  return payload.profile;
 }
 
 export async function launchRunProfile(profileId: number): Promise<{ profile: RunProfile; run: RunRow }> {
@@ -1042,9 +1105,9 @@ export async function deleteSimulationPlan(planId: string): Promise<{ plan_id: s
   );
 }
 
-export async function fetchGitHubIntegrationMappings(): Promise<GitHubIntegrationMappingsPayload> {
+export async function fetchGitHubIntegrationMappings(includeArchived: boolean = false): Promise<GitHubIntegrationMappingsPayload> {
   const payload = await unwrap<GitHubIntegrationMappingsPayload>(
-    await fetch("/api/v1/integrations/github/mappings", withSession()),
+    await fetch(`/api/v1/integrations/github/mappings?include_archived=${includeArchived ? "true" : "false"}`, withSession()),
     "github-integration-mappings"
   );
   return {
@@ -1077,6 +1140,27 @@ export async function deleteGitHubIntegrationMapping(
     }),
     "github-integration-mapping-delete"
   );
+}
+
+export async function restoreGitHubIntegrationMapping(
+  mappingId: number
+): Promise<IntegrationMapping> {
+  const payload = await unwrap<{ mapping: IntegrationMapping }>(
+    await fetch(`/api/v1/integrations/github/mappings/${mappingId}/restore`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "github-integration-mapping-restore"
+  );
+  return payload.mapping;
+}
+
+export async function fetchArchivedIntegrationMappings(): Promise<IntegrationMapping[]> {
+  const payload = await unwrap<{ mappings: IntegrationMapping[] }>(
+    await fetch("/api/v1/archives/integration-mappings", withSession()),
+    "archives-integration-mappings"
+  );
+  return payload.mappings;
 }
 
 export async function fetchGitHubIntegrationTriggers(

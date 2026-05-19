@@ -25,8 +25,8 @@ def list_flows() -> dict[str, Any]:
     return _callback("list_flows")()
 
 
-def list_runs(limit: int, offset: int) -> dict[str, Any]:
-    return _callback("list_runs")(limit, offset)
+def list_runs(limit: int, offset: int, include_archived: bool = False) -> dict[str, Any]:
+    return _callback("list_runs")(limit, offset, include_archived)
 
 
 def count_runs() -> dict[str, Any]:
@@ -71,8 +71,12 @@ def delete_run(run_id: int) -> dict[str, Any]:
     return _callback("delete_run")(run_id)
 
 
-def list_profiles() -> dict[str, Any]:
-    return _callback("list_profiles")()
+def restore_run(run_id: int) -> dict[str, Any]:
+    return _callback("restore_run")(run_id)
+
+
+def list_profiles(include_archived: bool = False) -> dict[str, Any]:
+    return _callback("list_profiles")(include_archived)
 
 
 def create_profile(request: RunProfileUpsertRequest, user_id: int | None) -> dict[str, Any]:
@@ -85,6 +89,10 @@ def update_profile(profile_id: int, request: RunProfileUpsertRequest, user_id: i
 
 def delete_profile(profile_id: int) -> dict[str, Any]:
     return _callback("delete_profile")(profile_id)
+
+
+def restore_profile(profile_id: int) -> dict[str, Any]:
+    return _callback("restore_profile")(profile_id)
 
 
 def launch_profile(

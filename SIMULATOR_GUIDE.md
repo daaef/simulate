@@ -52,6 +52,40 @@ Use **trace** (or **`doctor`**, which runs in trace mode) when you need proof th
 | `receipt_review_reorder` | Receipt PDF, review, reorder fetch after completion |
 
 **Websocket gates:** See **Trace mode and websocket evidence** above for how trace exercises APIs and passively observes sockets. In short: `SIM_ENFORCE_WEBSOCKET_GATES` default **off** (Runs checkbox off) records gate issues as **warnings** and continues; **on** = fail fast when required socket events are missing—stricter **Down** signal, more noise. **`SIM_STRICT_PLAN` / `rules.strict_plan`:** rejects invalid plans after any fallback—can flip a run from “best effort” to **Down** if the plan is wrong.
+**Failure policy:** Default run policy is `SIM_FAILURE_POLICY=api_only` with `SIM_PREFLIGHT_STRATEGY=auto_recover`. In this mode, transport/timeouts/websocket-connect/HTTP 5xx are hard failures, while most precondition misses (for example coupon unavailable, user GPS fallback required, already-setup new-user phone) downgrade scenarios to degraded/unsupported instead of failing the whole run.
+
+### Flow reliability and named-flow regression
+
+Run the 12 named GUI flows under default policy and collect a summary table:
+
+```bash
+export PYTHONPATH=.
+export SIM_FAILURE_POLICY=api_only
+export SIM_PREFLIGHT_STRATEGY=auto_recover
+./scripts/run_named_flow_regression.sh
+```
+
+Outputs: `runs/flow-reliability-<date>.json` and `runs/flow-reliability-<date>.md`. **Pass under `api_only`:** process exit `0` unless a true API fault occurred; health verdict `failed` only when `failure_class: api_fault` issues exist. Precondition-only runs may show **DEGRADED** or scenario **unsupported** — that is expected, not a regression failure.
+
+**Strict parity spot-check** (optional; restores prior hard-fail semantics):
+
+```bash
+export PYTHONPATH=.
+export SIM_FAILURE_POLICY=strict
+export SIM_PREFLIGHT_STRATEGY=hard_stop
+python3 __main__.py menus --plan sim_actors.json --timing fast
+python3 __main__.py paid-coupon --plan sim_actors.json --timing fast
+python3 __main__.py new-user --plan sim_actors.json --timing fast
+```
+
+| Flow / scenario | Typical precondition outcome (`api_only`) | Process exit | Health verdict |
+| --- | --- | --- | --- |
+| `free-coupon` / `paid-coupon` | No coupon in catalog → scenario `unsupported` (`coupon_missing`); alternate-store retry may recover | `0` if no API fault | `degraded` or `passed` |
+| `new-user` | Phone already `setup_complete` → `unsupported` (`account_already_setup`) | `0` | `degraded` |
+| `menus`, `store-*`, `robot-complete` | Usually completes when plan store/user valid | `0` | `passed` |
+| Any flow | HTTP 5xx / timeout / ws-connect failure on required path | `1` | `failed` |
+
+Artifacts record `failure_class` on issues and decisions in `events.json`; run config snapshot includes `failure_policy`.
 
 **Daily plan:** Prefer one owner-approved JSON path and document expected duration; failures surface in run log, `report.md`, Overview alerts, and optional email (`run_failed` / `critical_alert`).
 
@@ -170,8 +204,9 @@ Each launcher control now includes an example hint. Typical examples:
 
 Run detail: summary, log download, artifacts (`report.md`, `story.md`, `events.json`), metrics—deep dive after a failure.
 Run detail data is strictly scoped to the requested run id: active runs do not backfill artifact paths from historical logs, and `/runs/{id}` reads only `run-{id}.log` metadata plus that run row paths.
+Artifact path hydration from `run-{id}.log` tolerates wrapped console path lines, so long file paths still resolve to Overview/Story/Traffic artifacts after run completion.
 
-**Overview tab:** Shows aggregate metrics plus a **metrics-first dashboard** (Business default view, segmented Operations/Engineering views, and collapsed technical action drill-down with action-key search). It also renders side-by-side findings cards from `findings.critical` and `findings.operational` on `GET /api/v1/overview/runs/{run_id}` (flat `issues` is critical-only). Critical includes server/API/websocket availability and websocket event gaps; operational covers missing tokens, probes, coupons, and non-enforced gate bypass warnings. `GET /api/v1/runs/{id}/metrics` returns `action_counts` as `{ action, count }[]` (every distinct `action` in `events.json`, sorted by count then name). Process output is stored per run in `run-{id}.log`; the **Console** tab polls while the run is active and preserves scroll position (append-only updates, stick-to-bottom only when already at the bottom). Use **Traffic** for the raw event stream.
+**Overview tab:** Shows aggregate metrics plus a **metrics-first dashboard** (Business default view, segmented Operations/Engineering views, and collapsed technical action drill-down with action-key search). It also renders side-by-side findings cards from `findings.critical` and `findings.operational` on `GET /api/v1/overview/runs/{run_id}` (flat `issues` is critical-only). Critical includes server/API/websocket availability and websocket event gaps. Operational includes non-critical artifact `issues` (missing tokens, gate bypass with `enforced: false`, etc.) **plus** non-critical failed events from the ledger using the same rules as the **Failed Events** metric (`decision` failed/error/blocked, HTTP 5xx in critical only, other `ok: false` / failure statuses in operational). **Order Rejections** and **Payment Failures** on the metrics dashboard are action-count KPIs, not findings rows. `GET /api/v1/runs/{id}/metrics` returns `action_counts` as `{ action, count }[]` (every distinct `action` in `events.json`, sorted by count then name). Process output is stored per run in `run-{id}.log`; the **Console** tab polls while the run is active and preserves scroll position (append-only updates, stick-to-bottom only when already at the bottom). Use **Traffic** for the raw event stream.
 
 ### Route: `/config`
 
@@ -218,7 +253,7 @@ Generated artifacts per run:
 - Overview page behavior: Latest Run `Critical Findings` is filtered to server/API availability failures (`5xx`, transport/network, websocket connection availability). Missing-information or business-availability conditions (for example missing token, no saved card, no coupon) stay in `events.json`/`report.md`/`story.md` but are intentionally excluded from Overview.
 - Decision-category skips/recoveries for expected reasons (for example `unsupported_profile_fetch_contract`, `no_customer_id`, `missing_*`, `missing_auth_token`) are treated as informational context, not failures, in overview counters/findings and report decision summaries.
 - Overview `Critical Findings` rows include failed route/endpoint, HTTP method/status, simulator flow/step, optional session phase label (`flow_label`), preceding steps from artifacts, and the Latest Run hero surfaces context chips such as `profile:<name>`, `schedule:<name>`, and integration `route:<project/environment>`.
-- Latest Run Overview also renders **Operational Findings** next to critical (missing token, probes, gate bypass with `enforced: false`, etc.).
+- Latest Run Overview also renders **Operational Findings** next to critical: artifact issues that are not server/API critical, plus ledger events counted as failed by run metrics but not promoted to critical (up to 25 rows; use **Traffic** for the full stream).
 - `receipt_review_reorder` with post-order actions enabled: after receipt/review/reorder fetch, the simulator builds the cart from `GET /v1/core/reorder/?order_id=` response data and runs a **full second order** lifecycle (place → accept → payment → robot → completed).
 
 Configuration precedence:
@@ -436,8 +471,8 @@ Multiple-scenario explicit combinations:
 
 | Combination | Description |
 | --- | --- |
-| `... --timing fast` | Uses fast deterministic trace delays. |
-| `... --timing realistic` | Uses realistic deterministic trace delays. |
+| `... --timing fast` | Short store/robot delays (~0.2–0.6s) in load and trace. |
+| `... --timing realistic` | Realistic store prep and robot leg delays in load and trace. |
 | `... --store <STORE_ID>` | Forces explicit store; disables store fallback autopilot. |
 | `... --phone <PHONE>` | Forces explicit user phone selection. |
 | `... --strict-plan` | Requires full plan quality gate (user GPS + store IDs). |
@@ -565,7 +600,7 @@ Common failure signatures:
 | `--mode` | `load` or `trace` | from plan/env (`SIM_RUN_MODE`) | Selects orchestration model | `trace` rejects `--continuous` |
 | `--suite` | string | from plan/env (`SIM_TRACE_SUITE`) | Selects trace suite | Trace-mode only |
 | `--scenario` | repeatable string | none | Appends explicit trace scenarios | Trace-mode only; invalid names fail |
-| `--timing` | `fast` or `realistic` | from plan/env (`SIM_TIMING_PROFILE`) | Controls deterministic delays in trace | Does not throttle load worker creation |
+| `--timing` | `fast` or `realistic` | from plan/env (`SIM_TIMING_PROFILE`) | Store accept/prep and robot leg delays in load and trace | Does not change user `--interval` (order placement spacing) |
 | `--users` | int | from plan/env (`N_USERS`) | User worker count for load | Must be `>=1` in load |
 | `--orders` | int | from plan/env (`SIM_ORDERS`) | Total orders in bounded load | Must be `>=1` in load unless `--continuous` |
 | `--interval` | float seconds | from plan/env (`ORDER_INTERVAL_SECONDS`) | Delay between user order attempts in load | Load-mode control |
@@ -581,6 +616,11 @@ Common failure signatures:
 | `--post-order-actions` | boolean | from plan/env | Enables receipt/review/reorder after completed orders | Can create real review/receipt records |
 | `--enforce-websocket-gates` / `--no-enforce-websocket-gates` | boolean | from plan/env (`SIM_ENFORCE_WEBSOCKET_GATES=false`) | Controls whether websocket gate failures fail the scenario or are bypassed with warning evidence | Trace/doctor websocket progression behavior |
 | `--no-auto-provision` | boolean | `false` | Disables automatic setup/category/menu repair path | Sets `SIM_AUTO_PROVISION_FIXTURES=false` for run |
+
+Policy env controls:
+- `SIM_FAILURE_POLICY=api_only|strict` (default `api_only`)
+- `SIM_PREFLIGHT_STRATEGY=auto_recover|skip_warn|hard_stop` (default `auto_recover`)
+- Plan equivalents: `rules.failure_policy`, `rules.preflight_strategy`
 
 ## 5) What We Test (Coverage Map)
 
@@ -810,7 +850,7 @@ Allowed persisted roles are:
 | Role | Intended use | Permissions |
 | --- | --- | --- |
 | `admin` | Full system administrator. | Create/read/update/delete users, reset passwords, create/read/update/cancel/delete runs, create/read/update/delete/trigger schedules, read alerts, read/delete archives, read/update retention, read/configure system settings. |
-| `operator` | Normal simulator operator. | Create/read/cancel runs, create/read/update/trigger schedules, read alerts, read dashboard, read archives, read retention settings. |
+| `operator` | Normal simulator operator. | Create/read/cancel/**delete** runs, create/read/update/**delete**/trigger schedules, read alerts, read dashboard, read archives, read retention settings. |
 | `runner` | Limited user who can start and inspect runs. | Create/read runs, read schedules, read alerts, read dashboard. Cannot cancel runs, delete runs, mutate schedules, manage users, or change retention/system settings. |
 | `viewer` | Read-only product/operations user. | Read runs, dashboard, schedules, alerts, archives, and retention settings. |
 | `auditor` | Read-only evidence/audit user. | Same read-only access as `viewer`; use this role when the account exists for compliance, evidence review, or investigation workflows. |
@@ -837,7 +877,7 @@ The authenticated app shell highlights the active route, including nested run de
 | `/runs` | Launch, cancel, replay, delete completed runs, inspect top-of-page run statistics, logs, artifacts, event data, and saved run profiles. |
 | `/config` | Edit GUI-owned run plans under `runs/gui-plans/`. |
 | `/schedules` | Create campaign-first schedules (simple requests are normalized to campaign steps); configure recurrence, period-specific run slots, all-day mode, run windows, blackout skip dates, and next automatic trigger visibility; active schedules run through the in-process scheduler and can also be manually triggered, paused/resumed, disabled/enabled, soft-deleted, and restored. |
-| `/archives` | Search archive candidates, raw-purge candidates, and retained run summaries. |
+| `/archives` | Archived runs/profiles/schedules/integration mappings with restore actions, plus retention summaries. |
 | `/retention` | Inspect active/archive policy windows, archive/purge queues, retained summary fields, and purge-safety state. |
 | `/admin/users` | Create, edit, reset, deactivate, or delete users. |
 | `/admin/system` | Configure system policies such as allowed scheduling timezones (IANA allowlist). |
@@ -880,21 +920,30 @@ Scheduling procedure:
 5. Add blackout dates for full local calendar days when automatic triggers must not run. Manual `Trigger` still launches immediately.
 6. Save the schedule, then confirm the `Next Automatic Trigger` panel and table metadata.
 7. Use `Pause`, `Resume`, `Disable`, `Delete`, and `Restore` for lifecycle control. `pause`, `disable`, and `delete` clear `next_run_at`; `resume` and `restore` recalculate it.
+8. Archived schedules/profiles are read-only; restore first, then edit.
 
 #### Catalog presets
 
-On database init, the API seeds seven **catalog** run profiles (`api-sweep-max`, `daily-doctor`, `gates-on-doctor`, `core-trace`, `bounded-load-smoke`, `menu-gates`, `weekly-full`) and one catalog schedule per profile. They appear in **Runs** (profiles may show a **Catalog** label) and **Schedules**.
+On database init, the API seeds two **catalog** run profiles (`api-sweep-max`, `bounded-load-smoke`) and one catalog schedule per profile. They appear in **Runs** (profiles may show a **Catalog** label) and **Schedules**. Older catalog slugs are retired on seed (profile `catalog_slug` cleared; schedule disabled) so only the current presets stay pinned.
 
 - `api-sweep-max` is the top-pinned profile in list ordering and is paired with an **active** UTC schedule that runs at `06:00`, `14:00`, and `20:00` daily.
-- All other catalog schedules remain **paused** daily templates at `08:00 UTC`; resume them when you want automatic triggers.
+- `bounded-load-smoke` has a **paused** daily template at `08:00 UTC`; resume it in **Schedules** when you want automatic load smoke.
 
-Catalog profiles and catalog-backed schedules are not deletable via the API (403). To disable this seed entirely, set env `SIM_SKIP_CATALOG_SEED` to `1`, `true`, or `yes` before starting the API.
+Catalog profiles and catalog-backed schedules are now deletable/archivable. On user edit/delete, they are detached from catalog management (`catalog_managed=false`) so seed does not overwrite or recreate them on restart. To disable this seed entirely, set env `SIM_SKIP_CATALOG_SEED` to `1`, `true`, or `yes` before starting the API.
 
-`bounded-load-smoke` is now a **phased bounded load** profile: it enforces a completed-order baseline first (`>=1`) before applying reject/cancel tail pressure. If baseline cannot be met within the configured bound, the run fails with `accepted_baseline_not_met`.
+`bounded-load-smoke` is a **phased bounded load** profile: `users`, `orders`, `interval`, and `reject` are set on the profile row (passed to the CLI as `--users`, `--orders`, `--interval`, `--reject`). It enforces a completed-order baseline first (`>=1`) before reject/cancel tail pressure. If baseline cannot be met within the configured bound, the run fails with `accepted_baseline_not_met`.
+
+Run rows include a `control` object (`can_stop`, `can_delete`, `actively_running`) so the GUI only enables **Stop** for runs that are `running` with a live process and log activity, and **Delete** for all other runs (including orphaned `running` rows after API restart).
 
 Key endpoints:
 
 ```bash
+GET  /api/v1/run-profiles?include_archived=<true|false>
+DELETE /api/v1/run-profiles/<PROFILE_ID>            # archive
+POST /api/v1/run-profiles/<PROFILE_ID>/restore
+GET  /api/v1/runs?include_archived=<true|false>
+DELETE /api/v1/runs/<RUN_ID>                        # archive
+POST /api/v1/runs/<RUN_ID>/restore
 GET  /api/v1/schedules
 GET  /api/v1/schedules/summary
 POST /api/v1/schedules
@@ -905,6 +954,9 @@ POST /api/v1/schedules/<SCHEDULE_ID>/resume
 POST /api/v1/schedules/<SCHEDULE_ID>/disable
 POST /api/v1/schedules/<SCHEDULE_ID>/delete
 POST /api/v1/schedules/<SCHEDULE_ID>/restore
+GET  /api/v1/archives/profiles
+GET  /api/v1/archives/schedules
+GET  /api/v1/archives/integration-mappings
 ```
 
 Campaign-first schedule payload:
@@ -1319,9 +1371,10 @@ GitHub deployment webhook automation:
 
 Operational APIs:
 
-- `GET /api/v1/integrations/github/mappings` (view mapping rows)
+- `GET /api/v1/integrations/github/mappings?include_archived=<true|false>` (view mapping rows)
 - `POST /api/v1/integrations/github/mappings` (upsert `{project, environment, profile_id, enabled}`)
-- `DELETE /api/v1/integrations/github/mappings/{mapping_id}`
+- `DELETE /api/v1/integrations/github/mappings/{mapping_id}` (archive)
+- `POST /api/v1/integrations/github/mappings/{mapping_id}/restore`
 - `GET /api/v1/integrations/github/triggers` (audit and debugging feed)
 
 To identify webhook-triggered runs in the GUI, use the **Launch** column on **Runs** (`trigger_source` is `github` and the label shows the integration route). For audit detail, use `GET /api/v1/integrations/github/triggers` and match `run_id` to the run.

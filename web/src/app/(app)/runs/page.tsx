@@ -42,6 +42,7 @@ import {
   type SimulationPlan
 } from "../../../lib/api";
 import type { LauncherFieldId } from "../../../lib/run-launcher-config";
+import { canStopRun, shouldPollRunLog } from "../../../lib/run-control";
 
 // Architecture content (from ARCHITECTURE.md)
 const ARCHITECTURE_CONTENT = `# Complete Order Flow Simulator
@@ -543,7 +544,7 @@ export default function App() {
     [runs, selectedRunId]
   );
 
-  const shouldPollLog = Boolean(selectedRunId && selectedRun && isActiveStatus(selectedRun.status));
+  const shouldPollLog = Boolean(selectedRunId && selectedRun && shouldPollRunLog(selectedRun));
   const { log: logText, setLogRef } = useRunLogTail(selectedRunId, {
     enabled: shouldPollLog,
     pollMs: 1000,
@@ -994,7 +995,7 @@ export default function App() {
                       Boolean(form.suite) ||
                       Boolean(form.scenarios && form.scenarios.length > 0)
                     }
-                    canCancelSelectedRun={Boolean(selectedRun && isActiveStatus(selectedRun.status))}
+                    canCancelSelectedRun={Boolean(selectedRun && canStopRun(selectedRun))}
                     planOptions={simulationPlans}
                     planContent={selectedPlanContent}
                   />
@@ -1063,7 +1064,6 @@ export default function App() {
             onWatchRun={(runId) => setSelectedRunId(runId)}
             onCancelRun={onCancelRun}
             onDeleteRunRequest={setDeleteConfirmRun}
-            isActiveStatus={isActiveStatus}
           />
         </CollapsibleSection>
 

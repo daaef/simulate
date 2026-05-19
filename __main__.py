@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import config
 import app_probes
+from failure_policy import VALID_FAILURE_POLICIES, VALID_PREFLIGHT_STRATEGIES
 from flow_presets import FLOW_PRESETS, resolve_flow
 from interaction_catalog import PAYMENT_CASES
 from load_worker_assignment import build_worker_user_index_assignment
@@ -344,6 +345,12 @@ def _validate_config() -> None:
         raise RuntimeError(
             f"SIM_PAYMENT_CASE must be one of {', '.join(PAYMENT_CASES)}."
         )
+    if config.SIM_FAILURE_POLICY not in VALID_FAILURE_POLICIES:
+        expected = ", ".join(sorted(VALID_FAILURE_POLICIES))
+        raise RuntimeError(f"SIM_FAILURE_POLICY must be one of {expected}.")
+    if config.SIM_PREFLIGHT_STRATEGY not in VALID_PREFLIGHT_STRATEGIES:
+        expected = ", ".join(sorted(VALID_PREFLIGHT_STRATEGIES))
+        raise RuntimeError(f"SIM_PREFLIGHT_STRATEGY must be one of {expected}.")
     trace_scenarios = (
         resolve_trace_scenarios(
             suite=config.SIM_TRACE_SUITE,

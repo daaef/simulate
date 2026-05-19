@@ -103,6 +103,7 @@ FLOW_ALIASES = {
     "store_accept": "store-accept",
     "store_reject": "store-reject",
     "robot": "robot-complete",
+    "ronot-complete": "robot-complete",
     "daily": "doctor",
     "doctor": "doctor",
     "receipt_review": "receipt-review",

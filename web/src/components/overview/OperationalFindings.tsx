@@ -10,7 +10,7 @@ export default function OperationalFindings({ issues }: { issues: LatestRunIssue
         title="Operational Findings"
         issues={issues}
         emptyMessage="No operational findings in the latest run."
-        limit={6}
+        limit={25}
       />
     </article>
   );

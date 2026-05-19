@@ -689,6 +689,14 @@ Manual smoke: log in, switch dark/light mode, verify active navigation on nested
   - Notes: Backend/frontend tests, flow docs checker, web build, session log update.
   - Completion evidence: See session log 2026-05-19 03:50; `git diff --check` pass.
 
+## Flow Reliability Hardening (2026-05-19)
+
+- [x] Regression runner (`scripts/run_named_flow_regression.sh` + `.py`)
+- [x] Targeted policy tests (`FlowReliabilityPolicyTests` in `tests/test_simulate.py`)
+- [x] Coupon retry: skip alternate-store HTTP 5xx and continue; hard-fail only when recovery exhausts with API faults
+- [x] Docs (`README.md`, `SIMULATOR_GUIDE.md`, `docs/SIMULATION_TEST_GUIDE.md`, `docs/reports/README.md`)
+- [ ] **Your verification:** full live regression + strict spot-check (commands in `session_log.md` 2026-05-19 Flow Reliability entry)
+
 ## Next Immediate Task
 
-Phase 34 is complete. Next backlog slice: contract-driven runtime/docs sync (5 open tasks in Phase 16 contract sync), or housekeeping to close stale `[~]` phases 14/351.
+Run `./scripts/run_named_flow_regression.sh` and strict spot-check flows locally; archive `runs/flow-reliability-*` if desired. Then resume contract-driven runtime/docs sync.
