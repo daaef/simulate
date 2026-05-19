@@ -691,4 +691,4 @@ Manual smoke: log in, switch dark/light mode, verify active navigation on nested
 
 ## Next Immediate Task
 
-Rebuild and smoke-test Docker stack (`docker compose up -d --build api web`), then run Phase 31 manual smoke (login, dark mode, schedules, archives/retention) against refreshed containers.
+Phase 34 is complete. Next backlog slice: contract-driven runtime/docs sync (5 open tasks in Phase 16 contract sync), or housekeeping to close stale `[~]` phases 14/351.

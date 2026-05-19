@@ -2709,3 +2709,41 @@ rg "Load Pace|config-tab-plans" web/.next/static/chunks
 ### Next Steps
 
 1. Manual browser pass for dark mode, schedule edit, and load launcher pace selector interaction.
+
+## 2026-05-19 04:05
+
+### Summary
+
+Ran full verification and GUI smoke suite on request: local tests, Docker rebuild, API smoke, and Playwright browser walkthrough (Phase 31 + 34).
+
+### Tests / Commands Run
+
+```bash
+python3 -m unittest tests.test_web_api.SimulationPlansApiTests tests.test_load_worker_assignment tests.test_simulate.LoadWorkerRuntimeTests -v
+python3 scripts/check_flow_docs.py
+cd web && npm run test -- src/lib/config-plan-draft.test.ts src/lib/load-mode-controls.test.ts
+cd web && npm run build
+git diff --check
+docker compose up -d --build api web
+docker compose exec api python -m unittest tests.test_web_api.SimulationPlansApiTests tests.test_load_worker_assignment -v
+docker compose exec web npm run build
+curl healthz + login + sim-actors + schedules + archives + retention + flows
+npm install --no-save playwright@1.49.0 && node scripts/smoke_gui.mjs
+```
+
+### Results
+
+- Local backend: 16/16 pass.
+- Flow docs: 16/16 present.
+- Frontend Vitest: 11/11 pass; local and container `npm run build` pass.
+- Docker API tests: 14/14 pass.
+- API smoke: healthz 200; sim-actors returns 11 users; schedules/archives/retention 200; 16 flows.
+- GUI smoke (`scripts/smoke_gui.mjs`): 13/13 pass — login, dark mode (none->dark), config tabs, plan load, New clone, load pace visible, trace controls hidden, schedules edit, archives, retention.
+
+### Issues / Blockers
+
+- None blocking Phase 34 closeout.
+
+### Next Steps
+
+1. Start contract-driven runtime/docs follow-on, or close stale tracker phases 14/351.

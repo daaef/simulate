@@ -10,7 +10,7 @@ Plan and sequence the redesign of the simulator web GUI into a production-grade 
 
 ## Current Status
 
-Completed (Phase 34 Config/Load UX alignment — verification recorded; manual GUI smoke pending container rebuild)
+Completed (Phase 34 Config/Load UX alignment — full automated + GUI smoke verified 2026-05-19)
 
 ## Scope
 
@@ -93,4 +93,4 @@ Completed (Phase 34 Config/Load UX alignment — verification recorded; manual G
 
 ## Last Updated
 
-2026-05-19 03:50
+2026-05-19 04:05
