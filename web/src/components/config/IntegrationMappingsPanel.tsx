@@ -430,7 +430,7 @@ export default function IntegrationMappingsPanel() {
         </section>
 
         <section className="panel grid" style={{ gap: 14, borderRadius: 12 }}>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ display: "grid", gridGap: 12 }}>
             <div>
               <h3 className="section-title" style={{ marginBottom: 4 }}>Active Routes</h3>
               <p className="form-help">{copy.listIntro}</p>
