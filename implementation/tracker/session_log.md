@@ -2504,3 +2504,53 @@ git status --short
 1. Run frontend build/tests inside the standard container/runtime where Next.js dependencies are installed.
 2. Manually verify `/runs/{id}` while a new run is active to confirm no stale event/report/story artifact carryover.
 3. Manually verify `/schedules` edit flow (edit existing schedule, save, refresh, trigger).
+
+## 2026-05-19 02:24
+
+### Summary
+
+Completed Superpowers brainstorming for Config/load improvements, locked all design decisions with the user, and wrote a formal approved-for-implementation design spec before any code changes. Updated tracker files so implementation can resume from docs alone.
+
+### Files Created / Modified
+
+- `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/implementation_plan.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+rg -n "^#|config|plans|integration|load|sim_actors|users|interval|speed" README.md SIMULATOR_GUIDE.md ARCHITECTURE.md
+rg -n "simulation_plans|sim_actors|load|users|interval|reject|continuous|all_users" api/app/main.py web/src app __main__.py user_sim.py
+sed -n '...' web/src/app/(app)/config/page.tsx
+sed -n '...' web/src/components/runs/RunLaunchPanel.tsx
+sed -n '...' api/app/main.py
+sed -n '...' __main__.py
+sed -n '...' user_sim.py
+date '+%Y-%m-%d %H:%M %Z'
+```
+
+### Results
+
+- Confirmed root cause for default-plan load bug: Config list includes `sim_actors.json`, but `Load` targets `/api/v1/simulation-plans/{id}` path that only resolves GUI-plan ids.
+- Confirmed current `New` behavior resets to static template rather than cloning loaded plan.
+- Confirmed load runtime currently fans out by authenticated user bundles and can diverge from desired `users=N` semantics.
+- Captured approved behavior contract:
+  - Config tabs (`Plans`, `Email`, `Integration mappings`).
+  - `New` clones loaded plan.
+  - Load mode hides trace-only fields and mode override.
+  - Pace presets (`slow=10s`, `normal=3s`, `fast=1s`) plus manual interval override.
+  - `all_users=false`: same user reused across workers.
+  - `all_users=true`: deterministic round-robin fill for exactly `N` workers.
+  - `SIMULATOR_GUIDE.md` canonical, `README.md` quickstart + links.
+
+### Issues / Blockers
+
+- Waiting for explicit user review of the written spec file before implementation-plan drafting and code changes.
+
+### Next Steps
+
+1. Ask user to review `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`.
+2. After approval, draft implementation plan and begin scoped code changes with tests.

@@ -627,3 +627,24 @@ Use plan-backed values for future CLI/GUI runs; keep `.env` free of actor/run-be
 ## Next Immediate Task
 
 Manual smoke: log in, switch dark/light mode, verify active navigation on nested `/runs/<id>`, create/trigger a schedule, inspect archive/retention pages.
+
+### Phase 32: Config/Load UX + Runtime Alignment Design (2026-05-19)
+
+- [x] Complete brainstorming and lock hybrid approach decisions
+  - Dependency: User requirements on config tabs, default plan loading, load semantics, and docs merge.
+  - Notes: Approved decisions captured section-by-section (behavior contract, implementation surface, validation/docs).
+  - Completion evidence: Explicit user approvals in session for hybrid approach and all three design sections.
+
+- [x] Write and self-review formal design spec
+  - Dependency: Approved design sections.
+  - Notes: Spec captures tabbed Config UX, default `sim_actors` loading fix, `New` clone semantics, load pacing presets, mode-specific UI isolation, round-robin worker policy, and documentation ownership.
+  - Completion evidence: `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`.
+
+- [ ] Wait for user review of written design spec
+  - Dependency: Spec file written and self-reviewed.
+  - Notes: Do not start implementation planning or code changes until user reviews the written spec file.
+  - Completion evidence: User confirms spec is approved.
+
+## Next Immediate Task
+
+Ask user to review `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md` before moving to implementation-plan drafting.

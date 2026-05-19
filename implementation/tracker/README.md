@@ -10,7 +10,7 @@ Plan and sequence the redesign of the simulator web GUI into a production-grade 
 
 ## Current Status
 
-In progress (GitHub deployment webhook integration implemented; verification and follow-up hardening pending)
+In progress (Phase 32 design approved; waiting for user review of the written spec before implementation planning)
 
 ## Scope
 
@@ -57,6 +57,7 @@ In progress (GitHub deployment webhook integration implemented; verification and
 - `docs/superpowers/plans/2026-05-06-simulator-operations-platform-redesign.md`
 - `docs/superpowers/specs/2026-05-06-plan-backed-simulator-config-design.md`
 - `docs/superpowers/plans/2026-05-06-plan-backed-simulator-config.md`
+- `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`
 - `api/app/main.py`
 - `tests/test_web_api.py`
 - `.env`
@@ -91,4 +92,4 @@ In progress (GitHub deployment webhook integration implemented; verification and
 
 ## Last Updated
 
-2026-05-08 22:19
+2026-05-19 02:24

@@ -236,3 +236,57 @@ Ensure that simulation run history and reports consistently capture complete ide
 - [ ] Simulation runs successfully without crashing.
 - [ ] Web GUI shows full names and phone numbers for both user and store.
 - [ ] Database schema is correctly migrated.
+
+## Follow-on Initiative: Config Tabs + Load Runtime Alignment (2026-05-19)
+
+### Goal
+
+Align Config UX and load-mode runtime behavior with operator expectations while keeping API contracts stable.
+
+### Target Behavior
+
+- `/config` is tabbed: Plans, Email, Integration mappings.
+- Default `sim_actors.json` row can be loaded in Config the same way GUI plans can.
+- `New` clones the currently loaded plan JSON into a draft.
+- Load mode hides trace-only controls and mode override.
+- Load mode exposes pace presets (`slow=10s`, `normal=3s`, `fast=1s`) that set interval, with manual override preserved.
+- Load worker/user assignment is deterministic:
+  - `all_users=false`: one selected/default user reused across `N` workers.
+  - `all_users=true`: strict round-robin fill across plan users for exactly `N` workers.
+- `SIMULATOR_GUIDE.md` is canonical operator doc; `README.md` is quickstart + links.
+
+### Proposed Design
+
+1. Update Config page composition to tabbed layout and isolate per-tab states.
+2. Add backend default-plan load branch for `sim_actors.json` sentinel id/path.
+3. Change `New` behavior to clone current editor/source plan content.
+4. Simplify launcher visibility by resolved mode and add load pace selector.
+5. Apply deterministic worker assignment policy in load orchestration.
+6. Add regression tests across API, UI, and runtime semantics.
+7. Merge docs ownership model (`SIMULATOR_GUIDE.md` canonical, README reduced).
+
+### Files to Modify
+
+| File | Purpose of Change |
+|---|---|
+| `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md` | Approved design contract for this initiative |
+| `web/src/app/(app)/config/page.tsx` | Tabbed Config UX, load/new semantics |
+| `api/app/main.py` | Default `sim_actors` load path handling |
+| `web/src/components/runs/RunLaunchPanel.tsx` | Load-only field visibility and pace selector |
+| `web/src/lib/run-launcher-config.ts` | Help metadata updates for load-only controls |
+| `__main__.py` | Deterministic worker assignment orchestration |
+| `user_sim.py` | Worker execution alignment, if assignment logic lives here |
+| `tests/test_web_api.py` | Default-plan load and config behavior tests |
+| `tests/test_simulate.py` | Load assignment semantics tests |
+| `README.md` | Quickstart + links only |
+| `SIMULATOR_GUIDE.md` | Canonical operator behavior and load semantics |
+
+### Acceptance Criteria
+
+- [ ] Config tabs exist and preserve existing capabilities.
+- [ ] Config can load default `sim_actors.json` row without API errors.
+- [ ] `New` clones currently loaded plan content into draft.
+- [ ] Load flow UI shows no trace-specific settings or mode override.
+- [ ] Pace presets map to interval values with manual override retained.
+- [ ] Runtime assignment policy matches approved `all_users` semantics.
+- [ ] README/SIMULATOR_GUIDE ownership split is applied in one patch.

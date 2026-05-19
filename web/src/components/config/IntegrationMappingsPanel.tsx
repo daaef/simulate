@@ -327,7 +327,7 @@ export default function IntegrationMappingsPanel() {
             <p className="form-help">{copy.formIntro}</p>
           </div>
 
-          <div className="grid two">
+          <div className="grid two" style={{ alignItems: "start" }}>
             <label className="grid" style={{ gap: 6 }}>
               <span className="muted">Project</span>
               <input
@@ -337,11 +337,6 @@ export default function IntegrationMappingsPanel() {
                 placeholder="backend"
                 disabled={busy}
               />
-              <datalist id="github-project-options">
-                {PROJECT_OPTIONS.map((option) => (
-                  <option key={option} value={option} />
-                ))}
-              </datalist>
             </label>
 
             <label className="grid" style={{ gap: 6 }}>
@@ -354,16 +349,23 @@ export default function IntegrationMappingsPanel() {
                 disabled={busy}
                 aria-describedby="github-route-key-help"
               />
-              <datalist id="github-route-key-options">
-                {copy.routeKeyOptions.map((option) => (
-                  <option key={option} value={option} />
-                ))}
-              </datalist>
-              <span id="github-route-key-help" className="form-help" style={{ margin: 0 }}>
-                {copy.routeKeyHelp}
-              </span>
             </label>
           </div>
+
+          <datalist id="github-project-options">
+            {PROJECT_OPTIONS.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+          <datalist id="github-route-key-options">
+            {copy.routeKeyOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+
+          <p id="github-route-key-help" className="form-help" style={{ margin: 0 }}>
+            {copy.routeKeyHelp}
+          </p>
 
           <label className="grid" style={{ gap: 6 }}>
             <span className="muted">Run Profile</span>
