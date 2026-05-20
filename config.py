@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 from pathlib import Path
 from typing import Any
 
@@ -159,7 +160,12 @@ SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS: float = _float(
 )
 
 ALL_USERS: bool = False
+SIM_PHONE_EXPLICIT: bool = False
 SIM_STORE_EXPLICIT: bool = False
+SIM_DISABLE_RANDOM_PHONE: bool = False
+SIM_DISABLE_RANDOM_STORE: bool = False
+SIM_PHONE_AUTO_SELECTED: bool = False
+SIM_STORE_AUTO_SELECTED: bool = False
 SIM_ACTORS: dict[str, Any] = {"defaults": {}, "users": [], "stores": []}
 
 
@@ -283,6 +289,37 @@ def _find_actor_user(
     return users[0] if users else None
 
 
+def _select_actor_user(
+    users: list[dict[str, Any]],
+    role: str | None,
+    phone: str | None = None,
+    *,
+    randomize: bool = False,
+) -> dict[str, Any] | None:
+    """Select a user from plan actors.
+
+    Priority: explicit phone match -> role-matching pool -> full user pool.
+    If randomize is enabled, pick a random candidate from the resolved pool.
+    """
+    if phone:
+        return _find_actor_user(users, None, phone)
+
+    role_matches = []
+    if role:
+        role_key = str(role).lower()
+        role_matches = [
+            user
+            for user in users
+            if str(user.get("role", "")).lower() == role_key
+        ]
+    pool = role_matches or users
+    if not pool:
+        return None
+    if randomize:
+        return random.choice(pool)
+    return pool[0]
+
+
 def _find_actor_store(
     stores: list[dict[str, Any]],
     store_id: str | None,
@@ -294,6 +331,21 @@ def _find_actor_store(
     return stores[0] if stores else None
 
 
+def _select_actor_store(
+    stores: list[dict[str, Any]],
+    store_id: str | None,
+    *,
+    randomize: bool = False,
+) -> dict[str, Any] | None:
+    if store_id:
+        return _find_actor_store(stores, store_id)
+    if not stores:
+        return None
+    if randomize:
+        return random.choice(stores)
+    return stores[0]
+
+
 def apply_actor_selection(
     actors: dict[str, Any],
     *,
@@ -303,6 +355,7 @@ def apply_actor_selection(
     """Apply actor defaults from sim_actors.json to config globals."""
     global USER_PHONE_NUMBER, STORE_ID, SUBENTITY_ID, STORE_CURRENCY, SIM_LAT, SIM_LNG
     global SIM_LOCATION_RADIUS, SIM_COUPON_ID
+    global SIM_PHONE_AUTO_SELECTED, SIM_STORE_AUTO_SELECTED
 
     defaults: dict[str, Any] = actors.get("defaults", {})
     users: list[dict[str, Any]] = actors.get("users", [])
@@ -318,8 +371,18 @@ def apply_actor_selection(
         if isinstance(store, dict) and store.get("store_id")
     }
 
-    explicit_user_phone = str(USER_PHONE_NUMBER or "").strip()
-    explicit_store_id = str(store_id or STORE_ID or "").strip()
+    has_manual_user_phone = bool(str(USER_PHONE_NUMBER or "").strip()) and not SIM_PHONE_AUTO_SELECTED
+    has_manual_store_id = bool(str(store_id or STORE_ID or "").strip()) and not SIM_STORE_AUTO_SELECTED
+    explicit_user_phone = (
+        str(USER_PHONE_NUMBER or "").strip()
+        if SIM_PHONE_EXPLICIT or has_manual_user_phone
+        else ""
+    )
+    explicit_store_id = (
+        str(store_id or STORE_ID or "").strip()
+        if SIM_STORE_EXPLICIT or has_manual_store_id
+        else ""
+    )
     if explicit_user_phone and allowed_phones and explicit_user_phone not in allowed_phones:
         raise RuntimeError(
             f"Configured phone {explicit_user_phone!r} is not present in selected plan users[]."
@@ -329,21 +392,92 @@ def apply_actor_selection(
             f"Configured store {explicit_store_id!r} is not present in selected plan stores[]."
         )
 
-    requested_user_phone = USER_PHONE_NUMBER or defaults.get("user_phone")
-    selected_user = _find_actor_user(
-        users,
-        user_role,
-        str(requested_user_phone) if requested_user_phone else None,
-    )
-    if selected_user and user_role:
+    selected_user: dict[str, Any] | None = None
+    if explicit_user_phone:
+        selected_user = _select_actor_user(
+            users,
+            user_role=None,
+            phone=explicit_user_phone,
+            randomize=False,
+        )
+        SIM_PHONE_AUTO_SELECTED = False
+    elif SIM_DISABLE_RANDOM_PHONE:
+        requested_user_phone = USER_PHONE_NUMBER or defaults.get("user_phone")
+        selected_user = _select_actor_user(
+            users,
+            user_role,
+            str(requested_user_phone) if requested_user_phone else None,
+            randomize=False,
+        )
+        SIM_PHONE_AUTO_SELECTED = False
+    else:
+        if user_role:
+            selected_user = _select_actor_user(
+                users,
+                user_role,
+                phone=None,
+                randomize=True,
+            )
+        elif (
+            SIM_PHONE_AUTO_SELECTED
+            and USER_PHONE_NUMBER
+            and str(USER_PHONE_NUMBER) in allowed_phones
+        ):
+            selected_user = _select_actor_user(
+                users,
+                user_role=None,
+                phone=str(USER_PHONE_NUMBER),
+                randomize=False,
+            )
+        else:
+            selected_user = _select_actor_user(
+                users,
+                user_role=None,
+                phone=None,
+                randomize=True,
+            )
+        SIM_PHONE_AUTO_SELECTED = selected_user is not None
+
+    if selected_user:
         USER_PHONE_NUMBER = str(selected_user.get("phone") or USER_PHONE_NUMBER)
     elif not USER_PHONE_NUMBER and defaults.get("user_phone"):
         USER_PHONE_NUMBER = str(defaults["user_phone"])
-    elif selected_user and not USER_PHONE_NUMBER:
-        USER_PHONE_NUMBER = str(selected_user.get("phone") or USER_PHONE_NUMBER)
+        SIM_PHONE_AUTO_SELECTED = False
 
-    requested_store_id = store_id or STORE_ID or defaults.get("store_id")
-    selected_store = _find_actor_store(stores, str(requested_store_id) if requested_store_id else None)
+    selected_store: dict[str, Any] | None = None
+    if explicit_store_id:
+        selected_store = _select_actor_store(
+            stores,
+            explicit_store_id,
+            randomize=False,
+        )
+        SIM_STORE_AUTO_SELECTED = False
+    elif SIM_DISABLE_RANDOM_STORE:
+        requested_store_id = store_id or STORE_ID or defaults.get("store_id")
+        selected_store = _select_actor_store(
+            stores,
+            str(requested_store_id) if requested_store_id else None,
+            randomize=False,
+        )
+        SIM_STORE_AUTO_SELECTED = False
+    else:
+        if (
+            SIM_STORE_AUTO_SELECTED
+            and STORE_ID
+            and str(STORE_ID) in allowed_store_ids
+        ):
+            selected_store = _select_actor_store(
+                stores,
+                str(STORE_ID),
+                randomize=False,
+            )
+        else:
+            selected_store = _select_actor_store(
+                stores,
+                None,
+                randomize=True,
+            )
+        SIM_STORE_AUTO_SELECTED = selected_store is not None
 
     # Prefer selected-user GPS, then defaults/first user, then selected-store GPS, then first store GPS.
     user_lat, user_lng = actor_gps(selected_user)
@@ -376,6 +510,7 @@ def apply_actor_selection(
             STORE_CURRENCY = str(selected_store["currency"]).lower()
     elif not STORE_ID and defaults.get("store_id"):
         STORE_ID = str(defaults["store_id"])
+        SIM_STORE_AUTO_SELECTED = False
 
     if defaults.get("location_radius") is not None:
         SIM_LOCATION_RADIUS = int(defaults["location_radius"])

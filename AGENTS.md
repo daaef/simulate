@@ -5,6 +5,8 @@ alwaysApply: true
 
 # Simulator Repo Instructions (Codex)
 
+Implementation workflow: follow user-level `~/.config/coding-agents/ENGINEERING_PROTOCOL.md` (tiered gates, MES-first, confirmation before non-trivial edits).
+
 Keep project docs current:
 - When a change affects user-facing behavior (Docker services/ports, auth/roles/default admin, CLI flows/flags, API routes, env vars, troubleshooting), update docs in the same patch.
 - Primary docs to maintain: `README.md` (canonical overview) and `SIMULATOR_GUIDE.md` (deep operational reference).

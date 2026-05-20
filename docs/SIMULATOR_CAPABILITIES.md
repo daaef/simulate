@@ -42,7 +42,7 @@ For an operator-first run-efficiency playbook (how to choose runs and flags quic
 
 **Artifacts (each run):** under `runs/<timestamp>/` — `events.json`, `report.md`, `story.md`.
 
-**Plans:** `users[]` and `stores[]` scope `--phone`, `--store`, and env-derived user/store selection; out-of-plan values fail fast. Invalid selected plan falls back to repo `sim_actors.json` with warning unless strict validation fails both.
+**Plans:** `users[]` and `stores[]` scope `--phone` and `--store`. When those flags are omitted, runtime now randomly selects phone/store from the selected plan by default (disable with `--no-random-phone` / `--no-random-store`). Out-of-plan explicit values fail fast. Invalid selected plan falls back to repo `sim_actors.json` with warning unless strict validation fails both.
 
 ---
 
@@ -140,9 +140,9 @@ Hyphens vs underscores: keys are normalized with `.lower().replace("_", "-")` be
 
 `allowed_optional_flags` per resolved mode (from `FLOW_OPTIONAL_FLAGS`):
 
-**Trace:** `timing`, `store_id`, `phone`, `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `no_auto_provision`, `enforce_websocket_gates`, `post_order_actions`, `all_users`, `extra_args`
+**Trace:** `timing`, `store_id`, `phone`, `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `no_auto_provision`, `enforce_websocket_gates`, `post_order_actions`, `no_random_phone`, `no_random_store`, `all_users`, `extra_args`
 
-**Load:** `timing`, `store_id`, `phone`, `all_users`, `users`, `orders`, `interval`, `reject`, `continuous`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `no_auto_provision`, `enforce_websocket_gates`, `post_order_actions`, `extra_args`
+**Load:** `timing`, `store_id`, `phone`, `all_users`, `users`, `orders`, `interval`, `reject`, `continuous`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `no_auto_provision`, `enforce_websocket_gates`, `post_order_actions`, `no_random_phone`, `no_random_store`, `extra_args`
 
 Note: CLI uses `--store` and `--phone` (not `store_id`). Web API uses `store_id` / `phone` field names.
 
@@ -260,6 +260,8 @@ Invocation: `python3 __main__.py …` from the repo root (same entry as `python3
 | `--continuous` | flag | Load only; run until interrupted |
 | `--phone` | string | Must be in plan `users[]` |
 | `--store` | string | Must be in plan `stores[]` |
+| `--no-random-phone` | flag | Disable default random phone selection for this run |
+| `--no-random-store` | flag | Disable default random store selection for this run |
 | `--all-users` | flag | Auth all plan users (load path) |
 | `--plan` | path | JSON run plan |
 | `--strict-plan` | flag | Strict plan validation (users/stores GPS etc. per `RunPlan.validate`) |
@@ -481,7 +483,7 @@ All `SIM_STORE_SETUP_*` and `SIM_MENU_*` listed in `config.py` L95–118; defaul
 | `SIM_WEBSOCKET_DRAIN_SECONDS` | `3` |
 | `SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS` | `20` |
 
-`ALL_USERS` and `SIM_STORE_EXPLICIT` are runtime flags set by CLI logic, not primary env reads.
+`ALL_USERS`, `SIM_PHONE_EXPLICIT`, `SIM_STORE_EXPLICIT`, `SIM_DISABLE_RANDOM_PHONE`, and `SIM_DISABLE_RANDOM_STORE` are runtime flags set by CLI logic, not primary env reads.
 
 ---
 
@@ -511,7 +513,7 @@ Model: `api/app/runs/models.py`. Command builder: `_build_command` in `api/app/m
 | `interval` | `--interval` |
 | `reject` | `--reject` |
 | `continuous` | `--continuous` |
-| `extra_args` | appended verbatim |
+| `extra_args` | appended verbatim (e.g., `--no-random-phone`, `--no-random-store`) |
 
 Trigger metadata (`trigger_source`, `trigger_label`, `trigger_context`, `profile_id`, `schedule_id`, …) is not part of the CLI argv. **Saved run profiles** use the same launch fields as `RunCreateRequest` (`RunProfileUpsertRequest` in `api/app/runs/models.py`).
 

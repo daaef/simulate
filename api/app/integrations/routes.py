@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..auth.policies import require_permission
-from .models import IntegrationMappingUpsertRequest
+from .models import (
+    IntegrationMappingUpsertRequest,
+    IntegrationWebhookProjectCreateRequest,
+    IntegrationWebhookProjectRepositoriesRequest,
+)
 from . import service
 from .github_workflow_run import process_github_workflow_run_webhook
 
@@ -78,3 +82,62 @@ def list_triggers(
     current_user: dict = Depends(require_permission("system", "read")),
 ) -> dict[str, Any]:
     return service.list_triggers(limit, offset)
+
+
+@router.get("/api/v1/integrations/github/projects")
+def list_webhook_projects(
+    include_archived: bool = Query(default=False),
+    current_user: dict = Depends(require_permission("system", "read")),
+) -> dict[str, Any]:
+    return service.list_webhook_projects(include_archived)
+
+
+@router.post("/api/v1/integrations/github/projects")
+def create_webhook_project(
+    request: IntegrationWebhookProjectCreateRequest,
+    current_user: dict = Depends(require_permission("system", "configure")),
+) -> dict[str, Any]:
+    try:
+        return service.create_webhook_project(request, current_user.get("id"))
+    except ValueError as exc:
+        if str(exc) == "project_already_exists":
+            raise HTTPException(status_code=409, detail="A webhook project with this name already exists.") from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/v1/integrations/github/projects/{project}/rotate-secret")
+def rotate_webhook_project_secret(
+    project: str,
+    current_user: dict = Depends(require_permission("system", "configure")),
+) -> dict[str, Any]:
+    try:
+        return service.rotate_webhook_project_secret(project, current_user.get("id"))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Webhook project not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/api/v1/integrations/github/projects/{project}/repositories")
+def update_webhook_project_repositories(
+    project: str,
+    request: IntegrationWebhookProjectRepositoriesRequest,
+    current_user: dict = Depends(require_permission("system", "configure")),
+) -> dict[str, Any]:
+    try:
+        return service.update_webhook_project_repositories(project, request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Webhook project not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/api/v1/integrations/github/projects/{project}")
+def archive_webhook_project(
+    project: str,
+    current_user: dict = Depends(require_permission("system", "configure")),
+) -> dict[str, Any]:
+    try:
+        return service.archive_webhook_project(project)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Webhook project not found.") from exc

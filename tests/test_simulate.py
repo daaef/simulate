@@ -443,6 +443,217 @@ class RunPlanTests(unittest.TestCase):
                 os.chdir(previous_cwd)
                 config.SIM_ACTORS_PATH = previous_path
 
+    def test_default_random_selection_uses_plan_phone_and_store(self) -> None:
+        import config
+
+        tracked = (
+            "USER_PHONE_NUMBER",
+            "STORE_ID",
+            "SIM_PHONE_EXPLICIT",
+            "SIM_STORE_EXPLICIT",
+            "SIM_DISABLE_RANDOM_PHONE",
+            "SIM_DISABLE_RANDOM_STORE",
+            "SIM_PHONE_AUTO_SELECTED",
+            "SIM_STORE_AUTO_SELECTED",
+            "SIM_LAT",
+            "SIM_LNG",
+            "SUBENTITY_ID",
+            "STORE_CURRENCY",
+        )
+        previous = {name: getattr(config, name) for name in tracked}
+        actors = {
+            "defaults": {
+                "user_phone": "+100",
+                "store_id": "FZY_1",
+            },
+            "users": [
+                {"phone": "+100", "role": "returning", "lat": 1.0, "lng": 2.0},
+                {"phone": "+200", "role": "returning", "lat": 3.0, "lng": 4.0},
+            ],
+            "stores": [
+                {"store_id": "FZY_1", "subentity_id": 7, "currency": "jpy", "lat": 1.0, "lng": 2.0},
+                {"store_id": "FZY_2", "subentity_id": 8, "currency": "jpy", "lat": 3.0, "lng": 4.0},
+            ],
+        }
+        try:
+            config.USER_PHONE_NUMBER = ""
+            config.STORE_ID = ""
+            config.SIM_PHONE_EXPLICIT = False
+            config.SIM_STORE_EXPLICIT = False
+            config.SIM_DISABLE_RANDOM_PHONE = False
+            config.SIM_DISABLE_RANDOM_STORE = False
+            config.SIM_PHONE_AUTO_SELECTED = False
+            config.SIM_STORE_AUTO_SELECTED = False
+            config.SIM_LAT = None
+            config.SIM_LNG = None
+            with mock.patch.object(
+                config.random,
+                "choice",
+                side_effect=[actors["users"][1], actors["stores"][1]],
+            ):
+                config.apply_actor_selection(actors)
+
+            self.assertEqual(config.USER_PHONE_NUMBER, "+200")
+            self.assertEqual(config.STORE_ID, "FZY_2")
+            self.assertEqual(config.SUBENTITY_ID, 8)
+            self.assertTrue(config.SIM_PHONE_AUTO_SELECTED)
+            self.assertTrue(config.SIM_STORE_AUTO_SELECTED)
+        finally:
+            for name, value in previous.items():
+                setattr(config, name, value)
+
+    def test_no_random_flags_bypass_random_selection(self) -> None:
+        import config
+
+        tracked = (
+            "USER_PHONE_NUMBER",
+            "STORE_ID",
+            "SIM_PHONE_EXPLICIT",
+            "SIM_STORE_EXPLICIT",
+            "SIM_DISABLE_RANDOM_PHONE",
+            "SIM_DISABLE_RANDOM_STORE",
+            "SIM_PHONE_AUTO_SELECTED",
+            "SIM_STORE_AUTO_SELECTED",
+            "SIM_LAT",
+            "SIM_LNG",
+            "SUBENTITY_ID",
+            "STORE_CURRENCY",
+        )
+        previous = {name: getattr(config, name) for name in tracked}
+        actors = {
+            "defaults": {
+                "user_phone": "+100",
+                "store_id": "FZY_1",
+            },
+            "users": [
+                {"phone": "+100", "role": "returning", "lat": 1.0, "lng": 2.0},
+                {"phone": "+200", "role": "returning", "lat": 3.0, "lng": 4.0},
+            ],
+            "stores": [
+                {"store_id": "FZY_1", "subentity_id": 7, "currency": "jpy", "lat": 1.0, "lng": 2.0},
+                {"store_id": "FZY_2", "subentity_id": 8, "currency": "jpy", "lat": 3.0, "lng": 4.0},
+            ],
+        }
+        try:
+            config.USER_PHONE_NUMBER = ""
+            config.STORE_ID = ""
+            config.SIM_PHONE_EXPLICIT = False
+            config.SIM_STORE_EXPLICIT = False
+            config.SIM_DISABLE_RANDOM_PHONE = True
+            config.SIM_DISABLE_RANDOM_STORE = True
+            config.SIM_PHONE_AUTO_SELECTED = False
+            config.SIM_STORE_AUTO_SELECTED = False
+            config.SIM_LAT = None
+            config.SIM_LNG = None
+            with mock.patch.object(config.random, "choice") as random_choice:
+                config.apply_actor_selection(actors)
+            self.assertEqual(random_choice.call_count, 0)
+
+            self.assertEqual(config.USER_PHONE_NUMBER, "+100")
+            self.assertEqual(config.STORE_ID, "FZY_1")
+            self.assertEqual(config.SUBENTITY_ID, 7)
+            self.assertFalse(config.SIM_PHONE_AUTO_SELECTED)
+            self.assertFalse(config.SIM_STORE_AUTO_SELECTED)
+        finally:
+            for name, value in previous.items():
+                setattr(config, name, value)
+
+    def test_explicit_phone_and_store_override_random_selection(self) -> None:
+        import config
+
+        tracked = (
+            "USER_PHONE_NUMBER",
+            "STORE_ID",
+            "SIM_PHONE_EXPLICIT",
+            "SIM_STORE_EXPLICIT",
+            "SIM_DISABLE_RANDOM_PHONE",
+            "SIM_DISABLE_RANDOM_STORE",
+            "SIM_PHONE_AUTO_SELECTED",
+            "SIM_STORE_AUTO_SELECTED",
+            "SIM_LAT",
+            "SIM_LNG",
+            "SUBENTITY_ID",
+            "STORE_CURRENCY",
+        )
+        previous = {name: getattr(config, name) for name in tracked}
+        actors = {
+            "defaults": {
+                "user_phone": "+100",
+                "store_id": "FZY_1",
+            },
+            "users": [
+                {"phone": "+100", "role": "returning", "lat": 1.0, "lng": 2.0},
+                {"phone": "+200", "role": "returning", "lat": 3.0, "lng": 4.0},
+            ],
+            "stores": [
+                {"store_id": "FZY_1", "subentity_id": 7, "currency": "jpy", "lat": 1.0, "lng": 2.0},
+                {"store_id": "FZY_2", "subentity_id": 8, "currency": "jpy", "lat": 3.0, "lng": 4.0},
+            ],
+        }
+        try:
+            config.USER_PHONE_NUMBER = "+200"
+            config.STORE_ID = "FZY_2"
+            config.SIM_PHONE_EXPLICIT = True
+            config.SIM_STORE_EXPLICIT = True
+            config.SIM_DISABLE_RANDOM_PHONE = False
+            config.SIM_DISABLE_RANDOM_STORE = False
+            config.SIM_PHONE_AUTO_SELECTED = False
+            config.SIM_STORE_AUTO_SELECTED = False
+            with mock.patch.object(config.random, "choice") as random_choice:
+                config.apply_actor_selection(actors)
+            self.assertEqual(random_choice.call_count, 0)
+
+            self.assertEqual(config.USER_PHONE_NUMBER, "+200")
+            self.assertEqual(config.STORE_ID, "FZY_2")
+            self.assertEqual(config.SUBENTITY_ID, 8)
+            self.assertFalse(config.SIM_PHONE_AUTO_SELECTED)
+            self.assertFalse(config.SIM_STORE_AUTO_SELECTED)
+        finally:
+            for name, value in previous.items():
+                setattr(config, name, value)
+
+    def test_new_user_role_randomizes_within_role_pool(self) -> None:
+        import config
+
+        tracked = (
+            "USER_PHONE_NUMBER",
+            "STORE_ID",
+            "SIM_PHONE_EXPLICIT",
+            "SIM_STORE_EXPLICIT",
+            "SIM_DISABLE_RANDOM_PHONE",
+            "SIM_DISABLE_RANDOM_STORE",
+            "SIM_PHONE_AUTO_SELECTED",
+            "SIM_STORE_AUTO_SELECTED",
+        )
+        previous = {name: getattr(config, name) for name in tracked}
+        actors = {
+            "defaults": {"store_id": "FZY_1"},
+            "users": [
+                {"phone": "+100", "role": "returning"},
+                {"phone": "+200", "role": "new_user"},
+                {"phone": "+300", "role": "new_user"},
+            ],
+            "stores": [{"store_id": "FZY_1", "subentity_id": 7}],
+        }
+        try:
+            config.USER_PHONE_NUMBER = ""
+            config.STORE_ID = "FZY_1"
+            config.SIM_PHONE_EXPLICIT = False
+            config.SIM_STORE_EXPLICIT = True
+            config.SIM_DISABLE_RANDOM_PHONE = False
+            config.SIM_DISABLE_RANDOM_STORE = True
+            config.SIM_PHONE_AUTO_SELECTED = False
+            config.SIM_STORE_AUTO_SELECTED = False
+
+            with mock.patch.object(config.random, "choice", return_value=actors["users"][2]):
+                config.apply_actor_selection(actors, user_role="new_user")
+
+            self.assertEqual(config.USER_PHONE_NUMBER, "+300")
+            self.assertTrue(config.SIM_PHONE_AUTO_SELECTED)
+        finally:
+            for name, value in previous.items():
+                setattr(config, name, value)
+
     def test_store_selection_does_not_override_delivery_gps(self) -> None:
         import config
 
@@ -812,6 +1023,7 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
         previous_store_id = config.STORE_ID
         previous_actors = getattr(config, "SIM_ACTORS", None)
         previous_store_explicit = getattr(config, "SIM_STORE_EXPLICIT", None)
+        previous_disable_random_store = getattr(config, "SIM_DISABLE_RANDOM_STORE", False)
 
         async def fake_user_auth(client, recorder, scenario=None):
             return user_sim.UserSession(
@@ -868,6 +1080,7 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
             ],
         }
         config.SIM_STORE_EXPLICIT = False
+        config.SIM_DISABLE_RANDOM_STORE = True
         try:
             await trace_runner.run(
                 recorder=recorder,
@@ -891,9 +1104,41 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 delattr(config, "SIM_STORE_EXPLICIT")
             else:
                 config.SIM_STORE_EXPLICIT = previous_store_explicit
+            config.SIM_DISABLE_RANDOM_STORE = previous_disable_random_store
 
         self.assertEqual(store_login_calls, ["FZY_BAD", "FZY_GOOD"])
         self.assertEqual(recorder.fixtures_summary["store"]["id"], 2)
+
+    async def test_trace_store_candidates_are_shuffled_when_random_store_enabled(self) -> None:
+        import config
+        import trace_runner
+
+        tracked = (
+            "SIM_ACTORS",
+            "SIM_STORE_EXPLICIT",
+            "SIM_DISABLE_RANDOM_STORE",
+        )
+        previous = {name: getattr(config, name) for name in tracked}
+        config.SIM_ACTORS = {
+            "stores": [
+                {"store_id": "FZY_1"},
+                {"store_id": "FZY_2"},
+                {"store_id": "FZY_3"},
+            ],
+        }
+        config.SIM_STORE_EXPLICIT = False
+        config.SIM_DISABLE_RANDOM_STORE = False
+        try:
+            with mock.patch.object(
+                trace_runner.random,
+                "shuffle",
+                side_effect=lambda values: values.reverse(),
+            ):
+                candidates = trace_runner._trace_store_candidates()
+            self.assertEqual(candidates, ["FZY_3", "FZY_2", "FZY_1"])
+        finally:
+            for name, value in previous.items():
+                setattr(config, name, value)
 
 
 class StoreSetupPayloadTests(unittest.IsolatedAsyncioTestCase):
@@ -2432,6 +2677,91 @@ class CliArgPrecedenceTests(unittest.TestCase):
             config.load_sim_actors = original_loader
             sim_main.sys.argv = previous_argv
             sim_main._store_from_cli = previous_store_from_cli
+            sim_main._active_flow = previous_active_flow
+            for name, value in previous.items():
+                setattr(config, name, value)
+
+    def test_cli_no_random_flags_disable_default_randomization(self) -> None:
+        sim_main = _load_simulate_entrypoint_module()
+        config = sim_main.config
+        tracked = (
+            "SIM_DISABLE_RANDOM_PHONE",
+            "SIM_DISABLE_RANDOM_STORE",
+            "SIM_FLOW",
+            "SIM_RUN_MODE",
+            "USER_PHONE_NUMBER",
+            "STORE_ID",
+            "SIM_PHONE_EXPLICIT",
+            "SIM_STORE_EXPLICIT",
+            "SIM_ACTORS",
+        )
+        previous = {name: getattr(config, name) for name in tracked}
+        previous_store_from_cli = sim_main._store_from_cli
+        previous_phone_from_cli = getattr(sim_main, "_phone_from_cli", False)
+        previous_active_flow = sim_main._active_flow
+        previous_argv = list(sim_main.sys.argv)
+        original_loader = config.load_sim_actors
+        actors = {
+            "defaults": {},
+            "users": [{"phone": "+15550000001", "role": "returning", "lat": 35.1, "lng": 136.9}],
+            "stores": [{"store_id": "FZY_1", "subentity_id": 7, "lat": 35.1, "lng": 136.9}],
+        }
+
+        def fake_load_sim_actors(*_args, **_kwargs):
+            config.SIM_ACTORS = actors
+            return actors
+
+        config.load_sim_actors = fake_load_sim_actors
+        try:
+            config.USER_PHONE_NUMBER = "+15550000001"
+            config.STORE_ID = "FZY_1"
+            sim_main.sys.argv = [
+                "simulate",
+                "doctor",
+                "--phone",
+                "+15550000001",
+                "--store",
+                "FZY_1",
+                "--no-random-phone",
+                "--no-random-store",
+            ]
+            args = types.SimpleNamespace(
+                flow="doctor",
+                mode="trace",
+                suite=None,
+                scenario=None,
+                timing="fast",
+                users=1,
+                interval=30.0,
+                reject=0.1,
+                orders=1,
+                continuous=False,
+                phone="+15550000001",
+                store="FZY_1",
+                all_users=False,
+                plan=None,
+                strict_plan=False,
+                skip_app_probes=False,
+                skip_store_dashboard_probes=False,
+                post_order_actions=False,
+                enforce_websocket_gates=None,
+                no_auto_provision=False,
+                no_random_phone=True,
+                no_random_store=True,
+                bounded_load_smoke_policy=False,
+                bounded_baseline_min_completed=1,
+                bounded_baseline_max_attempts=3,
+                bounded_tail_reject_rate=None,
+                bounded_tail_cancel_rate=0.0,
+            )
+            sim_main._apply_args(args)
+            self.assertTrue(config.SIM_DISABLE_RANDOM_PHONE)
+            self.assertTrue(config.SIM_DISABLE_RANDOM_STORE)
+        finally:
+            config.load_sim_actors = original_loader
+            sim_main.sys.argv = previous_argv
+            sim_main._store_from_cli = previous_store_from_cli
+            sim_main._phone_from_cli = previous_phone_from_cli
             sim_main._active_flow = previous_active_flow
             for name, value in previous.items():
                 setattr(config, name, value)

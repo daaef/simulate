@@ -73,13 +73,14 @@ Set repository variables:
    - `SIMULATOR_HOST_PORT=8090`
 4. Do not commit `.env.prod`.
 
-5. Configure GitHub webhook integration env values:
+5. Configure GitHub webhook integration:
    - `SIMULATOR_EXTERNAL_BASE_URL` (public HTTPS base URL, for example `https://simulator.example.com`)
-   - `GITHUB_WEBHOOK_PROJECT_SECRETS` JSON map:
+   - **Recommended:** after deploy, sign in to the simulator UI → **Config → Integration → Webhook Projects** to generate per-project signing secrets and repository allowlists (stored encrypted in the simulator database). No VPS `printenv` or manual GitHub secret JSON editing required for new projects.
+   - **Legacy (optional):** `SIMULATOR_WEBHOOK_PROJECT_SECRETS` GitHub secret JSON map (merged with DB; DB wins on key collision):
      ```json
      {"backend":"<secret>","mobile":"<secret>","store":"<secret>","robot":"<secret>"}
      ```
-   - `GITHUB_WEBHOOK_REPO_ALLOWLIST` JSON map:
+   - **Legacy (optional):** `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` repository variable JSON map (merged with DB repos):
      ```json
      {
        "backend":["org/backend-repo"],
@@ -257,7 +258,7 @@ Per upstream repository setup:
 
 1. In repo settings, add a webhook pointing to the endpoint above.
 2. Select `deployment_status` event.
-3. Set secret to the value configured for that project key in `GITHUB_WEBHOOK_PROJECT_SECRETS`.
+3. Set secret to the value shown when the project was created in **Webhook Projects** (or the legacy env map entry for that project key).
 4. Ensure repository full name is present in `GITHUB_WEBHOOK_REPO_ALLOWLIST` under the right project.
 5. Ensure deployment workflow emits GitHub deployment + deployment status events.
 

@@ -125,6 +125,8 @@ FLOW_OPTIONAL_FLAGS: dict[str, list[str]] = {
         "no_auto_provision",
         "enforce_websocket_gates",
         "post_order_actions",
+        "no_random_phone",
+        "no_random_store",
         "all_users",
         "extra_args",
     ],
@@ -144,6 +146,8 @@ FLOW_OPTIONAL_FLAGS: dict[str, list[str]] = {
         "no_auto_provision",
         "enforce_websocket_gates",
         "post_order_actions",
+        "no_random_phone",
+        "no_random_store",
         "extra_args",
     ],
 }

@@ -176,6 +176,18 @@ def _parse_args() -> argparse.Namespace:
         help="Do not auto-create missing store setup/category/menu prerequisites.",
     )
     parser.add_argument(
+        "--no-random-phone",
+        action="store_true",
+        default=config.SIM_DISABLE_RANDOM_PHONE,
+        help="Disable default random phone selection and use plan/default deterministic phone selection.",
+    )
+    parser.add_argument(
+        "--no-random-store",
+        action="store_true",
+        default=config.SIM_DISABLE_RANDOM_STORE,
+        help="Disable default random store selection and use plan/default deterministic store selection.",
+    )
+    parser.add_argument(
         "--bounded-load-smoke-policy",
         action="store_true",
         default=False,
@@ -209,6 +221,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 _store_from_cli = False
+_phone_from_cli = False
 _active_flow = ""
 
 
@@ -237,6 +250,8 @@ def _explicit_config_overrides(argv: list[str]) -> set[str]:
         "--enforce-websocket-gates": "SIM_ENFORCE_WEBSOCKET_GATES",
         "--no-enforce-websocket-gates": "SIM_ENFORCE_WEBSOCKET_GATES",
         "--no-auto-provision": "SIM_AUTO_PROVISION_FIXTURES",
+        "--no-random-phone": "SIM_DISABLE_RANDOM_PHONE",
+        "--no-random-store": "SIM_DISABLE_RANDOM_STORE",
     }
     return {
         attr
@@ -246,17 +261,21 @@ def _explicit_config_overrides(argv: list[str]) -> set[str]:
 
 
 def _apply_args(args: argparse.Namespace) -> None:
-    global _store_from_cli, _active_flow
+    global _store_from_cli, _phone_from_cli, _active_flow
     argv = sys.argv[1:]
     explicit_overrides = _explicit_config_overrides(argv)
     if args.plan:
         config.set_sim_actors_path(args.plan)
+    _phone_from_cli = bool(getattr(args, "phone", None))
+    _store_from_cli = bool(getattr(args, "store", None))
     if args.phone:
         config.USER_PHONE_NUMBER = args.phone
     if args.store:
         config.STORE_ID = args.store
-        _store_from_cli = True
+    config.SIM_PHONE_EXPLICIT = _phone_from_cli
     config.SIM_STORE_EXPLICIT = _store_from_cli
+    config.SIM_PHONE_AUTO_SELECTED = False
+    config.SIM_STORE_AUTO_SELECTED = False
 
     actors = config.load_sim_actors(preserve=explicit_overrides)
 
@@ -292,6 +311,10 @@ def _apply_args(args: argparse.Namespace) -> None:
         config.SIM_ENFORCE_WEBSOCKET_GATES = bool(args.enforce_websocket_gates)
     if _has_cli_flag(argv, "--no-auto-provision") and args.no_auto_provision:
         config.SIM_AUTO_PROVISION_FIXTURES = False
+    if _has_cli_flag(argv, "--no-random-phone"):
+        config.SIM_DISABLE_RANDOM_PHONE = bool(getattr(args, "no_random_phone", False))
+    if _has_cli_flag(argv, "--no-random-store"):
+        config.SIM_DISABLE_RANDOM_STORE = bool(getattr(args, "no_random_store", False))
     config.configure_bounded_load_policy(
         enabled=bool(args.bounded_load_smoke_policy),
         baseline_min_completed=args.bounded_baseline_min_completed,
@@ -759,6 +782,8 @@ async def main() -> None:
             f"  User workers: {config.N_USERS}\n"
             f"  Users       : {all_users_label} ({'--all-users' if config.ALL_USERS else config.USER_PHONE_NUMBER or 'auto'})\n"
             f"  Store       : {config.STORE_ID or 'all from sim_actors.json'}\n"
+            f"  Random phone: {'off' if config.SIM_DISABLE_RANDOM_PHONE else 'on'}\n"
+            f"  Random store: {'off' if config.SIM_DISABLE_RANDOM_STORE else 'on'}\n"
             f"  Interval    : {config.ORDER_INTERVAL_SECONDS}s\n"
             f"  Orders      : {'continuous' if config.SIM_CONTINUOUS else config.SIM_ORDERS}\n"
             f"  Reject rate : {config.REJECT_RATE:.0%}\n"

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import random
 from typing import Any
 
 import httpx
@@ -199,6 +200,8 @@ def _trace_store_candidates() -> list[str | None]:
             )
         return [explicit_store]
 
+    if not getattr(config, "SIM_DISABLE_RANDOM_STORE", False):
+        random.shuffle(actor_store_ids)
     return actor_store_ids
 
 

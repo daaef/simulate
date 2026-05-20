@@ -149,7 +149,7 @@ Redirects to `/overview` when a session cookie exists, otherwise `/auth/login`.
 
 - **Header strip** — Title, theme, profile, **API health** note (healthz scope), link to Overview flow ladder.
 - **Run statistics** — Status + flow distribution bars; optional **Last succeeded / Last failed** panels when API returns highlights.
-- **Start Run** (`CollapsibleSection`) — `RunLaunchPanel` + `RunLiveConsole`. Plan dropdown (`sim_actors.json` + `runs/gui-plans/*`), flow/mode/suite/scenario controls gated by `/api/v1/flows`, command preview, websocket gate checkbox, advanced overrides. In Advanced Mode Overrides, `Scenarios (trace only)` is a searchable chips multiselect (typeahead + keyboard nav) limited to supported flow scenarios.
+- **Start Run** (`CollapsibleSection`) — `RunLaunchPanel` + `RunLiveConsole`. Plan dropdown (`sim_actors.json` + `runs/gui-plans/*`), flow/mode/suite/scenario controls gated by `/api/v1/flows`, command preview, websocket gate checkbox, random-actor checkboxes (`Disable random phone`, `Disable random store`), advanced overrides. In Advanced Mode Overrides, `Scenarios (trace only)` is a searchable chips multiselect (typeahead + keyboard nav) limited to supported flow scenarios.
 - **Saved profiles** — CRUD and launch saved configurations (behavior preserved; labels improved only under observability work).
 - **Recent runs table** — Select run, open detail, actions.
 - **Admin dashboard embed** — Role-gated operator tools when permitted.
@@ -359,7 +359,7 @@ Richer plans can also carry non-sensitive defaults:
 
 Keep these out of plan JSON: keys containing `secret`, `token`, `password`, `api_key`, or `private_key`. Plan validation rejects them. Stripe secret keys, cached auth tokens, test-user passwords, and deployment URLs stay in `.env`.
 
-Keep normal simulator behavior out of `.env`. Phone/store selection, delivery GPS, runtime defaults, fixture/menu defaults, payment mode/coupon defaults, review defaults, and new-user names/email belong in `sim_actors.json` or the selected GUI plan. If the GUI Phone field is blank, the launched run uses the selected plan's phone; if `--phone` is supplied, that explicit CLI value wins.
+Keep normal simulator behavior out of `.env`. Phone/store selection, delivery GPS, runtime defaults, fixture/menu defaults, payment mode/coupon defaults, review defaults, and new-user names/email belong in `sim_actors.json` or the selected GUI plan. If GUI Phone/Store fields are blank, each run now randomly selects from plan `users[]` / `stores[]` by default. Explicit `--phone` / `--store` still wins, and `--no-random-phone` / `--no-random-store` disable random defaults for that run.
 
 Admins can edit GUI-owned plans at `Config` in the web UI. The saved `path` field is launchable from the Runs page and from CLI:
 
@@ -477,6 +477,8 @@ Multiple-scenario explicit combinations:
 | `... --timing realistic` | Realistic store prep and robot leg delays in load and trace. |
 | `... --store <STORE_ID>` | Forces explicit store; disables store fallback autopilot. |
 | `... --phone <PHONE>` | Forces explicit user phone selection. |
+| `... --no-random-store` | Disables default random store selection for the run. |
+| `... --no-random-phone` | Disables default random phone selection for the run. |
 | `... --strict-plan` | Requires full plan quality gate (user GPS + store IDs). |
 | `... --no-auto-provision` | Disables automatic setup/category/menu repair. |
 | `... --skip-app-probes` | Disables user-side app probes. |
@@ -608,8 +610,10 @@ Common failure signatures:
 | `--interval` | float seconds | from plan/env (`ORDER_INTERVAL_SECONDS`) | Delay between user order attempts in load | Load-mode control |
 | `--reject` | float `0..1` | from plan/env (`REJECT_RATE`) | Probabilistic store rejection rate in load | Must be between `0` and `1` |
 | `--continuous` | boolean | from plan/env (`SIM_CONTINUOUS`) | Infinite load run | Invalid in trace |
-| `--phone` | string | none | Overrides selected user phone | Should exist in plan for deterministic selection |
-| `--store` | string | none | Forces a specific store ID | Disables store fallback behavior by marking explicit store |
+| `--phone` | string | none | Overrides selected user phone | Explicit override; should exist in selected plan |
+| `--store` | string | none | Forces a specific store ID | Explicit override; should exist in selected plan |
+| `--no-random-phone` | boolean | `false` | Disables default random phone selection | Uses deterministic plan/default phone selection |
+| `--no-random-store` | boolean | `false` | Disables default random store selection | Uses deterministic plan/default store selection |
 | `--all-users` | boolean | `false` | In load, auth and run all plan users | Load-mode control |
 | `--plan` | path | `sim_actors.json` | Run plan JSON path | Relative paths resolve from current cwd first |
 | `--strict-plan` | boolean | from plan/env (`SIM_STRICT_PLAN`) | Enforces user GPS + store IDs at load time | Fails fast on missing required plan fields |
@@ -1366,15 +1370,28 @@ GitHub deployment webhook automation:
 - Supported events:
   - `deployment_status` with `state=success` (required fields in payload); other states/events are rejected for launches.
   - `workflow_run` with `action=completed` and `workflow_run.conclusion=success`; repository must be allowlisted and `(project, environment)` must map to a profile (same mapping table as deployments). **Runs created from `workflow_run` are stored with `trigger_source=github`**, `trigger_label` `GitHub integration: {project}/{environment}`, merged `trigger_context` (profile name, repository, workflow summary, `github_event: workflow_run`), and `integration_trigger_id` pointing at the `integration_triggers` row—same style as deployment-triggered runs, so the Runs page and overview chips show GitHub rather than a dashboard profile launch.
-- Security: HMAC verification via `X-Hub-Signature-256` using project-specific secrets from `SIMULATOR_WEBHOOK_PROJECT_SECRETS` (JSON map of project key → secret string).
-- Repository guardrail: repository must match `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` for one configured project (JSON map: project key → list of `owner/repo` strings).
+- Security: HMAC verification via `X-Hub-Signature-256` using project-specific signing secrets. Prefer **Config → Integration → Webhook Projects** (stored encrypted in `integration_webhook_projects`); legacy env JSON `SIMULATOR_WEBHOOK_PROJECT_SECRETS` still merges as fallback (DB values override env keys with the same name).
+- Repository guardrail: repository must match an allowlisted `owner/repo` for the resolved project. Configure repositories in **Webhook Projects** or legacy env `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` (merged; DB repos append to env lists per project).
 - Profile routing: simulator maps `(project, route key)` to a saved run profile through `integration_profile_mappings`. The route key column is named `environment` in the API/DB. By default it is GitHub’s deployment environment (`deployment.environment` on `deployment_status`, or `SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT` / `production` on `workflow_run`). Set `SIMULATOR_WEBHOOK_ROUTE_BY=branch` to route by git ref instead (`workflow_run.head_branch` or `deployment.ref`, normalized to lowercase).
 - Idempotency key: `project + environment + deployment_id + sha`; duplicate webhook deliveries do not launch duplicate runs.
 - Lifecycle states recorded per trigger: `validated`, `queued`, `launched`, `completed`/`failed`, `rejected`, `duplicate`.
 - Callback: when run reaches terminal state, simulator posts deployment status back to GitHub with context `simulator/verification` using `GITHUB_STATUS_TOKEN`.
 
+Webhook project setup (GUI):
+
+1. Open **Config → Integration**.
+2. Under **Webhook Projects**, enter the project key (same name used in mappings, for example `dashboard`) and allowed `owner/repo` lines.
+3. Click **Generate webhook secret**, then **Copy secret** and paste it into the upstream repository GitHub webhook **Secret** field.
+4. Copy the displayed webhook URL into the upstream webhook **Payload URL**.
+5. Add **Integration Mappings** for `(project, environment or branch)` → run profile.
+
 Operational APIs:
 
+- `GET /api/v1/integrations/github/projects` (list saved webhook projects; secrets are masked)
+- `POST /api/v1/integrations/github/projects` (create project + generate secret; plaintext secret returned once)
+- `POST /api/v1/integrations/github/projects/{project}/rotate-secret` (new secret returned once)
+- `PATCH /api/v1/integrations/github/projects/{project}/repositories` (update allowlisted repos)
+- `DELETE /api/v1/integrations/github/projects/{project}` (archive project)
 - `GET /api/v1/integrations/github/mappings?include_archived=<true|false>` (view mapping rows)
 - `POST /api/v1/integrations/github/mappings` (upsert `{project, environment, profile_id, enabled}`)
 - `DELETE /api/v1/integrations/github/mappings/{mapping_id}` (archive)

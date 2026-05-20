@@ -22,3 +22,12 @@ class GitHubDeploymentWebhookResponse(BaseModel):
     environment: Optional[str] = None
     repository: Optional[str] = None
     meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class IntegrationWebhookProjectCreateRequest(BaseModel):
+    project: str = Field(min_length=1, max_length=120)
+    repositories: list[str] = Field(default_factory=list)
+
+
+class IntegrationWebhookProjectRepositoriesRequest(BaseModel):
+    repositories: list[str] = Field(default_factory=list)

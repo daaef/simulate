@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import os
 import sqlite3
@@ -35,33 +33,15 @@ def _json_env(name: str, default: Any) -> Any:
 
 
 def _github_project_secrets() -> dict[str, str]:
-    payload = _json_env("SIMULATOR_WEBHOOK_PROJECT_SECRETS", {})
-    if not isinstance(payload, dict):
-        return {}
+    from .webhook_config import merged_project_secrets
 
-    return {
-        str(project): str(secret)
-        for project, secret in payload.items()
-        if str(project).strip() and str(secret).strip()
-    }
+    return merged_project_secrets()
 
 
 def _github_repo_allowlist() -> dict[str, list[str]]:
-    payload = _json_env("SIMULATOR_WEBHOOK_REPO_ALLOWLIST", {})
-    if isinstance(payload, list):
-        return {"default": [str(item) for item in payload]}
+    from .webhook_config import merged_repo_allowlist
 
-    if not isinstance(payload, dict):
-        return {}
-
-    normalized: dict[str, list[str]] = {}
-    for project, repos in payload.items():
-        if isinstance(repos, list):
-            normalized[str(project)] = [str(repo) for repo in repos if str(repo).strip()]
-        elif isinstance(repos, str) and repos.strip():
-            normalized[str(project)] = [repos.strip()]
-
-    return normalized
+    return merged_repo_allowlist()
 
 
 @contextmanager
@@ -89,22 +69,10 @@ def _dict_row(row: Any) -> dict[str, Any] | None:
 
 
 def _verify_signature_project(body: bytes, headers: dict[str, str]) -> str | None:
+    from .webhook_config import resolve_project_from_signature
+
     signature = headers.get("x-hub-signature-256", "").strip()
-    if not signature.startswith("sha256="):
-        return None
-
-    secrets = _github_project_secrets()
-    for project, secret in secrets.items():
-        expected = "sha256=" + hmac.new(
-            secret.encode("utf-8"),
-            body,
-            hashlib.sha256,
-        ).hexdigest()
-
-        if hmac.compare_digest(signature, expected):
-            return project
-
-    return None
+    return resolve_project_from_signature(body, signature)
 
 
 def _repo_allowed_for_project(project: str, repository: str) -> bool:

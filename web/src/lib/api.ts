@@ -558,6 +558,31 @@ export type GitHubIntegrationTrigger = {
   [key: string]: unknown;
 };
 
+export type IntegrationWebhookProject = {
+  id: number;
+  project: string;
+  secret_hint: string;
+  repositories: string[];
+  status?: string;
+  archived_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  created_by_user_id?: number | null;
+  source?: string;
+  secret?: string;
+  secret_display_once?: boolean;
+};
+
+export type IntegrationWebhookProjectsPayload = {
+  projects: IntegrationWebhookProject[];
+  webhook_url: string;
+};
+
+export type IntegrationWebhookProjectCreateRequest = {
+  project: string;
+  repositories: string[];
+};
+
 export type TimezonePolicyMode = "all" | "allowlist";
 
 export type SystemTimezonesPolicy = {
@@ -1238,5 +1263,68 @@ export async function fetchGitHubIntegrationTriggers(
   return unwrap<{ triggers: GitHubIntegrationTrigger[]; total?: number; limit?: number; offset?: number }>(
     await fetch(`/api/v1/integrations/github/triggers?limit=${limit}&offset=${offset}`, withSession()),
     "github-integration-triggers"
+  );
+}
+
+export async function fetchIntegrationWebhookProjects(
+  includeArchived = false
+): Promise<IntegrationWebhookProjectsPayload> {
+  return unwrap<IntegrationWebhookProjectsPayload>(
+    await fetch(
+      `/api/v1/integrations/github/projects?include_archived=${includeArchived ? "true" : "false"}`,
+      withSession()
+    ),
+    "integration-webhook-projects"
+  );
+}
+
+export async function createIntegrationWebhookProject(
+  request: IntegrationWebhookProjectCreateRequest
+): Promise<{ project: IntegrationWebhookProject; webhook_url: string }> {
+  return unwrap<{ project: IntegrationWebhookProject; webhook_url: string }>(
+    await fetch("/api/v1/integrations/github/projects", {
+      method: "POST",
+      ...withSession(),
+      body: JSON.stringify(request),
+    }),
+    "integration-webhook-project-create"
+  );
+}
+
+export async function rotateIntegrationWebhookProjectSecret(
+  project: string
+): Promise<{ project: IntegrationWebhookProject; webhook_url: string }> {
+  return unwrap<{ project: IntegrationWebhookProject; webhook_url: string }>(
+    await fetch(`/api/v1/integrations/github/projects/${encodeURIComponent(project)}/rotate-secret`, {
+      method: "POST",
+      ...withSession(),
+    }),
+    "integration-webhook-project-rotate"
+  );
+}
+
+export async function updateIntegrationWebhookProjectRepositories(
+  project: string,
+  repositories: string[]
+): Promise<{ project: IntegrationWebhookProject; webhook_url: string }> {
+  return unwrap<{ project: IntegrationWebhookProject; webhook_url: string }>(
+    await fetch(`/api/v1/integrations/github/projects/${encodeURIComponent(project)}/repositories`, {
+      method: "PATCH",
+      ...withSession(),
+      body: JSON.stringify({ repositories }),
+    }),
+    "integration-webhook-project-repositories"
+  );
+}
+
+export async function archiveIntegrationWebhookProject(
+  project: string
+): Promise<{ project: IntegrationWebhookProject; archived: boolean }> {
+  return unwrap<{ project: IntegrationWebhookProject; archived: boolean }>(
+    await fetch(`/api/v1/integrations/github/projects/${encodeURIComponent(project)}`, {
+      method: "DELETE",
+      ...withSession(),
+    }),
+    "integration-webhook-project-archive"
   );
 }

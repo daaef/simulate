@@ -385,6 +385,9 @@ def _init_db() -> None:
             )
             """
         )
+        from .integrations.project_secrets import ensure_schema_sqlite
+
+        ensure_schema_sqlite(conn)
         _migrate_db(conn)
 
 
@@ -496,6 +499,9 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE integration_triggers ADD COLUMN deployment_status_id TEXT")
     if trigger_columns and "github_status_url" not in trigger_columns:
         conn.execute("ALTER TABLE integration_triggers ADD COLUMN github_status_url TEXT")
+    from .integrations.project_secrets import ensure_schema_sqlite
+
+    ensure_schema_sqlite(conn)
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_run_profiles_catalog_slug ON run_profiles(catalog_slug) WHERE catalog_slug IS NOT NULL"
     )
@@ -690,6 +696,9 @@ def _migrate_postgres_schema() -> None:
                 )
                 """
             )
+            from .integrations.project_secrets import ensure_schema_postgres
+
+            ensure_schema_postgres(cursor)
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE")
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'")
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE")
@@ -3110,27 +3119,15 @@ def _list_integration_triggers(limit: int, offset: int) -> dict[str, Any]:
 
 
 def _match_project_for_repository(repository: str) -> str | None:
-    repo = repository.strip().lower()
-    allowlist = SIMULATOR_WEBHOOK_REPO_ALLOWLIST if isinstance(SIMULATOR_WEBHOOK_REPO_ALLOWLIST, dict) else {}
-    for project, repos in allowlist.items():
-        if not isinstance(repos, list):
-            continue
-        normalized_repos = {str(item).strip().lower() for item in repos if str(item).strip()}
-        if repo in normalized_repos:
-            return str(project).strip().lower()
-    return None
+    from .integrations.webhook_config import match_project_for_repository
+
+    return match_project_for_repository(repository)
 
 
 def _verify_github_signature(project: str, body: bytes, signature_header: str | None) -> bool:
-    if not signature_header or not signature_header.startswith("sha256="):
-        return False
-    secret_map = SIMULATOR_WEBHOOK_PROJECT_SECRETS if isinstance(SIMULATOR_WEBHOOK_PROJECT_SECRETS, dict) else {}
-    secret = str(secret_map.get(project, "")).strip()
-    if not secret:
-        return False
-    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    provided = signature_header.split("=", 1)[1].strip()
-    return hmac.compare_digest(digest, provided)
+    from .integrations.webhook_config import verify_github_signature
+
+    return verify_github_signature(project, body, signature_header)
 
 
 def _integration_mapping_for(project: str, environment: str) -> dict[str, Any] | None:

@@ -28,6 +28,7 @@ python3 -m simulate doctor --plan sim_actors.json --timing fast
 
 - Explicit CLI flags (`--mode`, `--suite`, repeated `--scenario`) override flow preset defaults.
 - In trace mode, `--suite` and repeated `--scenario` can be combined: suite scenarios resolve first, then explicit scenarios are appended (deduped in order).
+- By default, each run randomly selects phone and store from the selected plan (`users[]`, `stores[]`). Use `--phone`/`--store` for explicit selection, or disable random defaults with `--no-random-phone` and `--no-random-store`.
 
 ## Failure Policy Defaults
 
@@ -57,6 +58,7 @@ python3 -m unittest tests.test_simulate.FlowReliabilityPolicyTests -v
 
 On **Runs → {id} → Overview**, **Failed Events** uses the same failure rules as `GET /api/v1/runs/{id}/metrics`. **Critical Findings** shows server/API/websocket availability failures; **Operational Findings** shows other failed ledger events and non-critical artifact issues (not order-rejection or payment-failure action counts—those are separate KPIs). See [SIMULATOR_GUIDE.md](SIMULATOR_GUIDE.md) for details.
 Run artifact paths (`report.md`, `story.md`, `events.json`) are hydrated from run logs, including long wrapped path lines from launcher console output.
+
 On **Overview**, **Attention Queue** and **Alerts** rows now include explicit date/time stamps for easier triage ordering.
 
 ## Archive-First Delete/Restore
@@ -78,3 +80,5 @@ On **Overview**, **Attention Queue** and **Alerts** rows now include explicit da
 - Capability matrix (flows/suites/scenarios/flags): [docs/SIMULATOR_CAPABILITIES.md](docs/SIMULATOR_CAPABILITIES.md)
 - Run-efficiency playbook: [docs/SIMULATION_TEST_GUIDE.md](docs/SIMULATION_TEST_GUIDE.md)
 - GUI testing checklist: [docs/GUI_TESTING.md](docs/GUI_TESTING.md)
+- GUI presentation / personal demo checklist: [docs/GUI_PERSONAL_DEMO_CHECKLIST.md](docs/GUI_PERSONAL_DEMO_CHECKLIST.md)
+- GitHub webhook projects (generate signing secrets in **Config → Integration**): [SIMULATOR_GUIDE.md](SIMULATOR_GUIDE.md#production-deployment-operations)

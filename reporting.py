@@ -178,6 +178,8 @@ class RunRecorder:
             "auto_select_store": config.SIM_AUTO_SELECT_STORE,
             "auto_select_coupon": config.SIM_AUTO_SELECT_COUPON,
             "auto_provision_fixtures": config.SIM_AUTO_PROVISION_FIXTURES,
+            "disable_random_phone": getattr(config, "SIM_DISABLE_RANDOM_PHONE", False),
+            "disable_random_store": getattr(config, "SIM_DISABLE_RANDOM_STORE", False),
             "failure_policy": config.SIM_FAILURE_POLICY,
             "preflight_strategy": config.SIM_PREFLIGHT_STRATEGY,
             "mutate_store_setup": config.SIM_MUTATE_STORE_SETUP,

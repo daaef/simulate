@@ -20,6 +20,7 @@ import {
   type SimulationPlanContent,
 } from "../../../lib/api";
 import IntegrationMappingsPanel from "../../../components/config/IntegrationMappingsPanel";
+import IntegrationWebhookProjectsPanel from "../../../components/config/IntegrationWebhookProjectsPanel";
 import { buildNewPlanDraft } from "../../../lib/config-plan-draft";
 
 const PLAN_TEMPLATE: SimulationPlanContent = {
@@ -575,7 +576,10 @@ export default function ConfigPage() {
         role="tabpanel"
         aria-labelledby="config-tab-integration"
       >
-        <IntegrationMappingsPanel />
+        <div className="grid" style={{ gap: 24 }}>
+          <IntegrationWebhookProjectsPanel />
+          <IntegrationMappingsPanel />
+        </div>
       </div>
       ) : null}
       </div>

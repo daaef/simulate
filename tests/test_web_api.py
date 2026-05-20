@@ -2676,6 +2676,135 @@ class IntegrationsApiTests(unittest.TestCase):
         self.assertEqual((run.get("trigger_context") or {}).get("environment"), "dev")
 
 
+class IntegrationWebhookProjectsApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_auth = _FakeCookieAuthManager()
+        self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
+        self.auth_enabled_patch.start()
+        self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
+        self.auth_manager_patch.start()
+        self.client = TestClient(web_api.app)
+        login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
+        assert login.status_code == 200
+        self._old_allowlist = (
+            dict(web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST)
+            if isinstance(web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST, dict)
+            else {}
+        )
+        self._old_secrets = (
+            dict(web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS)
+            if isinstance(web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS, dict)
+            else {}
+        )
+        web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST = {}
+        web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS = {}
+
+    def tearDown(self) -> None:
+        web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST = self._old_allowlist
+        web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS = self._old_secrets
+        self.client.close()
+        self.auth_manager_patch.stop()
+        self.auth_enabled_patch.stop()
+
+    @staticmethod
+    def _signature(secret: str, body: bytes) -> str:
+        digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        return f"sha256={digest}"
+
+    def test_create_and_list_webhook_project(self) -> None:
+        suffix = str(time.time_ns())
+        project_name = f"gui-project-{suffix}"
+        create_response = self.client.post(
+            "/api/v1/integrations/github/projects",
+            json={
+                "project": project_name,
+                "repositories": [f"org/gui-repo-{suffix}"],
+            },
+        )
+        self.assertEqual(create_response.status_code, 200)
+        created = create_response.json()["project"]
+        self.assertEqual(created["project"], project_name)
+        self.assertTrue(created.get("secret"))
+        self.assertTrue(created.get("secret_display_once"))
+
+        list_response = self.client.get("/api/v1/integrations/github/projects")
+        self.assertEqual(list_response.status_code, 200)
+        listed = list_response.json()
+        self.assertIn("webhook_url", listed)
+        match = next(item for item in listed["projects"] if item["project"] == project_name)
+        self.assertNotIn("secret", match)
+        self.assertEqual(match["repositories"], [f"org/gui-repo-{suffix}"])
+
+    def test_create_duplicate_webhook_project_conflict(self) -> None:
+        project_name = f"dup-project-{time.time_ns()}"
+        first = self.client.post(
+            "/api/v1/integrations/github/projects",
+            json={"project": project_name, "repositories": []},
+        )
+        self.assertEqual(first.status_code, 200)
+        second = self.client.post(
+            "/api/v1/integrations/github/projects",
+            json={"project": project_name, "repositories": []},
+        )
+        self.assertEqual(second.status_code, 409)
+
+    def test_deployment_webhook_uses_database_project_secret(self) -> None:
+        suffix = str(time.time_ns())
+        project_name = f"db-secret-{suffix}"
+        repo = f"org/db-secret-{suffix}"
+        create_response = self.client.post(
+            "/api/v1/integrations/github/projects",
+            json={"project": project_name, "repositories": [repo]},
+        )
+        self.assertEqual(create_response.status_code, 200)
+        secret = create_response.json()["project"]["secret"]
+
+        create_profile = self.client.post(
+            "/api/v1/run-profiles",
+            json={
+                "name": "DB Secret Profile",
+                "flow": "doctor",
+                "plan": "sim_actors.json",
+                "timing": "fast",
+            },
+        )
+        self.assertEqual(create_profile.status_code, 200)
+        profile_id = int(create_profile.json()["profile"]["id"])
+
+        mapping_response = self.client.post(
+            "/api/v1/integrations/github/mappings",
+            json={
+                "project": project_name,
+                "environment": "production",
+                "profile_id": profile_id,
+                "enabled": True,
+            },
+        )
+        self.assertEqual(mapping_response.status_code, 200)
+
+        dep_id = int(time.time_ns() % 1_000_000_000) + 20_000_000
+        status_id = dep_id + 1
+        payload = {
+            "repository": {"full_name": repo},
+            "deployment": {"id": dep_id, "environment": "production", "sha": f"dbsecret{dep_id}"},
+            "deployment_status": {"id": status_id, "state": "success"},
+        }
+        body = json.dumps(payload).encode("utf-8")
+        with mock.patch.object(web_api, "_enqueue_integration_profile_launch") as launch_mock:
+            response = self.client.post(
+                "/api/v1/integrations/github/deployment-complete",
+                data=body,
+                headers={
+                    "X-GitHub-Event": "deployment_status",
+                    "X-Hub-Signature-256": self._signature(secret, body),
+                    "Content-Type": "application/json",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "queued")
+        launch_mock.assert_called_once()
+
+
 class CatalogSeedTests(unittest.TestCase):
     def _reset_catalog_rows(self) -> None:
         from api.app import catalog_seed
