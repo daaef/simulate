@@ -10,6 +10,7 @@ import { ErrorBanner } from "../../../components/ErrorBanner";
 import { LastUpdatedIndicator } from "../../../components/LastUpdatedIndicator";
 import { PageLoadingSkeleton } from "../../../components/PageLoadingSkeleton";
 import LatestRunCommandCenter from "../../../components/overview/LatestRunCommandCenter";
+import { formatDateTime } from "../../../lib/time-format";
 
 import {
   ApiRequestError,
@@ -62,6 +63,10 @@ function buildFailureTrend(runs: RunRow[]): { labels: string[]; points: number[]
     if (counts.has(key)) counts.set(key, (counts.get(key) ?? 0) + 1);
   });
   return { labels, points: keys.map((key) => counts.get(key) ?? 0) };
+}
+
+function formatTimestamp(value: string | null | undefined): string {
+  return formatDateTime(value, { fallback: "—" });
 }
 
 export default function OverviewPage() {
@@ -329,6 +334,11 @@ export default function OverviewPage() {
                     <div className="muted" style={{ fontSize: "14px" }}>
                       {run.store_id || "auto-store"} / {run.phone || "auto-user"}
                     </div>
+                    <div className="muted" style={{ fontSize: "13px", marginTop: "4px" }}>
+                      Created: {formatTimestamp(run.created_at)}
+                      {run.started_at ? ` · Started: ${formatTimestamp(run.started_at)}` : ""}
+                      {run.finished_at ? ` · Finished: ${formatTimestamp(run.finished_at)}` : ""}
+                    </div>
                   </div>
                 </Link>
               ))}
@@ -350,6 +360,9 @@ export default function OverviewPage() {
                       <span className={`alert-pill severity-${alert.severity}`}>{alert.severity}</span>
                     </div>
                     <div className="muted" style={{ fontSize: "14px" }}>{alert.message}</div>
+                    <div className="muted" style={{ fontSize: "13px", marginTop: "4px" }}>
+                      Alert time: {formatTimestamp(alert.created_at)}
+                    </div>
                   </div>
                 </Link>
               ))}

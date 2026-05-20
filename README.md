@@ -57,6 +57,7 @@ python3 -m unittest tests.test_simulate.FlowReliabilityPolicyTests -v
 
 On **Runs → {id} → Overview**, **Failed Events** uses the same failure rules as `GET /api/v1/runs/{id}/metrics`. **Critical Findings** shows server/API/websocket availability failures; **Operational Findings** shows other failed ledger events and non-critical artifact issues (not order-rejection or payment-failure action counts—those are separate KPIs). See [SIMULATOR_GUIDE.md](SIMULATOR_GUIDE.md) for details.
 Run artifact paths (`report.md`, `story.md`, `events.json`) are hydrated from run logs, including long wrapped path lines from launcher console output.
+On **Overview**, **Attention Queue** and **Alerts** rows now include explicit date/time stamps for easier triage ordering.
 
 ## Archive-First Delete/Restore
 

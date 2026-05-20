@@ -135,8 +135,8 @@ Redirects to `/overview` when a session cookie exists, otherwise `/auth/login`.
 - **Recent run outcomes** — **Last succeeded** and **Last failed** from dashboard API (quick links to run detail).
 - **Stat cards** — Total runs, success rate, active runs, failed (24h), schedules count, alert count.
 - **Charts** — Status donut, success split, flow distribution, 7-day failure sparkline, archive/purge backlog bars, schedule health donut.
-- **Attention queue** — Active or failed runs (links to `/runs/{id}`).
-- **Alerts** — Top operational alerts with links.
+- **Attention queue** — Active or failed runs (links to `/runs/{id}`) with created/started/finished date-time stamps.
+- **Alerts** — Top operational alerts with links and alert date-time stamps.
 - **Platform / Archive / Retention** panels — Policies and queue depths; **Platform** clarifies **`/healthz`** scope.
 
 **Refresh:** Data loads once on mount (no auto-poll on Overview).
