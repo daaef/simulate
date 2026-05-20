@@ -149,7 +149,7 @@ Redirects to `/overview` when a session cookie exists, otherwise `/auth/login`.
 
 - **Header strip** — Title, theme, profile, **API health** note (healthz scope), link to Overview flow ladder.
 - **Run statistics** — Status + flow distribution bars; optional **Last succeeded / Last failed** panels when API returns highlights.
-- **Start Run** (`CollapsibleSection`) — `RunLaunchPanel` + `RunLiveConsole`. Plan dropdown (`sim_actors.json` + `runs/gui-plans/*`), flow/mode/suite/scenario controls gated by `/api/v1/flows`, command preview, websocket gate checkbox, random-actor checkboxes (`Disable random phone`, `Disable random store`), advanced overrides. In Advanced Mode Overrides, `Scenarios (trace only)` is a searchable chips multiselect (typeahead + keyboard nav) limited to supported flow scenarios.
+- **Start Run** (`CollapsibleSection`) — `RunLaunchPanel` + `RunLiveConsole`. Plan dropdown (`sim_actors.json` + `runs/gui-plans/*`), flow/mode/suite/scenario controls gated by `/api/v1/flows`, command preview, websocket gate checkbox, random-actor checkboxes (`Disable random phone`, `Disable random store`), advanced overrides. In Advanced Mode Overrides, `Scenarios (trace only)` is a searchable chips multiselect (typeahead + keyboard nav) limited to supported flow scenarios. After a successful manual start, launcher actor overrides reset to plan-default auto-random mode for the next run.
 - **Saved profiles** — CRUD and launch saved configurations (behavior preserved; labels improved only under observability work).
 - **Recent runs table** — Select run, open detail, actions.
 - **Admin dashboard embed** — Role-gated operator tools when permitted.
@@ -359,7 +359,7 @@ Richer plans can also carry non-sensitive defaults:
 
 Keep these out of plan JSON: keys containing `secret`, `token`, `password`, `api_key`, or `private_key`. Plan validation rejects them. Stripe secret keys, cached auth tokens, test-user passwords, and deployment URLs stay in `.env`.
 
-Keep normal simulator behavior out of `.env`. Phone/store selection, delivery GPS, runtime defaults, fixture/menu defaults, payment mode/coupon defaults, review defaults, and new-user names/email belong in `sim_actors.json` or the selected GUI plan. If GUI Phone/Store fields are blank, each run now randomly selects from plan `users[]` / `stores[]` by default. Explicit `--phone` / `--store` still wins, and `--no-random-phone` / `--no-random-store` disable random defaults for that run.
+Keep normal simulator behavior out of `.env`. Phone/store selection, delivery GPS, runtime defaults, fixture/menu defaults, payment mode/coupon defaults, review defaults, and new-user names/email belong in `sim_actors.json` or the selected GUI plan. If GUI Phone/Store fields are blank, each run now randomly selects from plan `users[]` / `stores[]` by default. Explicit `--phone` / `--store` still wins, and `--no-random-phone` / `--no-random-store` disable random defaults for that run. API-launched runs intentionally ignore `.env` actor pins unless the run request passes explicit actor overrides.
 
 Admins can edit GUI-owned plans at `Config` in the web UI. The saved `path` field is launchable from the Runs page and from CLI:
 
@@ -1370,8 +1370,8 @@ GitHub deployment webhook automation:
 - Supported events:
   - `deployment_status` with `state=success` (required fields in payload); other states/events are rejected for launches.
   - `workflow_run` with `action=completed` and `workflow_run.conclusion=success`; repository must be allowlisted and `(project, environment)` must map to a profile (same mapping table as deployments). **Runs created from `workflow_run` are stored with `trigger_source=github`**, `trigger_label` `GitHub integration: {project}/{environment}`, merged `trigger_context` (profile name, repository, workflow summary, `github_event: workflow_run`), and `integration_trigger_id` pointing at the `integration_triggers` row—same style as deployment-triggered runs, so the Runs page and overview chips show GitHub rather than a dashboard profile launch.
-- Security: HMAC verification via `X-Hub-Signature-256` using project-specific signing secrets. Prefer **Config → Integration → Webhook Projects** (stored encrypted in `integration_webhook_projects`); legacy env JSON `SIMULATOR_WEBHOOK_PROJECT_SECRETS` still merges as fallback (DB values override env keys with the same name).
-- Repository guardrail: repository must match an allowlisted `owner/repo` for the resolved project. Configure repositories in **Webhook Projects** or legacy env `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` (merged; DB repos append to env lists per project).
+- Security: HMAC verification via `X-Hub-Signature-256` using project-specific signing secrets from the persistent webhook config file (`SIMULATOR_WEBHOOK_PROJECTS_FILE`, default `/workspace/simulate/data/webhook-projects.json`). Manage projects in **Config → Integration → Webhook Projects**; changes auto-sync to GitHub `SIMULATOR_WEBHOOK_PROJECT_SECRETS` when `SIMULATOR_GITHUB_CONFIG_TOKEN` is set on the API.
+- Repository guardrail: repository must match an allowlisted `owner/repo` for the resolved project. Configure repositories in **Webhook Projects** (synced to `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` on the simulator repo).
 - Profile routing: simulator maps `(project, route key)` to a saved run profile through `integration_profile_mappings`. The route key column is named `environment` in the API/DB. By default it is GitHub’s deployment environment (`deployment.environment` on `deployment_status`, or `SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT` / `production` on `workflow_run`). Set `SIMULATOR_WEBHOOK_ROUTE_BY=branch` to route by git ref instead (`workflow_run.head_branch` or `deployment.ref`, normalized to lowercase).
 - Idempotency key: `project + environment + deployment_id + sha`; duplicate webhook deliveries do not launch duplicate runs.
 - Lifecycle states recorded per trigger: `validated`, `queued`, `launched`, `completed`/`failed`, `rejected`, `duplicate`.
@@ -1379,11 +1379,14 @@ GitHub deployment webhook automation:
 
 Webhook project setup (GUI):
 
-1. Open **Config → Integration**.
-2. Under **Webhook Projects**, enter the project key (same name used in mappings, for example `dashboard`) and allowed `owner/repo` lines.
-3. Click **Generate webhook secret**, then **Copy secret** and paste it into the upstream repository GitHub webhook **Secret** field.
-4. Copy the displayed webhook URL into the upstream webhook **Payload URL**.
-5. Add **Integration Mappings** for `(project, environment or branch)` → run profile.
+1. Add repository secret `SIMULATOR_GITHUB_CONFIG_TOKEN` (fine-grained PAT with Actions read/write on this simulator repo) so the UI can auto-sync GitHub maps.
+2. Open **Config → Integration → Webhook Projects**.
+3. Enter the project key (same name used in mappings, for example `dashboard`) and allowed `owner/repo` lines.
+4. Click **Generate webhook secret**, then **Copy secret** and paste it into the upstream repository GitHub webhook **Secret** field.
+5. Confirm **Synced to GitHub** (or use the manual `gh` fallback commands if sync is skipped).
+6. Copy the webhook URL into the upstream webhook **Payload URL**.
+7. Add **Integration Mappings** for `(project, environment or branch)` → run profile.
+8. Run deploy (or wait for push to `main`) so host `.env` picks up the updated GitHub secret and variable.
 
 Operational APIs:
 

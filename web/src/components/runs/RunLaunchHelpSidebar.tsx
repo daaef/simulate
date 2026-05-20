@@ -211,8 +211,16 @@ function ResolvedScopeBlock({
 
   const rows: Array<{ label: string; value: string; source?: string }> = [
     { label: "Plan", value: scope.planPath },
-    { label: "Store", value: scope.storeId || "(unset)", source: formatActorSource(scope.storeSource) },
-    { label: "Phone", value: scope.phone || "(unset)", source: formatActorSource(scope.phoneSource) },
+    {
+      label: "Store",
+      value: scope.storeSource === "random_plan_pool" ? "random from plan pool" : (scope.storeId || "(unset)"),
+      source: formatActorSource(scope.storeSource),
+    },
+    {
+      label: "Phone",
+      value: scope.phoneSource === "random_plan_pool" ? "random from plan pool" : (scope.phone || "(unset)"),
+      source: formatActorSource(scope.phoneSource),
+    },
     {
       label: "User scope",
       value:

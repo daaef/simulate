@@ -29,6 +29,7 @@ python3 -m simulate doctor --plan sim_actors.json --timing fast
 - Explicit CLI flags (`--mode`, `--suite`, repeated `--scenario`) override flow preset defaults.
 - In trace mode, `--suite` and repeated `--scenario` can be combined: suite scenarios resolve first, then explicit scenarios are appended (deduped in order).
 - By default, each run randomly selects phone and store from the selected plan (`users[]`, `stores[]`). Use `--phone`/`--store` for explicit selection, or disable random defaults with `--no-random-phone` and `--no-random-store`.
+- In the web launcher, successful manual starts reset Store/Phone to `Plan default` and clear random-disable flags for the next run.
 
 ## Failure Policy Defaults
 
@@ -81,4 +82,4 @@ On **Overview**, **Attention Queue** and **Alerts** rows now include explicit da
 - Run-efficiency playbook: [docs/SIMULATION_TEST_GUIDE.md](docs/SIMULATION_TEST_GUIDE.md)
 - GUI testing checklist: [docs/GUI_TESTING.md](docs/GUI_TESTING.md)
 - GUI presentation / personal demo checklist: [docs/GUI_PERSONAL_DEMO_CHECKLIST.md](docs/GUI_PERSONAL_DEMO_CHECKLIST.md)
-- GitHub webhook projects (generate signing secrets in **Config → Integration**): [SIMULATOR_GUIDE.md](SIMULATOR_GUIDE.md#production-deployment-operations)
+- GitHub webhook projects (file-backed config + auto-sync to GitHub secrets in **Config → Integration**): [SIMULATOR_GUIDE.md](SIMULATOR_GUIDE.md#production-deployment-operations)

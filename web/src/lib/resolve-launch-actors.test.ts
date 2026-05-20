@@ -49,12 +49,24 @@ describe("resolveLaunchActors", () => {
 
   it("resolves empty store from plan defaults", () => {
     const scope = resolveLaunchActors(baseForm, fixturePlan, "trace");
-    expect(scope?.storeId).toBe("FZY_926025");
-    expect(scope?.storeSource).toBe("plan_default");
+    expect(scope?.storeId).toBe("");
+    expect(scope?.storeSource).toBe("random_plan_pool");
   });
 
   it("resolves empty phone from plan defaults", () => {
     const scope = resolveLaunchActors(baseForm, fixturePlan, "trace");
+    expect(scope?.phone).toBe("");
+    expect(scope?.phoneSource).toBe("random_plan_pool");
+  });
+
+  it("resolves deterministic store when random-store is disabled", () => {
+    const scope = resolveLaunchActors({ ...baseForm, extra_args: ["--no-random-store"] }, fixturePlan, "trace");
+    expect(scope?.storeId).toBe("FZY_926025");
+    expect(scope?.storeSource).toBe("plan_default");
+  });
+
+  it("resolves deterministic phone when random-phone is disabled", () => {
+    const scope = resolveLaunchActors({ ...baseForm, extra_args: ["--no-random-phone"] }, fixturePlan, "trace");
     expect(scope?.phone).toBe("+2348166675609");
     expect(scope?.phoneSource).toBe("plan_default");
   });
@@ -64,7 +76,7 @@ describe("resolveLaunchActors", () => {
       ...fixturePlan,
       defaults: { store_id: "FZY_926025" },
     };
-    const scope = resolveLaunchActors(baseForm, plan, "trace");
+    const scope = resolveLaunchActors({ ...baseForm, extra_args: ["--no-random-phone"] }, plan, "trace");
     expect(scope?.phone).toBe("+2349077777740");
     expect(scope?.phoneSource).toBe("plan_first_user");
   });
@@ -74,7 +86,7 @@ describe("resolveLaunchActors", () => {
       ...fixturePlan,
       defaults: { user_phone: "+2348166675609" },
     };
-    const scope = resolveLaunchActors(baseForm, plan, "trace");
+    const scope = resolveLaunchActors({ ...baseForm, extra_args: ["--no-random-store"] }, plan, "trace");
     expect(scope?.storeId).toBe("FZY_111");
     expect(scope?.storeSource).toBe("plan_first_store");
   });

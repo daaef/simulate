@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  clearRandomActorFlags,
   NO_RANDOM_PHONE_FLAG,
   NO_RANDOM_STORE_FLAG,
   hasNoRandomPhone,
@@ -33,5 +34,15 @@ describe("random-actor-args helpers", () => {
     const once = setNoRandomPhone([NO_RANDOM_PHONE_FLAG], true);
     const twice = setNoRandomPhone(once, true);
     expect(twice.filter((item) => item === NO_RANDOM_PHONE_FLAG)).toHaveLength(1);
+  });
+
+  it("clears both random-disable flags while preserving unrelated args", () => {
+    const cleaned = clearRandomActorFlags([
+      "--strict-plan",
+      NO_RANDOM_PHONE_FLAG,
+      NO_RANDOM_STORE_FLAG,
+      "--skip-app-probes",
+    ]);
+    expect(cleaned).toEqual(["--strict-plan", "--skip-app-probes"]);
   });
 });

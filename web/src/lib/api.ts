@@ -558,16 +558,17 @@ export type GitHubIntegrationTrigger = {
   [key: string]: unknown;
 };
 
+export type WebhookGithubSyncCommands = {
+  secret: string;
+  allowlist: string;
+};
+
 export type IntegrationWebhookProject = {
-  id: number;
   project: string;
   secret_hint: string;
   repositories: string[];
-  status?: string;
-  archived_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
-  created_by_user_id?: number | null;
   source?: string;
   secret?: string;
   secret_display_once?: boolean;
@@ -576,6 +577,16 @@ export type IntegrationWebhookProject = {
 export type IntegrationWebhookProjectsPayload = {
   projects: IntegrationWebhookProject[];
   webhook_url: string;
+};
+
+export type IntegrationWebhookProjectMutationResponse = {
+  project: IntegrationWebhookProject;
+  webhook_url: string;
+  sync_status?: "ok" | "failed" | "skipped";
+  sync_error?: string | null;
+  sync_message?: string | null;
+  sync_commands?: WebhookGithubSyncCommands;
+  deleted?: boolean;
 };
 
 export type IntegrationWebhookProjectCreateRequest = {
@@ -1266,22 +1277,17 @@ export async function fetchGitHubIntegrationTriggers(
   );
 }
 
-export async function fetchIntegrationWebhookProjects(
-  includeArchived = false
-): Promise<IntegrationWebhookProjectsPayload> {
+export async function fetchIntegrationWebhookProjects(): Promise<IntegrationWebhookProjectsPayload> {
   return unwrap<IntegrationWebhookProjectsPayload>(
-    await fetch(
-      `/api/v1/integrations/github/projects?include_archived=${includeArchived ? "true" : "false"}`,
-      withSession()
-    ),
+    await fetch("/api/v1/integrations/github/projects", withSession()),
     "integration-webhook-projects"
   );
 }
 
 export async function createIntegrationWebhookProject(
   request: IntegrationWebhookProjectCreateRequest
-): Promise<{ project: IntegrationWebhookProject; webhook_url: string }> {
-  return unwrap<{ project: IntegrationWebhookProject; webhook_url: string }>(
+): Promise<IntegrationWebhookProjectMutationResponse> {
+  return unwrap<IntegrationWebhookProjectMutationResponse>(
     await fetch("/api/v1/integrations/github/projects", {
       method: "POST",
       ...withSession(),
@@ -1293,8 +1299,8 @@ export async function createIntegrationWebhookProject(
 
 export async function rotateIntegrationWebhookProjectSecret(
   project: string
-): Promise<{ project: IntegrationWebhookProject; webhook_url: string }> {
-  return unwrap<{ project: IntegrationWebhookProject; webhook_url: string }>(
+): Promise<IntegrationWebhookProjectMutationResponse> {
+  return unwrap<IntegrationWebhookProjectMutationResponse>(
     await fetch(`/api/v1/integrations/github/projects/${encodeURIComponent(project)}/rotate-secret`, {
       method: "POST",
       ...withSession(),
@@ -1306,8 +1312,8 @@ export async function rotateIntegrationWebhookProjectSecret(
 export async function updateIntegrationWebhookProjectRepositories(
   project: string,
   repositories: string[]
-): Promise<{ project: IntegrationWebhookProject; webhook_url: string }> {
-  return unwrap<{ project: IntegrationWebhookProject; webhook_url: string }>(
+): Promise<IntegrationWebhookProjectMutationResponse> {
+  return unwrap<IntegrationWebhookProjectMutationResponse>(
     await fetch(`/api/v1/integrations/github/projects/${encodeURIComponent(project)}/repositories`, {
       method: "PATCH",
       ...withSession(),
@@ -1317,14 +1323,14 @@ export async function updateIntegrationWebhookProjectRepositories(
   );
 }
 
-export async function archiveIntegrationWebhookProject(
+export async function deleteIntegrationWebhookProject(
   project: string
-): Promise<{ project: IntegrationWebhookProject; archived: boolean }> {
-  return unwrap<{ project: IntegrationWebhookProject; archived: boolean }>(
+): Promise<IntegrationWebhookProjectMutationResponse> {
+  return unwrap<IntegrationWebhookProjectMutationResponse>(
     await fetch(`/api/v1/integrations/github/projects/${encodeURIComponent(project)}`, {
       method: "DELETE",
       ...withSession(),
     }),
-    "integration-webhook-project-archive"
+    "integration-webhook-project-delete"
   );
 }

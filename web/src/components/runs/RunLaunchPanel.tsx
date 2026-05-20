@@ -20,7 +20,6 @@ import {
   setNoRandomStore,
 } from "../../lib/random-actor-args";
 import type { LauncherFieldId } from "../../lib/run-launcher-config";
-import { listPlanUsers, userActorKey } from "../../lib/plan-actor-options";
 import LaunchActorSelect from "./LaunchActorSelect";
 import { launcherFieldFocusHandlers, notifyLauncherField } from "./RunLaunchHelpSidebar";
 import ScenarioChipsMultiSelect from "./ScenarioChipsMultiSelect";
@@ -45,9 +44,6 @@ interface RunLaunchPanelProps {
   canCancelSelectedRun: boolean;
   planOptions?: SimulationPlan[];
   planContent?: SimulationPlanContent | null;
-  rotateEnabled?: boolean;
-  rotateCount?: number;
-  onRotateToggle?: (enabled: boolean) => void;
 }
 
 function CollapseButton({
@@ -106,17 +102,9 @@ export default function RunLaunchPanel({
   canCancelSelectedRun,
   planOptions = [],
   planContent = null,
-  rotateEnabled = false,
-  rotateCount = 0,
-  onRotateToggle,
 }: RunLaunchPanelProps) {
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const manualLoadIntervalRef = useRef<number | undefined>(undefined);
-  const planUserPhoneCount = useMemo(
-    () => listPlanUsers(planContent).map((u) => userActorKey(u)).filter(Boolean).length,
-    [planContent],
-  );
-  const canRotate = !form.all_users && planUserPhoneCount > 1;
   const noRandomPhone = hasNoRandomPhone(form.extra_args);
   const noRandomStore = hasNoRandomStore(form.extra_args);
   const capability = useMemo(() => flowCapabilities[form.flow] || null, [flowCapabilities, form.flow]);
@@ -338,30 +326,6 @@ export default function RunLaunchPanel({
                 />
                 Disable random phone
               </label>
-              <label
-                className="checkbox"
-                style={{ marginTop: 6, opacity: canRotate ? 1 : 0.5 }}
-                title={
-                  form.all_users
-                    ? "Disabled when All Users is on"
-                    : planUserPhoneCount <= 1
-                      ? "Needs 2+ phones in the plan to rotate"
-                      : "Automatically pick a different phone after every 3 runs"
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={rotateEnabled}
-                  disabled={!canRotate}
-                  onChange={(e) => onRotateToggle?.(e.target.checked)}
-                />
-                Rotate / 3 runs
-              </label>
-              {rotateEnabled && canRotate ? (
-                <small className="muted" style={{ display: "block", marginTop: 2 }}>
-                  Run {rotateCount + 1} / 3
-                </small>
-              ) : null}
             </div>
             {isLoadMode ? (
               <label {...focus("users")}>

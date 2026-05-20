@@ -75,12 +75,14 @@ Set repository variables:
 
 5. Configure GitHub webhook integration:
    - `SIMULATOR_EXTERNAL_BASE_URL` (public HTTPS base URL, for example `https://simulator.example.com`)
-   - **Recommended:** after deploy, sign in to the simulator UI → **Config → Integration → Webhook Projects** to generate per-project signing secrets and repository allowlists (stored encrypted in the simulator database). No VPS `printenv` or manual GitHub secret JSON editing required for new projects.
-   - **Legacy (optional):** `SIMULATOR_WEBHOOK_PROJECT_SECRETS` GitHub secret JSON map (merged with DB; DB wins on key collision):
+   - `SIMULATOR_GITHUB_CONFIG_TOKEN` — repository Actions **secret**: fine-grained PAT (Actions read/write) on `Fainzy-Technologies/simulator`. Passed to the API by deploy for automatic sync when you use **Webhook Projects** in the UI.
+   - Optional: `SIMULATOR_GITHUB_CONFIG_REPO` (default `Fainzy-Technologies/simulator`), `SIMULATOR_WEBHOOK_PROJECTS_FILE` (default `/workspace/simulate/data/webhook-projects.json` on the persistent volume).
+   - **Webhook Projects UI:** after deploy, use **Config → Integration → Webhook Projects** to add projects; the API writes `webhook-projects.json` and updates `SIMULATOR_WEBHOOK_PROJECT_SECRETS` + `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` on GitHub. No VPS `printenv` or manual JSON editing for new projects.
+   - `SIMULATOR_WEBHOOK_PROJECT_SECRETS` and `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` are still written into host `.env` on each deploy from GitHub (populated by UI sync). Example shapes:
      ```json
      {"backend":"<secret>","mobile":"<secret>","store":"<secret>","robot":"<secret>"}
      ```
-   - **Legacy (optional):** `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` repository variable JSON map (merged with DB repos):
+   - `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` repository variable JSON map:
      ```json
      {
        "backend":["org/backend-repo"],

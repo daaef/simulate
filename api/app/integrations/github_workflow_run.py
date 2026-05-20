@@ -33,15 +33,15 @@ def _json_env(name: str, default: Any) -> Any:
 
 
 def _github_project_secrets() -> dict[str, str]:
-    from .webhook_config import merged_project_secrets
+    from .webhook_config import project_secrets
 
-    return merged_project_secrets()
+    return project_secrets()
 
 
 def _github_repo_allowlist() -> dict[str, list[str]]:
-    from .webhook_config import merged_repo_allowlist
+    from .webhook_config import repo_allowlist
 
-    return merged_repo_allowlist()
+    return repo_allowlist()
 
 
 @contextmanager

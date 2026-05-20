@@ -16,6 +16,7 @@ import {
   storeActorKey,
   userActorKey,
 } from "./plan-actor-options";
+import { hasNoRandomPhone, hasNoRandomStore } from "./random-actor-args";
 
 export type LauncherFieldId =
   | "flow"
@@ -148,13 +149,13 @@ const FIELD_META: Record<
   store: {
     title: "Store ID",
     whenToChange:
-      "Pin a specific store from the plan when you are not using auto-selection. Must exist in the plan’s stores[] and authenticate in the target environment.",
+      "Leave blank for random plan-store selection. Set a value only when you need to pin a specific store from plan stores[].",
     flagKey: "--store",
   },
   phone: {
     title: "Phone",
     whenToChange:
-      "Pin a specific user phone from the plan. Required for returning-user branches; use a fresh phone for strict new-user scenarios.",
+      "Leave blank for random plan-phone selection. Set a value only when you need to pin a specific user phone.",
     flagKey: "--phone",
   },
   users: {
@@ -388,12 +389,18 @@ export function getSelectedOptionHelp(
   if (fieldId === "store" || fieldId === "phone") {
     const text = String(value ?? "").trim();
     if (!text) {
+      const randomDisabled = fieldId === "store"
+        ? hasNoRandomStore(context.form.extra_args)
+        : hasNoRandomPhone(context.form.extra_args);
       return {
         valueLabel: "Plan default",
-        description:
-          fieldId === "store"
-            ? "Uses the plan’s default store selection when the run needs one."
-            : "Uses the plan’s default user phone when the run needs one.",
+        description: randomDisabled
+          ? fieldId === "store"
+            ? "Deterministic actor resolution: uses defaults.store_id, then first store in plan."
+            : "Deterministic actor resolution: uses defaults.user_phone, then first user in plan."
+          : fieldId === "store"
+            ? "Auto-random actor resolution: runtime picks a random store from plan stores[]."
+            : "Auto-random actor resolution: runtime picks a random phone from plan users[].",
       };
     }
 
@@ -580,7 +587,8 @@ export function getLauncherFieldHelp(
         {
           value: "",
           label: "Plan default",
-          description: "Uses defaults.store_id or the first store in the plan when the run needs one.",
+          description:
+            "Default behavior is random selection from plan stores[]. If random is disabled, fallback is defaults.store_id then first store.",
         },
         ...stores
           .filter((store) => storeActorKey(store))
@@ -606,7 +614,8 @@ export function getLauncherFieldHelp(
         {
           value: "",
           label: "Plan default",
-          description: "Uses defaults.user_phone or the first user in the plan when the run needs one.",
+          description:
+            "Default behavior is random selection from plan users[]. If random is disabled, fallback is defaults.user_phone then first user.",
         },
         ...users
           .filter((user) => userActorKey(user))

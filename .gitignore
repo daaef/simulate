@@ -1,5 +1,6 @@
 .env
 .env.prod
+data/webhook-projects.json
 __pycache__/
 /runs/
 .venv

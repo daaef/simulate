@@ -1,6 +1,13 @@
 import type { RunCreateRequest, SimulationPlanContent } from "./api";
+import { hasNoRandomPhone, hasNoRandomStore } from "./random-actor-args";
 
-export type ActorSource = "form" | "plan_default" | "plan_first_store" | "plan_first_user" | "plan_runtime_default";
+export type ActorSource =
+  | "form"
+  | "random_plan_pool"
+  | "plan_default"
+  | "plan_first_store"
+  | "plan_first_user"
+  | "plan_runtime_default";
 
 export type ResolvedLaunchScope = {
   planPath: string;
@@ -77,6 +84,8 @@ export function formatActorSource(source: ActorSource): string {
   switch (source) {
     case "form":
       return "form override";
+    case "random_plan_pool":
+      return "random from plan pool";
     case "plan_default":
       return "plan default";
     case "plan_first_store":
@@ -105,12 +114,17 @@ export function resolveLaunchActors(
 
   const explicitStore = String(form.store_id ?? "").trim();
   const explicitPhone = String(form.phone ?? "").trim();
+  const disableRandomStore = hasNoRandomStore(form.extra_args);
+  const disableRandomPhone = hasNoRandomPhone(form.extra_args);
 
   let storeId = "";
   let storeSource: ActorSource = "plan_first_store";
   if (explicitStore) {
     storeId = explicitStore;
     storeSource = "form";
+  } else if (!disableRandomStore && stores.length > 0) {
+    storeId = "";
+    storeSource = "random_plan_pool";
   } else {
     const defaultStoreId = defaults.store_id != null ? String(defaults.store_id) : "";
     if (defaultStoreId) {
@@ -128,6 +142,9 @@ export function resolveLaunchActors(
   if (explicitPhone) {
     phone = explicitPhone;
     phoneSource = "form";
+  } else if (!disableRandomPhone && users.length > 0) {
+    phone = "";
+    phoneSource = "random_plan_pool";
   } else {
     const defaultPhone = defaults.user_phone != null ? String(defaults.user_phone) : "";
     if (defaultPhone) {
@@ -164,11 +181,23 @@ export function resolveLaunchActors(
   return scope;
 }
 
+function actorValueForDisplay(
+  value: string,
+  source: ActorSource,
+): string {
+  if (source === "random_plan_pool") {
+    return "random from plan pool";
+  }
+  return value || "unset";
+}
+
 export function buildResolvedScopeLines(scope: ResolvedLaunchScope): string[] {
+  const storeValue = actorValueForDisplay(scope.storeId, scope.storeSource);
+  const phoneValue = actorValueForDisplay(scope.phone, scope.phoneSource);
   const lines: string[] = [
     `Plan: ${scope.planPath}`,
-    `Store: ${scope.storeId || "(unset)"} (${formatActorSource(scope.storeSource)})`,
-    `Phone: ${scope.phone || "(unset)"} (${formatActorSource(scope.phoneSource)})`,
+    `Store: ${storeValue} (${formatActorSource(scope.storeSource)})`,
+    `Phone: ${phoneValue} (${formatActorSource(scope.phoneSource)})`,
     scope.userScope === "all_plan_users"
       ? `User scope: all ${scope.planUserCount} users in plan`
       : `User scope: single user (${scope.planUserCount} users in plan)`,
@@ -184,10 +213,12 @@ export function buildResolvedScopeLines(scope: ResolvedLaunchScope): string[] {
 }
 
 export function buildResolvedScopeSummaryLine(scope: ResolvedLaunchScope): string {
+  const storeValue = actorValueForDisplay(scope.storeId, scope.storeSource);
+  const phoneValue = actorValueForDisplay(scope.phone, scope.phoneSource);
   const parts = [
     `Plan ${scope.planPath}`,
-    `store ${scope.storeId || "unset"}`,
-    `phone ${scope.phone || "unset"}`,
+    `store ${storeValue}`,
+    `phone ${phoneValue}`,
   ];
   if (scope.userScope === "all_plan_users") {
     parts.push(`all ${scope.planUserCount} plan users`);

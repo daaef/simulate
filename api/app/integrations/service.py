@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sqlite3
 from collections.abc import Callable
 from typing import Any
 
@@ -10,7 +9,8 @@ from .models import (
     IntegrationWebhookProjectCreateRequest,
     IntegrationWebhookProjectRepositoriesRequest,
 )
-from . import project_secrets as project_secrets_store
+from . import github_webhook_sync
+from . import webhook_projects_store as store
 
 _runtime: dict[str, Callable[..., Any]] = {}
 
@@ -65,8 +65,15 @@ def _attach_webhook_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def list_webhook_projects(include_archived: bool = False) -> dict[str, Any]:
-    return _attach_webhook_metadata(project_secrets_store.list_projects(include_archived=include_archived))
+def _with_github_sync(payload: dict[str, Any]) -> dict[str, Any]:
+    secrets_map, allowlist_map = store.export_github_payloads()
+    sync_result = github_webhook_sync.sync_to_github(secrets_map, allowlist_map)
+    payload.update(sync_result)
+    return _attach_webhook_metadata(payload)
+
+
+def list_webhook_projects() -> dict[str, Any]:
+    return _attach_webhook_metadata({"projects": store.list_projects()})
 
 
 def create_webhook_project(
@@ -74,34 +81,30 @@ def create_webhook_project(
     user_id: int | None,
 ) -> dict[str, Any]:
     try:
-        created = project_secrets_store.create_project(
+        created = store.create_project(
             project=request.project,
             repositories=request.repositories,
-            user_id=user_id,
         )
-    except sqlite3.IntegrityError as exc:
-        raise ValueError("project_already_exists") from exc
-    except Exception as exc:
-        if exc.__class__.__name__ == "UniqueViolation":
+    except ValueError as exc:
+        if str(exc) == "project_already_exists":
             raise ValueError("project_already_exists") from exc
         raise
-    return _attach_webhook_metadata(created)
+    return _with_github_sync(created)
 
 
 def rotate_webhook_project_secret(project: str, user_id: int | None) -> dict[str, Any]:
-    return _attach_webhook_metadata(
-        project_secrets_store.rotate_project_secret(project, user_id=user_id)
-    )
+    rotated = store.rotate_project_secret(project)
+    return _with_github_sync(rotated)
 
 
 def update_webhook_project_repositories(
     project: str,
     request: IntegrationWebhookProjectRepositoriesRequest,
 ) -> dict[str, Any]:
-    return _attach_webhook_metadata(
-        project_secrets_store.update_project_repositories(project, request.repositories)
-    )
+    updated = store.update_project_repositories(project, request.repositories)
+    return _with_github_sync(updated)
 
 
-def archive_webhook_project(project: str) -> dict[str, Any]:
-    return project_secrets_store.archive_project(project)
+def delete_webhook_project(project: str) -> dict[str, Any]:
+    deleted = store.delete_project(project)
+    return _with_github_sync(deleted)

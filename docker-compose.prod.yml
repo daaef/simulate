@@ -52,6 +52,9 @@ services:
       SIMULATOR_EXTERNAL_BASE_URL: ${SIMULATOR_EXTERNAL_BASE_URL:-}
       SIMULATOR_WEBHOOK_PROJECT_SECRETS: ${SIMULATOR_WEBHOOK_PROJECT_SECRETS:?SIMULATOR_WEBHOOK_PROJECT_SECRETS is required}
       SIMULATOR_WEBHOOK_REPO_ALLOWLIST: ${SIMULATOR_WEBHOOK_REPO_ALLOWLIST:?SIMULATOR_WEBHOOK_REPO_ALLOWLIST is required}
+      SIMULATOR_GITHUB_CONFIG_TOKEN: ${SIMULATOR_GITHUB_CONFIG_TOKEN:-}
+      SIMULATOR_GITHUB_CONFIG_REPO: ${SIMULATOR_GITHUB_CONFIG_REPO:-Fainzy-Technologies/simulator}
+      SIMULATOR_WEBHOOK_PROJECTS_FILE: ${SIMULATOR_WEBHOOK_PROJECTS_FILE:-/workspace/simulate/data/webhook-projects.json}
       SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT: ${SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT:-production}
       SIMULATOR_WEBHOOK_ROUTE_BY: ${SIMULATOR_WEBHOOK_ROUTE_BY:-environment}
       SIMULATOR_GITHUB_STATUS_CONTEXT: ${SIMULATOR_GITHUB_STATUS_CONTEXT:-simulator/verification}
@@ -65,6 +68,7 @@ services:
     volumes:
       - simulator_runs_data:/workspace/simulate/runs
       - simulator_gui_plans_data:/workspace/simulate/runs/gui-plans
+      - simulator_webhook_config_data:/workspace/simulate/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,3 +121,4 @@ volumes:
   simulator_postgres_data:
   simulator_runs_data:
   simulator_gui_plans_data:
+  simulator_webhook_config_data:

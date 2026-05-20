@@ -28,3 +28,9 @@ export function setNoRandomPhone(extraArgs: string[] | undefined, disabled: bool
 export function setNoRandomStore(extraArgs: string[] | undefined, disabled: boolean): string[] {
   return setFlag(extraArgs, NO_RANDOM_STORE_FLAG, disabled);
 }
+
+export function clearRandomActorFlags(extraArgs: string[] | undefined): string[] {
+  return normalise(extraArgs).filter(
+    (item) => item !== NO_RANDOM_PHONE_FLAG && item !== NO_RANDOM_STORE_FLAG,
+  );
+}

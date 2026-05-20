@@ -144,12 +144,25 @@ describe("getSelectedOptionHelp", () => {
   });
 
   it("returns plan default label when store and phone are empty", () => {
-    expect(getSelectedOptionHelp("store", context({ planContent: fixturePlan }))?.valueLabel).toBe(
-      "Plan default",
+    const store = getSelectedOptionHelp("store", context({ planContent: fixturePlan }));
+    const phone = getSelectedOptionHelp("phone", context({ planContent: fixturePlan }));
+    expect(store?.valueLabel).toBe("Plan default");
+    expect(phone?.valueLabel).toBe("Plan default");
+    expect(store?.description.toLowerCase()).toContain("auto-random");
+    expect(phone?.description.toLowerCase()).toContain("auto-random");
+  });
+
+  it("describes deterministic actor resolution when random flags are disabled", () => {
+    const store = getSelectedOptionHelp(
+      "store",
+      context({ planContent: fixturePlan, form: { ...baseForm, extra_args: ["--no-random-store"] } }),
     );
-    expect(getSelectedOptionHelp("phone", context({ planContent: fixturePlan }))?.valueLabel).toBe(
-      "Plan default",
+    const phone = getSelectedOptionHelp(
+      "phone",
+      context({ planContent: fixturePlan, form: { ...baseForm, extra_args: ["--no-random-phone"] } }),
     );
+    expect(store?.description.toLowerCase()).toContain("deterministic");
+    expect(phone?.description.toLowerCase()).toContain("deterministic");
   });
 
   it("returns detail rows when a plan store is selected", () => {

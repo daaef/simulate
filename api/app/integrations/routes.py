@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..auth.policies import require_permission
 from .models import (
@@ -45,7 +45,7 @@ async def github_deployment_complete(request: Request) -> dict[str, Any]:
 
 @router.get("/api/v1/integrations/github/mappings")
 def list_mappings(
-    include_archived: bool = Query(default=False),
+    include_archived: bool = False,
     current_user: dict = Depends(require_permission("system", "read")),
 ) -> dict[str, Any]:
     return service.list_mappings(include_archived)
@@ -77,8 +77,8 @@ def restore_mapping(
 
 @router.get("/api/v1/integrations/github/triggers")
 def list_triggers(
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
+    limit: int = 50,
+    offset: int = 0,
     current_user: dict = Depends(require_permission("system", "read")),
 ) -> dict[str, Any]:
     return service.list_triggers(limit, offset)
@@ -86,10 +86,9 @@ def list_triggers(
 
 @router.get("/api/v1/integrations/github/projects")
 def list_webhook_projects(
-    include_archived: bool = Query(default=False),
     current_user: dict = Depends(require_permission("system", "read")),
 ) -> dict[str, Any]:
-    return service.list_webhook_projects(include_archived)
+    return service.list_webhook_projects()
 
 
 @router.post("/api/v1/integrations/github/projects")
@@ -133,11 +132,11 @@ def update_webhook_project_repositories(
 
 
 @router.delete("/api/v1/integrations/github/projects/{project}")
-def archive_webhook_project(
+def delete_webhook_project(
     project: str,
     current_user: dict = Depends(require_permission("system", "configure")),
 ) -> dict[str, Any]:
     try:
-        return service.archive_webhook_project(project)
+        return service.delete_webhook_project(project)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Webhook project not found.") from exc

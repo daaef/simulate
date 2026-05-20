@@ -385,9 +385,6 @@ def _init_db() -> None:
             )
             """
         )
-        from .integrations.project_secrets import ensure_schema_sqlite
-
-        ensure_schema_sqlite(conn)
         _migrate_db(conn)
 
 
@@ -499,9 +496,6 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE integration_triggers ADD COLUMN deployment_status_id TEXT")
     if trigger_columns and "github_status_url" not in trigger_columns:
         conn.execute("ALTER TABLE integration_triggers ADD COLUMN github_status_url TEXT")
-    from .integrations.project_secrets import ensure_schema_sqlite
-
-    ensure_schema_sqlite(conn)
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_run_profiles_catalog_slug ON run_profiles(catalog_slug) WHERE catalog_slug IS NOT NULL"
     )
@@ -696,9 +690,6 @@ def _migrate_postgres_schema() -> None:
                 )
                 """
             )
-            from .integrations.project_secrets import ensure_schema_postgres
-
-            ensure_schema_postgres(cursor)
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE")
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'")
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE")
@@ -2155,6 +2146,28 @@ def _build_execution_snapshot(request: RunCreateRequest, command: list[str], cre
     }
 
 
+def _has_extra_arg(extra_args: list[str] | None, flag: str) -> bool:
+    return any(str(item).strip() == flag for item in (extra_args or []))
+
+
+def _launch_env_overrides_for_request(request: RunCreateRequest) -> dict[str, str]:
+    overrides: dict[str, str] = {
+        "USER_PHONE_NUMBER": "",
+        "STORE_ID": "",
+        "SIM_DISABLE_RANDOM_PHONE": "0",
+        "SIM_DISABLE_RANDOM_STORE": "0",
+    }
+    if request.phone:
+        overrides["USER_PHONE_NUMBER"] = str(request.phone)
+    if request.store_id:
+        overrides["STORE_ID"] = str(request.store_id)
+    if _has_extra_arg(request.extra_args, "--no-random-phone"):
+        overrides["SIM_DISABLE_RANDOM_PHONE"] = "1"
+    if _has_extra_arg(request.extra_args, "--no-random-store"):
+        overrides["SIM_DISABLE_RANDOM_STORE"] = "1"
+    return overrides
+
+
 def _profile_request_to_run_request(profile: dict[str, Any]) -> RunCreateRequest:
     return RunCreateRequest(
         flow=profile["flow"],
@@ -2394,11 +2407,25 @@ def _hydrate_run_artifacts(run: dict[str, Any]) -> dict[str, Any]:
     return run
 
 
-def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
+def _run_simulation(
+    run_id: int,
+    command: list[str],
+    log_path: Path,
+    launch_env_overrides: dict[str, str] | None = None,
+) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     _update_run(run_id, status="running", started_at=_utc_now(), log_path=str(log_path))
     # Truncate any previous content for this run-id log file.
     log_path.write_text("", encoding="utf-8")
+    process_env = {
+        **os.environ,
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "TERM": os.getenv("TERM", "xterm-256color"),
+    }
+    if launch_env_overrides:
+        process_env.update(launch_env_overrides)
+
     process = subprocess.Popen(
         command,
         cwd=SIMULATOR_WORKDIR,
@@ -2407,12 +2434,7 @@ def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
         text=True,
         encoding="utf-8",
         errors="replace",
-        env={
-            **os.environ,
-            "PYTHONUNBUFFERED": "1",
-            "PYTHONIOENCODING": "utf-8",
-            "TERM": os.getenv("TERM", "xterm-256color"),
-        },
+        env=process_env,
     )
     with RUN_LOCK:
         RUN_PROCESSES[run_id] = process
@@ -2503,6 +2525,7 @@ def _run_simulation(run_id: int, command: list[str], log_path: Path) -> None:
 
 def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dict[str, Any]:
     command = _build_command(request)
+    launch_env_overrides = _launch_env_overrides_for_request(request)
     created_at = _utc_now()
     execution_snapshot = _build_execution_snapshot(request, command, created_at)
     persisted_user_id = _resolve_persisted_user_id(user_id)
@@ -2602,7 +2625,9 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"run-{run_id}.log"
     thread = threading.Thread(
-        target=_run_simulation, args=(run_id, command, log_path), daemon=True
+        target=_run_simulation,
+        args=(run_id, command, log_path, launch_env_overrides),
+        daemon=True,
     )
     thread.start()
     return _get_run(run_id)

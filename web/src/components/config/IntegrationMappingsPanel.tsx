@@ -273,7 +273,7 @@ export default function IntegrationMappingsPanel() {
             Route successful GitHub webhooks to saved simulator run profiles. Routing mode on this server:{" "}
             <strong>{routeBy === "branch" ? "git branch" : "deployment environment"}</strong> (set{" "}
             <code>SIMULATOR_WEBHOOK_ROUTE_BY</code> in the API environment). Configure signing secrets and repository
-            allowlists in <strong>Webhook Projects</strong> above; legacy env JSON values still merge as fallback.
+            allowlists in <strong>Webhook Projects</strong> above (synced to GitHub automatically when configured).
           </p>
         </div>
 

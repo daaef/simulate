@@ -505,6 +505,35 @@ class RunExecutionSnapshotTests(unittest.TestCase):
         self.assertIn("--scenario app_bootstrap", snapshot["command"])
         self.assertIn("--enforce-websocket-gates", snapshot["command"])
 
+    def test_create_run_passes_launch_env_overrides_to_runner_thread(self) -> None:
+        class _FakeThread:
+            instances: list["_FakeThread"] = []
+
+            def __init__(self, target=None, args=(), daemon=None):
+                self.target = target
+                self.args = args
+                self.daemon = daemon
+                _FakeThread.instances.append(self)
+
+            def start(self) -> None:
+                return None
+
+        request = web_api.RunCreateRequest(
+            flow="doctor",
+            plan="sim_actors.json",
+            timing="fast",
+        )
+
+        with mock.patch.object(web_api.threading, "Thread", _FakeThread):
+            web_api._create_run(request)
+
+        self.assertTrue(_FakeThread.instances)
+        launch_env_overrides = _FakeThread.instances[-1].args[3]
+        self.assertEqual(launch_env_overrides["USER_PHONE_NUMBER"], "")
+        self.assertEqual(launch_env_overrides["STORE_ID"], "")
+        self.assertEqual(launch_env_overrides["SIM_DISABLE_RANDOM_PHONE"], "0")
+        self.assertEqual(launch_env_overrides["SIM_DISABLE_RANDOM_STORE"], "0")
+
     def test_build_command_rejects_invalid_mode_combinations(self) -> None:
         with self.assertRaises(web_api.HTTPException) as trace_continuous:
             web_api._build_command(
@@ -541,6 +570,34 @@ class RunExecutionSnapshotTests(unittest.TestCase):
                 )
             )
         self.assertIn("between 0.0 and 1.0", str(bad_reject.exception.detail))
+
+    def test_launch_env_overrides_default_to_random_actor_selection(self) -> None:
+        request = web_api.RunCreateRequest(
+            flow="doctor",
+            plan="sim_actors.json",
+            timing="fast",
+            extra_args=[],
+        )
+        overrides = web_api._launch_env_overrides_for_request(request)
+        self.assertEqual(overrides["USER_PHONE_NUMBER"], "")
+        self.assertEqual(overrides["STORE_ID"], "")
+        self.assertEqual(overrides["SIM_DISABLE_RANDOM_PHONE"], "0")
+        self.assertEqual(overrides["SIM_DISABLE_RANDOM_STORE"], "0")
+
+    def test_launch_env_overrides_preserve_explicit_actor_and_random_flags(self) -> None:
+        request = web_api.RunCreateRequest(
+            flow="doctor",
+            plan="sim_actors.json",
+            timing="fast",
+            store_id="FZY_123",
+            phone="+2348000000000",
+            extra_args=["--no-random-phone", "--no-random-store"],
+        )
+        overrides = web_api._launch_env_overrides_for_request(request)
+        self.assertEqual(overrides["USER_PHONE_NUMBER"], "+2348000000000")
+        self.assertEqual(overrides["STORE_ID"], "FZY_123")
+        self.assertEqual(overrides["SIM_DISABLE_RANDOM_PHONE"], "1")
+        self.assertEqual(overrides["SIM_DISABLE_RANDOM_STORE"], "1")
 
 
 class FlowCapabilitiesTests(unittest.TestCase):
@@ -2683,25 +2740,39 @@ class IntegrationWebhookProjectsApiTests(unittest.TestCase):
         self.auth_enabled_patch.start()
         self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
         self.auth_manager_patch.start()
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._projects_file = pathlib.Path(self._tmpdir.name) / "webhook-projects.json"
+        self._env_patch = mock.patch.dict(
+            os.environ,
+            {
+                "SIMULATOR_WEBHOOK_PROJECTS_FILE": str(self._projects_file),
+                "SIMULATOR_WEBHOOK_PROJECT_SECRETS": "{}",
+                "SIMULATOR_WEBHOOK_REPO_ALLOWLIST": "{}",
+                "SIMULATOR_GITHUB_CONFIG_TOKEN": "",
+            },
+            clear=False,
+        )
+        self._env_patch.start()
+        self._sync_patch = mock.patch(
+            "api.app.integrations.github_webhook_sync.sync_to_github",
+            return_value={
+                "sync_status": "skipped",
+                "sync_error": None,
+                "sync_commands": {
+                    "secret": "gh secret set SIMULATOR_WEBHOOK_PROJECT_SECRETS --repo test/repo --body '{}'",
+                    "allowlist": "gh variable set SIMULATOR_WEBHOOK_REPO_ALLOWLIST --repo test/repo --body '{}'",
+                },
+            },
+        )
+        self._sync_patch.start()
         self.client = TestClient(web_api.app)
         login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
         assert login.status_code == 200
-        self._old_allowlist = (
-            dict(web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST)
-            if isinstance(web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST, dict)
-            else {}
-        )
-        self._old_secrets = (
-            dict(web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS)
-            if isinstance(web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS, dict)
-            else {}
-        )
-        web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST = {}
-        web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS = {}
 
     def tearDown(self) -> None:
-        web_api.SIMULATOR_WEBHOOK_REPO_ALLOWLIST = self._old_allowlist
-        web_api.SIMULATOR_WEBHOOK_PROJECT_SECRETS = self._old_secrets
+        self._sync_patch.stop()
+        self._env_patch.stop()
+        self._tmpdir.cleanup()
         self.client.close()
         self.auth_manager_patch.stop()
         self.auth_enabled_patch.stop()
@@ -2722,10 +2793,12 @@ class IntegrationWebhookProjectsApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(create_response.status_code, 200)
-        created = create_response.json()["project"]
+        created_body = create_response.json()
+        created = created_body["project"]
         self.assertEqual(created["project"], project_name)
         self.assertTrue(created.get("secret"))
         self.assertTrue(created.get("secret_display_once"))
+        self.assertIn("sync_commands", created_body)
 
         list_response = self.client.get("/api/v1/integrations/github/projects")
         self.assertEqual(list_response.status_code, 200)
@@ -2748,7 +2821,26 @@ class IntegrationWebhookProjectsApiTests(unittest.TestCase):
         )
         self.assertEqual(second.status_code, 409)
 
-    def test_deployment_webhook_uses_database_project_secret(self) -> None:
+    def test_delete_webhook_project(self) -> None:
+        project_name = f"del-project-{time.time_ns()}"
+        self.assertEqual(
+            self.client.post(
+                "/api/v1/integrations/github/projects",
+                json={"project": project_name, "repositories": []},
+            ).status_code,
+            200,
+        )
+        delete_response = self.client.delete(f"/api/v1/integrations/github/projects/{project_name}")
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertTrue(delete_response.json().get("deleted"))
+
+        recreate = self.client.post(
+            "/api/v1/integrations/github/projects",
+            json={"project": project_name, "repositories": []},
+        )
+        self.assertEqual(recreate.status_code, 200)
+
+    def test_deployment_webhook_uses_file_project_secret(self) -> None:
         suffix = str(time.time_ns())
         project_name = f"db-secret-{suffix}"
         repo = f"org/db-secret-{suffix}"

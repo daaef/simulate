@@ -396,7 +396,7 @@ def apply_actor_selection(
     if explicit_user_phone:
         selected_user = _select_actor_user(
             users,
-            user_role=None,
+            role=None,
             phone=explicit_user_phone,
             randomize=False,
         )
@@ -425,14 +425,14 @@ def apply_actor_selection(
         ):
             selected_user = _select_actor_user(
                 users,
-                user_role=None,
+                role=None,
                 phone=str(USER_PHONE_NUMBER),
                 randomize=False,
             )
         else:
             selected_user = _select_actor_user(
                 users,
-                user_role=None,
+                role=None,
                 phone=None,
                 randomize=True,
             )
