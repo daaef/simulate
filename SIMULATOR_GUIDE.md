@@ -36,7 +36,11 @@ Use **trace** (or **`doctor`**, which runs in trace mode) when you need proof th
 
 - **APIs (REST and similar):** Scenarios issue real requests: place and mutate orders, run `app_bootstrap` and `store_dashboard` probes, menu checks, payment paths, store setup, and so on. Failures (for example 5xx, timeouts, auth errors) are recorded in the run ledger and summarized in `report.md` / `story.md` / `events.json` for that run.
 - **Websockets:** When the resolved scenario list includes **order-driving** scenarios (for example `completed`, `rejected`, `cancelled`, payment and robot completion paths, `receipt_review_reorder`), trace attaches a **`WebsocketObserver`**. That component **only opens the same socket URLs the apps use and receives messages**—it does **not** send app traffic to impersonate a user or store on those sockets. **Active** order-driving traffic still comes from the normal simulator paths (user / store / robot simulators and REST-driven steps). The observer is a **passive listener** used for **evidence** (coverage, recorded frames, optional gates).
-- **Websocket gate enforcement:** With enforcement **off** (default), missing or late socket events are usually **warnings** and the scenario can continue—good for signal without blocking every run. With enforcement **on** (`SIM_ENFORCE_WEBSOCKET_GATES`, CLI flags, plan `rules`, or Runs **Enforce Websocket Gates**), required status events must arrive within the configured window or the run **fails**—a stricter check when you care whether “HTTP succeeded but realtime never showed up.”
+- **Websocket gate enforcement:** With enforcement **on** (`SIM_ENFORCE_WEBSOCKET_GATES`, CLI flags, plan `rules`, or Runs **Enforce Websocket Gates**), required channels must be active at startup and remain recoverable during runtime, or the run fails immediately.
+- **Order lifecycle contract (always on):** For any standard run that creates orders, success now requires both:
+  1. every created order ends in exactly `completed`, `rejected`, or `cancelled`;
+  2. websocket lifecycle proof exists for order progression (pending + driven intermediate statuses + terminal status). Missing/late lifecycle proof is run-failing.
+- **Pending-order seed exception:** `place-order` is the only trace flow allowed to leave orders open. It places 1-10 orders, requires pending websocket proof, records `pending_order_seeded`, and skips cleanup so a real store operator can inspect or act on those pending orders.
 - **Full scenario and flag matrix:** See [docs/SIMULATOR_CAPABILITIES.md](docs/SIMULATOR_CAPABILITIES.md) for every scenario name, suite, and launcher field.
 
 ### Trace scenarios and flags (process truth)
@@ -46,12 +50,14 @@ Use **trace** (or **`doctor`**, which runs in trace mode) when you need proof th
 | `completed` | Full happy path through robot completion |
 | `rejected` | Store rejects before payment |
 | `cancelled` | Customer cancels while pending |
-| `auto_cancel` | Backend timeout cancellation without store action |
+| `place_order` | Seeds pending order(s) for manual store-app inspection; intentionally leaves them pending |
+| `backend_auto_cancel` | Store idle on pending, countdown ticks, observe `cancelled` (primary backend auto-cancel diagnostic) |
+| `auto_cancel` | Store accept, withhold payment, awaiting-payment countdown ticks, observe `cancelled` (optional; may time out if backend only cancels pending) |
 | `app_bootstrap` | Config, product auth, pricing, cards, coupons, active orders |
 | `store_dashboard` | Store orders, statistics, top customers |
 | `receipt_review_reorder` | Receipt PDF, review, reorder fetch after completion |
 
-**Websocket gates:** See **Trace mode and websocket evidence** above for how trace exercises APIs and passively observes sockets. In short: `SIM_ENFORCE_WEBSOCKET_GATES` default **off** (Runs checkbox off) records gate issues as **warnings** and continues; **on** = fail fast when required socket events are missing—stricter **Down** signal, more noise. **`SIM_STRICT_PLAN` / `rules.strict_plan`:** rejects invalid plans after any fallback—can flip a run from “best effort” to **Down** if the plan is wrong.
+**Websocket gates:** See **Trace mode and websocket evidence** above for how trace exercises APIs and passively observes sockets. In short: `SIM_ENFORCE_WEBSOCKET_GATES` default **off** keeps startup/runtime gates advisory, while **on** blocks run start until `user_orders` + `store_orders` + `store_stats` are active and fails if required channels stay degraded beyond retry window. Regardless of this toggle, order-producing runs still require websocket lifecycle proof for final success.
 **Failure policy:** Default run policy is `SIM_FAILURE_POLICY=api_only` with `SIM_PREFLIGHT_STRATEGY=auto_recover`. In this mode, transport/timeouts/websocket-connect/HTTP 5xx are hard failures, while most precondition misses (for example coupon unavailable, user GPS fallback required, already-setup new-user phone) downgrade scenarios to degraded/unsupported instead of failing the whole run.
 
 ### Flow reliability and named-flow regression
@@ -191,7 +197,7 @@ Each launcher control now includes an example hint. Typical examples:
 | Store ID | `FZY_926025` |
 | Phone | `+2348166675609` |
 | Users | `5` |
-| Orders | `50` |
+| Orders | `50` for load, `3` for `place-order` |
 | Interval | `3` |
 | Reject rate | `0.10` |
 | Continuous | on for soak tests |
@@ -270,7 +276,7 @@ Start Run now reads flow capabilities from `GET /api/v1/flows` and conditionally
 Advanced Mode Overrides are optional and let operators explicitly set `--mode`, `--suite`, and repeated `--scenario` flags; command preview and actual runtime resolution honor those explicit overrides over flow defaults.
 When both `--suite` and repeated `--scenario` are provided in trace mode, suite scenarios resolve first, then explicit scenarios are appended (deduped in order).
 The `Scenarios (trace only)` control in Advanced Mode Overrides is a searchable chips multiselect. It only allows scenarios returned by the selected flow capability (no free-text custom scenario values).
-Trace-context fields in the launcher: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, `enforce_websocket_gates`.
+Trace-context fields in the launcher: `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `post_order_actions`, `enforce_websocket_gates`, `timeout_fails`.
 Load-context fields in the launcher: `users`, `orders`, `interval`, `reject`, `continuous`, `all_users`, plus shared store/phone/provision controls.
 
 Load user-assignment semantics:
@@ -293,8 +299,13 @@ Run scope enforcement is strict to the selected plan:
 - If both selected plan and fallback plan fail, the run exits with a combined error showing both failures.
 - Strict mode still applies after fallback: when `--strict-plan` (or `rules.strict_plan=true`) is active, whichever plan is used must satisfy strict validation.
 - Trace/doctor order scenarios use **websocket-first gating** for progression (see **Trace mode and websocket evidence** in Operator observability for the passive observer model). The simulator waits for required websocket status events before each next action (store accept/reject, payment progression, ready, robot lifecycle, terminal state).
-- Websocket gate enforcement is configurable and defaults to off. With enforcement off, gate timeout/source failures are recorded as warnings and scenarios continue. With enforcement on, gate failures fail fast and stop downstream actions.
+- Websocket gate enforcement is configurable and defaults to off. With enforcement on, the run blocks at startup until `user_orders`, `store_orders`, and `store_stats` are connected, then fails fast if required channels drop past the retry window.
+- Universal order closure guard is always on for order-producing runs: every created order must end in `completed`, `rejected`, or `cancelled`.
+- End-of-run cleanup is automatic for non-terminal orders: short settle wait, then cancel-first/reject-fallback cleanup attempts, then re-check. Any unresolved order fails the run.
+- Websocket lifecycle proof is required for order-producing success even when gate enforcement is off.
 - Controls: env `SIM_ENFORCE_WEBSOCKET_GATES=false` (default), CLI `--enforce-websocket-gates` / `--no-enforce-websocket-gates`, and Runs UI checkbox `Enforce Websocket Gates`.
+- Timeout failure policy is configurable and defaults to off. With timeout-fails off, HTTP requests wait indefinitely for endpoint responses. With timeout-fails on, request timeout protection is enforced and timeout events fail the run.
+- Controls: env `SIM_TIMEOUT_FAILS=false` (default), CLI `--timeout-fails`, and Runs UI checkbox `Timeout Fails`.
 
 ## Plan-Backed Configuration
 
@@ -323,6 +334,8 @@ Richer plans can also carry non-sensitive defaults:
     "flow": "doctor",
     "mode": "trace",
     "trace_suite": "doctor",
+    "trace_scenarios": ["backend_auto_cancel", "auto_cancel"],
+    "store_auto_cancel_seconds": 120,
     "timing_profile": "fast",
     "users": 1,
     "orders": 1,
@@ -335,6 +348,8 @@ Richer plans can also carry non-sensitive defaults:
     "run_app_probes": true,
     "run_store_dashboard_probes": true,
     "run_post_order_actions": false,
+    "run_enforce_websocket_gates": false,
+    "run_timeout_fails": false,
     "auto_select_store": true,
     "auto_select_coupon": true,
     "auto_provision_fixtures": true
@@ -356,6 +371,8 @@ Richer plans can also carry non-sensitive defaults:
   "stores": [{"store_id": "FZY_586940", "subentity_id": 6}]
 }
 ```
+
+Trace scenarios such as `backend_auto_cancel` and `auto_cancel` belong in `runtime_defaults.trace_scenarios` (or the Runs page scenario multiselect / catalog profile `scenarios`), not in `rules`. The `rules` block is boolean simulator behavior (`run_app_probes`, `strict_plan`, etc.). Use `runtime_defaults.store_auto_cancel_seconds` to override the awaiting-payment observe window for `auto_cancel` (no env var).
 
 Keep these out of plan JSON: keys containing `secret`, `token`, `password`, `api_key`, or `private_key`. Plan validation rejects them. Stripe secret keys, cached auth tokens, test-user passwords, and deployment URLs stay in `.env`.
 
@@ -379,6 +396,7 @@ All rows below are supported flow presets exposed by CLI help.
 | `payments` | `trace` + suite `payments` | Paid no-coupon, paid with coupon, free with coupon payment routing | Stripe for paid branches; coupon for coupon branches (or auto-select coupon) | `--timing`, `--phone`, `--store`, `--no-auto-provision` | Same |
 | `menus` | `trace` + suite `menus` | Menu availability behavior (available/unavailable/sold-out/store-closed) | Valid fixtures (store + menu); auto-provision can repair missing setup/menu | `--timing`, `--store`, `--no-auto-provision` | Same |
 | `new-user` | `trace` + scenario `new_user_setup` | OTP + create-user path and first-time setup assertions | Phone in plan not fully onboarded (or backend forcing create path) | `--phone`, `--timing`, `--store`, `--no-auto-provision` | Same |
+| `place-order` | `trace` + scenario `place_order` | Seeds live pending order(s) for manual store-app inspection | Plan with at least one usable user and store | `--orders` 1..10, `--store`, `--phone`, `--timing` | Same |
 | `paid-no-coupon` | `trace` + scenario `returning_paid_no_coupon` | Standard paid checkout route | Stripe key and valid fixtures | `--timing`, `--phone`, `--store`, `--post-order-actions` | Same |
 | `paid-coupon` | `trace` + scenario `returning_paid_with_coupon` | Coupon checkout path with paid endpoint unless coupon fully covers total | Coupon configured/available (or auto-select coupon enabled) | `--timing`, `--phone`, `--store`, `--no-auto-provision` | Same |
 | `free-coupon` | `trace` + scenario `returning_free_with_coupon` | Coupon path targeting free-order behavior | Coupon configured/available (or auto-select coupon enabled) | `--timing`, `--phone`, `--store`, `--no-auto-provision` | Same |
@@ -404,6 +422,7 @@ This section enumerates every supported command family and value set (flow prese
 | `python3 -m simulate payments --plan sim_actors.json` | Payment-only suite (paid/coupon/free-coupon). |
 | `python3 -m simulate menus --plan sim_actors.json` | Menu behavior suite (available/unavailable/sold-out/store-closed). |
 | `python3 -m simulate new-user --plan sim_actors.json` | Runs only new-user setup path. |
+| `python3 -m simulate place-order --plan sim_actors.json --orders 3` | Seeds three pending live orders for manual store-app inspection. |
 | `python3 -m simulate paid-no-coupon --plan sim_actors.json` | Runs paid checkout without coupon. |
 | `python3 -m simulate paid-coupon --plan sim_actors.json` | Runs paid checkout with coupon path. |
 | `python3 -m simulate free-coupon --plan sim_actors.json` | Runs free-with-coupon path. |
@@ -434,7 +453,9 @@ This section enumerates every supported command family and value set (flow prese
 | `python3 -m simulate --mode trace --scenario completed --plan sim_actors.json` | End-to-end successful order flow. |
 | `python3 -m simulate --mode trace --scenario rejected --plan sim_actors.json` | Store reject flow. |
 | `python3 -m simulate --mode trace --scenario cancelled --plan sim_actors.json` | User cancel flow. |
-| `python3 -m simulate --mode trace --scenario auto_cancel --plan sim_actors.json` | Backend auto-cancel diagnostic flow. |
+| `python3 -m simulate --mode trace --scenario place_order --plan sim_actors.json --orders 3` | Seeds pending live orders and leaves them open for manual inspection. |
+| `python3 -m simulate --mode trace --scenario backend_auto_cancel --plan sim_actors.json` | Pending idle + observe backend/customer cancel (primary). |
+| `python3 -m simulate --mode trace --scenario auto_cancel --plan sim_actors.json` | Awaiting-payment countdown + observe cancel (optional diagnostic). |
 | `python3 -m simulate --mode trace --scenario new_user_setup --plan sim_actors.json` | New-user setup flow. |
 | `python3 -m simulate --mode trace --scenario returning_paid_no_coupon --plan sim_actors.json` | Returning paid, no coupon flow. |
 | `python3 -m simulate --mode trace --scenario returning_paid_with_coupon --plan sim_actors.json` | Returning paid with coupon flow. |
@@ -550,7 +571,7 @@ Expected outcomes:
 Common failure signatures:
 
 - Setup/menu gating failures if auto-provision is off and fixtures are missing.
-- Websocket assertion warnings for missing expected status events.
+- Websocket lifecycle proof failures (missing/late order status evidence).
 
 ### 3.3 `python3 -m simulate --mode trace --scenario <scenario> ...`
 
@@ -620,13 +641,15 @@ Common failure signatures:
 | `--skip-app-probes` | boolean | `false` | Disables user-side non-order probes | Affects `app_bootstrap`/doctor/full/audit evidence depth |
 | `--skip-store-dashboard-probes` | boolean | `false` | Disables store dashboard probes | Affects `store_dashboard` coverage |
 | `--post-order-actions` | boolean | from plan/env | Enables receipt/review/reorder after completed orders | Can create real review/receipt records |
-| `--enforce-websocket-gates` / `--no-enforce-websocket-gates` | boolean | from plan/env (`SIM_ENFORCE_WEBSOCKET_GATES=false`) | Controls whether websocket gate failures fail the scenario or are bypassed with warning evidence | Trace/doctor websocket progression behavior |
+| `--enforce-websocket-gates` / `--no-enforce-websocket-gates` | boolean | from plan/env (`SIM_ENFORCE_WEBSOCKET_GATES=false`) | When enabled, startup blocks until required websocket channels are active and runtime drops fail after retry window | Trace/doctor websocket progression behavior |
+| `--timeout-fails` | boolean | from plan/env (`SIM_TIMEOUT_FAILS=false`) | Enables request timeout enforcement and fails the run on timeout events | When off, HTTP requests wait indefinitely |
 | `--no-auto-provision` | boolean | `false` | Disables automatic setup/category/menu repair path | Sets `SIM_AUTO_PROVISION_FIXTURES=false` for run |
 
 Policy env controls:
 - `SIM_FAILURE_POLICY=api_only|strict` (default `api_only`)
 - `SIM_PREFLIGHT_STRATEGY=auto_recover|skip_warn|hard_stop` (default `auto_recover`)
-- Plan equivalents: `rules.failure_policy`, `rules.preflight_strategy`
+- `SIM_TIMEOUT_FAILS=true|false` (default `false`)
+- Plan equivalents: `rules.failure_policy`, `rules.preflight_strategy`, `rules.run_timeout_fails` / `rules.timeout_fails`
 
 ## 5) What We Test (Coverage Map)
 
@@ -709,7 +732,7 @@ Probe status policy:
   - `enroute_delivery`: `0.2s .. 0.6s`
   - `robot_arrived_for_delivery`: `0.2s .. 0.4s`
   - `completed`: `0.2s .. 0.3s`
-- Auto-cancel wait: `30s`
+- Awaiting-payment observe window: `30s` (override in plan `runtime_defaults.store_auto_cancel_seconds`)
 
 `--timing realistic`:
 
@@ -721,7 +744,7 @@ Probe status policy:
   - `enroute_delivery`: `30s .. 120s`
   - `robot_arrived_for_delivery`: `5s .. 20s`
   - `completed`: `2s .. 8s`
-- Auto-cancel wait: `180s`
+- Awaiting-payment observe window: `120s` (override in plan `runtime_defaults.store_auto_cancel_seconds`)
 
 ## 7) Store Behavior When `setup=true`
 
@@ -939,9 +962,9 @@ Catalog profiles and catalog-backed schedules are now deletable/archivable. On u
 
 `bounded-load-smoke` is a **phased bounded load** profile: `users`, `orders`, `interval`, and `reject` are set on the profile row (passed to the CLI as `--users`, `--orders`, `--interval`, `--reject`). It enforces a completed-order baseline first (`>=1`) before reject/cancel tail pressure. If baseline cannot be met within the configured bound, the run fails with `accepted_baseline_not_met`.
 
-Run rows include a `control` object (`can_stop`, `can_delete`, `actively_running`) so the GUI only enables **Stop** for runs that are `running` with a live process and log activity, and **Delete** for all other runs (including orphaned `running` rows after API restart).
+Run rows include durable ownership fields (`process_pid`, `launcher_instance_id`, `last_heartbeat_at`, `ownership_state`) plus a `control` object (`can_stop`, `can_delete`, `actively_running`, detached-process details). The GUI enables **Stop** only for attached live runs and blocks delete when detached liveness recovery proves the simulator process is still active.
 
-While a CLI run is finishing, the API worker sets terminal status from the subprocess exit code as soon as `wait()` returns, then enriches the row with artifact paths and resolved `store_id` / phone. Orphan reconciliation does not mark a run `failed` during the short post-exit window unless the log is idle; if the log already contains `main: report:` (including Rich-colored console lines), reconciliation finalizes as `succeeded` instead of `orphaned_run_no_live_process`.
+While a CLI run is finishing, the API worker sets terminal status from the subprocess exit code as soon as `wait()` returns, then enriches the row with artifact paths and resolved `store_id` / phone. Reconciliation now attempts detached-process recovery (PID + command/log identity checks) before failing. If no terminal log evidence exists and detached ownership is dead after grace windows, the run fails with `detached_process_dead_no_terminal_evidence`.
 
 Key endpoints:
 
@@ -997,7 +1020,7 @@ Campaign-first schedule payload:
 }
 ```
 
-Manual trigger launches runs immediately through the saved profile path and records a schedule execution row.
+Manual trigger launches runs immediately through the saved profile path and records a schedule execution row. Identical active schedule/profile/command launches are serialized; skipped overlaps are recorded with execution status `overlap_skipped`.
 
 #### Field Reference and Validation
 
@@ -1064,7 +1087,7 @@ Manual trigger launches runs immediately through the saved profile path and reco
 #### Recent Executions Statuses
 
 Recent Executions in `/schedules` renders one current-state card per schedule:
-- Schedule phase chip: `Queued`/`Starting`/`Run launched`/`Launch failed` from latest schedule execution lifecycle.
+- Schedule phase chip: `Queued`/`Starting`/`Run launched`/`Overlap skipped`/`Launch failed` from latest schedule execution lifecycle.
 - Run status chip: latest linked run status (`Queued`, `Running`, `Succeeded`, `Failed`, `Cancelled`) from the actual run row.
 
 Cards are fully clickable to run detail when a latest run exists, with a `View run` hover tooltip; if no run exists yet, the card remains non-clickable and shows `No run created yet`.

@@ -2,13 +2,14 @@
 
 import FindingsPanel from "../../overview/FindingsPanel";
 import RunActionCountsPanel from "../RunActionCountsPanel";
-import type { RunFindings, RunMetrics } from "../../../lib/api";
+import type { RunFindings, RunFindingsMeta, RunMetrics } from "../../../lib/api";
 
 interface RunDetailOverviewProps {
   metrics: RunMetrics | null;
   runStatus: string;
   runError: string | null;
   findings: RunFindings;
+  findingsMeta?: RunFindingsMeta | null;
 }
 
 function MetricsGrid({ metrics }: { metrics: RunMetrics }) {
@@ -66,8 +67,20 @@ function TopList({
   );
 }
 
-export default function RunDetailOverview({ metrics, runStatus, runError, findings }: RunDetailOverviewProps) {
+export default function RunDetailOverview({
+  metrics,
+  runStatus,
+  runError,
+  findings,
+  findingsMeta,
+}: RunDetailOverviewProps) {
   const topActors = metrics ? Object.entries(metrics.top_actors).sort((a, b) => b[1] - a[1]) : [];
+  const failedEvents = metrics?.failed_events ?? findingsMeta?.failed_events_total ?? 0;
+  const findingsShown =
+    findingsMeta?.findings_rows_shown ?? findings.critical.length + findings.operational.length;
+  const showFindingsTruncationBanner =
+    Boolean(findingsMeta?.truncated) ||
+    (failedEvents > 0 && findingsShown < failedEvents);
 
   return (
     <>
@@ -102,6 +115,14 @@ export default function RunDetailOverview({ metrics, runStatus, runError, findin
           </div>
         ) : null}
         {!runError && runStatus === "failed" && !metrics ? <p className="muted">Run failed before metrics were recorded.</p> : null}
+        {showFindingsTruncationBanner ? (
+          <div className="panel" style={{ borderColor: "#f59e0b", color: "#92400e" }}>
+            <strong>Findings coverage:</strong> {failedEvents} failed event
+            {failedEvents === 1 ? "" : "s"} in this run; showing {findingsShown} finding row
+            {findingsShown === 1 ? "" : "s"} below. Open the <strong>Traffic</strong> tab for the full event
+            ledger (filter for failed steps).
+          </div>
+        ) : null}
       </div>
 
       <div className="grid two" style={{ alignItems: "start", gap: 12 }}>

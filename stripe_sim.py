@@ -34,6 +34,8 @@ async def create_payment_intent(
     order_ref: str,
     order_db_id: int,
     amount: float,
+    store_subentity_id: int,
+    currency: str,
     recorder: RunRecorder,
     scenario: str,
     step: str,
@@ -45,11 +47,11 @@ async def create_payment_intent(
         )
 
     body: dict[str, Any] = {
-        "currency": config.STORE_CURRENCY,
+        "currency": str(currency).lower(),
         "amount": round(amount),
         "order_id": order_ref,
         "payment_method_types": "card",
-        "subentity_id": config.SUBENTITY_ID,
+        "subentity_id": int(store_subentity_id),
         "save_card": config.SIM_SAVE_CARD,
     }
     if config.SIM_COUPON_ID is not None:
@@ -80,7 +82,8 @@ async def create_payment_intent(
             auth_scheme="Token",
             details={
                 "amount": round(amount),
-                "currency": config.STORE_CURRENCY,
+                "currency": str(currency).lower(),
+                "subentity_id": int(store_subentity_id),
                 "payment_method": config.STRIPE_TEST_PAYMENT_METHOD,
             },
         )
@@ -181,6 +184,8 @@ async def pay_order(
     order_ref: str,
     order_db_id: int,
     amount: float,
+    store_subentity_id: int,
+    currency: str,
     recorder: RunRecorder,
     scenario: str,
     step: str,
@@ -193,6 +198,8 @@ async def pay_order(
             order_ref=order_ref,
             order_db_id=order_db_id,
             amount=amount,
+            store_subentity_id=store_subentity_id,
+            currency=currency,
             recorder=recorder,
             scenario=scenario,
             step=f"{step}_create_intent",

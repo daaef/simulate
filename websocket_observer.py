@@ -15,6 +15,7 @@ import config
 from reporting import RunRecorder
 
 console = Console()
+REQUIRED_WEBSOCKET_SOURCES = frozenset({"user_orders", "store_orders", "store_stats"})
 
 
 def _websocket_root() -> str:
@@ -111,6 +112,7 @@ class WebsocketObserver:
         self._connection_errors: dict[str, int] = {}
         self._event_lock = asyncio.Lock()
         self._event_notifier = asyncio.Event()
+        self._coverage_notifier = asyncio.Event()
         self._order_events: list[dict[str, Any]] = []
         self.coverage = {
             "user_orders": {
@@ -135,6 +137,28 @@ class WebsocketObserver:
             "matched_order_events": 0,
             "missed_order_events": 0,
         }
+
+    def required_sources(self) -> set[str]:
+        return set(REQUIRED_WEBSOCKET_SOURCES)
+
+    def connected_sources(self, sources: set[str] | None = None) -> set[str]:
+        required = set(sources or REQUIRED_WEBSOCKET_SOURCES)
+        return {
+            source
+            for source in required
+            if self.coverage.get(source, {}).get("status") == "connected"
+        }
+
+    def missing_sources(self, sources: set[str] | None = None) -> set[str]:
+        required = set(sources or REQUIRED_WEBSOCKET_SOURCES)
+        return required.difference(self.connected_sources(required))
+
+    def _set_source_status(self, source: str, *, status: str, reason: str | None = None) -> None:
+        if source not in self.coverage:
+            return
+        self.coverage[source]["status"] = status
+        self.coverage[source]["reason"] = reason
+        self._coverage_notifier.set()
 
     async def wait_for_order_status(
         self,
@@ -201,7 +225,7 @@ class WebsocketObserver:
 
     async def start(self) -> None:
         for source, (url, subprotocols) in self.targets.items():
-            self.coverage[source]["status"] = "connecting"
+            self._set_source_status(source, status="connecting")
             self._tasks.append(
                 asyncio.create_task(self._listen(source, url, subprotocols))
             )
@@ -214,8 +238,120 @@ class WebsocketObserver:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+
     def coverage_summary(self) -> dict[str, Any]:
         return self.coverage
+
+    async def wait_for_sources_connected(
+        self,
+        *,
+        sources: set[str] | None = None,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        required = set(sources or REQUIRED_WEBSOCKET_SOURCES)
+        timeout = (
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else float(config.SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS)
+        )
+        deadline = time.monotonic() + max(timeout, 0.1)
+
+        while True:
+            missing = self.missing_sources(required)
+            if not missing:
+                return {
+                    "required_sources": sorted(required),
+                    "connected_sources": sorted(self.connected_sources(required)),
+                    "coverage": {name: self.coverage.get(name, {}) for name in sorted(required)},
+                }
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                statuses = {
+                    source: (self.coverage.get(source) or {}).get("status")
+                    for source in sorted(required)
+                }
+                raise RuntimeError(
+                    "websocket_sources_timeout:"
+                    f" required={sorted(required)} missing={sorted(missing)} statuses={statuses}"
+                )
+            self._coverage_notifier.clear()
+            try:
+                await asyncio.wait_for(self._coverage_notifier.wait(), timeout=remaining)
+            except asyncio.TimeoutError as exc:
+                statuses = {
+                    source: (self.coverage.get(source) or {}).get("status")
+                    for source in sorted(required)
+                }
+                raise RuntimeError(
+                    "websocket_sources_timeout:"
+                    f" required={sorted(required)} missing={sorted(missing)} statuses={statuses}"
+                ) from exc
+
+    async def monitor_required_sources(
+        self,
+        *,
+        sources: set[str] | None = None,
+        retry_window_seconds: float | None = None,
+    ) -> None:
+        required = set(sources or REQUIRED_WEBSOCKET_SOURCES)
+        retry_window = (
+            float(retry_window_seconds)
+            if retry_window_seconds is not None
+            else float(config.SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS)
+        )
+        retry_window = max(0.1, retry_window)
+        outage_started: float | None = None
+        initial_missing = sorted(self.missing_sources(required))
+
+        while True:
+            missing = self.missing_sources(required)
+            if not missing:
+                if outage_started is not None:
+                    self.recorder.record_event(
+                        actor="websocket",
+                        action="websocket_required_sources_recovered",
+                        category="websocket_gate",
+                        details={
+                            "required_sources": sorted(required),
+                            "retry_window_seconds": retry_window,
+                        },
+                        track_order=False,
+                    )
+                outage_started = None
+            else:
+                if outage_started is None:
+                    outage_started = time.monotonic()
+                    self.recorder.record_event(
+                        actor="websocket",
+                        action="websocket_required_sources_degraded",
+                        category="websocket_gate",
+                        details={
+                            "required_sources": sorted(required),
+                            "missing_sources": sorted(missing),
+                            "retry_window_seconds": retry_window,
+                            "initial_missing_sources": initial_missing,
+                        },
+                        track_order=False,
+                    )
+                elapsed = time.monotonic() - outage_started
+                if elapsed >= retry_window:
+                    statuses = {
+                        source: (self.coverage.get(source) or {}).get("status")
+                        for source in sorted(required)
+                    }
+                    raise RuntimeError(
+                        "websocket_required_sources_timeout:"
+                        f" required={sorted(required)} missing={sorted(missing)} "
+                        f"retry_window_seconds={retry_window} statuses={statuses}"
+                    )
+
+            self._coverage_notifier.clear()
+            try:
+                await asyncio.wait_for(self._coverage_notifier.wait(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+
     async def _listen(
         self,
         source: str,
@@ -224,6 +360,8 @@ class WebsocketObserver:
     ) -> None:
         while True:
             try:
+                if self.coverage.get(source, {}).get("status") != "connected":
+                    self._set_source_status(source, status="connecting")
                 async with websockets.connect(
                     url,
                     subprotocols=subprotocols,
@@ -233,8 +371,7 @@ class WebsocketObserver:
                     ping_timeout=20,
                 ) as websocket:
                     console.print(f"[blue]websocket:[/] connected {source}")
-                    self.coverage[source]["status"] = "connected"
-                    self.coverage[source]["reason"] = None
+                    self._set_source_status(source, status="connected")
                     self.recorder.record_event(
                         actor="websocket",
                         action="connected",
@@ -248,8 +385,7 @@ class WebsocketObserver:
             except Exception as exc:
                 count = self._connection_errors.get(source, 0) + 1
                 self._connection_errors[source] = count
-                self.coverage[source]["status"] = "failed"
-                self.coverage[source]["reason"] = str(exc)
+                self._set_source_status(source, status="failed", reason=str(exc))
                 if count <= 3:
                     self.recorder.record_issue(
                         severity="warning",
@@ -322,7 +458,29 @@ class WebsocketObserver:
             self._event_notifier.set()
 
 
-def validate_websocket_events(recorder: RunRecorder) -> None:
+def _unsupported_lifecycle_order_ids(recorder: RunRecorder) -> set[int]:
+    skip: set[int] = set()
+    for scenario in getattr(recorder, "scenarios", {}).values():
+        if not isinstance(scenario, dict):
+            continue
+        if str(scenario.get("base_verdict") or "").strip().lower() != "unsupported":
+            continue
+        order_db_id = scenario.get("order_db_id")
+        if order_db_id is None:
+            continue
+        try:
+            skip.add(int(order_db_id))
+        except (TypeError, ValueError):
+            continue
+    return skip
+
+
+def validate_websocket_events(
+    recorder: RunRecorder,
+    *,
+    strict: bool = False,
+    require_lifecycle_proof: bool = False,
+) -> dict[str, Any]:
     expected = [
         event
         for event in recorder.events
@@ -331,11 +489,51 @@ def validate_websocket_events(recorder: RunRecorder) -> None:
     websocket_events = [
         event for event in recorder.events if event.get("category") == "websocket"
     ]
+    websocket_gate_events = [
+        event
+        for event in recorder.events
+        if event.get("category") == "websocket_gate"
+        and event.get("order_db_id") is not None
+        and str(event.get("action") or "").endswith("_ok")
+    ]
+    skip_lifecycle_order_ids = _unsupported_lifecycle_order_ids(recorder)
     coverage = getattr(recorder, "websocket_coverage", None)
     if isinstance(coverage, dict):
         coverage["expected_order_events"] = len(expected)
     timeout_ms = int(config.SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS * 1000)
     early_tolerance_ms = 5000
+    missing_count = 0
+    late_count = 0
+    lifecycle_missing_count = 0
+    blocking_failures = 0
+    issue_severity = "error" if strict else "warning"
+
+    def _ws_matches(order_id: int, order_ref: str | None, status: str) -> list[dict[str, Any]]:
+        normalized = str(status or "").strip().lower()
+        if not normalized:
+            return []
+        matches = [
+            ws
+            for ws in websocket_events
+            if str(ws.get("observed_status") or ws.get("status") or "").strip().lower()
+            == normalized
+            and (
+                ws.get("order_db_id") == order_id
+                or (order_ref is not None and ws.get("order_ref") == order_ref)
+            )
+        ]
+        if matches:
+            return matches
+        return [
+            gate
+            for gate in websocket_gate_events
+            if str(gate.get("observed_status") or gate.get("status") or "").strip().lower()
+            == normalized
+            and (
+                gate.get("order_db_id") == order_id
+                or (order_ref is not None and gate.get("order_ref") == order_ref)
+            )
+        ]
 
     for event in expected:
         order_id = event["order_db_id"]
@@ -358,8 +556,9 @@ def validate_websocket_events(recorder: RunRecorder) -> None:
             coverage = getattr(recorder, "websocket_coverage", None)
             if isinstance(coverage, dict):
                 coverage["missed_order_events"] = coverage.get("missed_order_events", 0) + 1
+            missing_count += 1
             recorder.record_issue(
-                severity="warning",
+                severity=issue_severity,
                 code="websocket_event_missing",
                 actor="websocket",
                 scenario=event.get("scenario"),
@@ -370,6 +569,8 @@ def validate_websocket_events(recorder: RunRecorder) -> None:
                 message=f"No websocket event observed for status {status}",
                 details={"expected_event": event},
             )
+            if strict:
+                blocking_failures += 1
             continue
 
         in_window = [
@@ -402,8 +603,9 @@ def validate_websocket_events(recorder: RunRecorder) -> None:
         coverage = getattr(recorder, "websocket_coverage", None)
         if isinstance(coverage, dict):
             coverage["missed_order_events"] = coverage.get("missed_order_events", 0) + 1
+        late_count += 1
         recorder.record_issue(
-            severity="warning",
+            severity=issue_severity,
             code="websocket_event_late",
             actor="websocket",
             scenario=event.get("scenario"),
@@ -414,3 +616,73 @@ def validate_websocket_events(recorder: RunRecorder) -> None:
             message=f"Websocket event for status {status} arrived outside timeout window",
             details={"expected_event": event, "observed_event": first},
         )
+        if strict:
+            blocking_failures += 1
+
+    if require_lifecycle_proof:
+        for order in recorder.orders.values():
+            if not isinstance(order, dict) or order.get("order_db_id") is None:
+                continue
+            order_db_id = int(order["order_db_id"])
+            if order_db_id in skip_lifecycle_order_ids:
+                continue
+            order_ref = (
+                str(order.get("order_ref"))
+                if order.get("order_ref") not in {None, ""}
+                else None
+            )
+            final_status = str(order.get("final_status") or "").strip().lower()
+            driven_statuses = {
+                str(
+                    event.get("observed_status")
+                    or event.get("status")
+                    or event.get("expected_status")
+                    or ""
+                ).strip().lower()
+                for event in recorder.events
+                if event.get("expect_websocket")
+                and event.get("order_db_id") == order_db_id
+            }
+            required_statuses = {status for status in driven_statuses if status}
+            required_statuses.add("pending")
+            if final_status:
+                required_statuses.add(final_status)
+
+            for required_status in sorted(required_statuses):
+                if _ws_matches(order_db_id, order_ref, required_status):
+                    continue
+                lifecycle_missing_count += 1
+                if required_status == "pending":
+                    code = "websocket_lifecycle_pending_missing"
+                elif required_status == final_status:
+                    code = "websocket_lifecycle_terminal_missing"
+                else:
+                    code = "websocket_lifecycle_intermediate_missing"
+                recorder.record_issue(
+                    severity=issue_severity,
+                    code=code,
+                    actor="websocket",
+                    scenario="simulation_cleanup",
+                    step="websocket_lifecycle_proof",
+                    order_db_id=order_db_id,
+                    order_ref=order_ref,
+                    message=(
+                        "Websocket lifecycle proof missing for "
+                        f"order {order_db_id} status={required_status}."
+                    ),
+                    details={
+                        "required_status": required_status,
+                        "final_status": final_status or None,
+                        "order_ref": order_ref,
+                    },
+                )
+                if strict:
+                    blocking_failures += 1
+
+    return {
+        "expected_events": len(expected),
+        "missing_events": missing_count,
+        "late_events": late_count,
+        "lifecycle_missing_events": lifecycle_missing_count,
+        "blocking_failures": blocking_failures,
+    }

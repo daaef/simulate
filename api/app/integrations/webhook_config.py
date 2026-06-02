@@ -2,17 +2,53 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import sys
 from typing import Any
 
 from . import webhook_projects_store as store
 
 
+def _main_global_dict(name: str) -> dict[str, Any]:
+    module = sys.modules.get("api.app.main")
+    value = getattr(module, name, {}) if module is not None else {}
+    return value if isinstance(value, dict) else {}
+
+
+def _normalize_secret_map(payload: dict[str, Any]) -> dict[str, str]:
+    return {
+        str(project).strip().lower(): str(secret).strip()
+        for project, secret in payload.items()
+        if str(project).strip() and str(secret).strip()
+    }
+
+
+def _normalize_allowlist_map(payload: dict[str, Any]) -> dict[str, list[str]]:
+    normalized: dict[str, list[str]] = {}
+    for project, repos in payload.items():
+        project_key = str(project).strip().lower()
+        if not project_key:
+            continue
+        if isinstance(repos, list):
+            values = [str(repo).strip() for repo in repos if str(repo).strip()]
+        elif isinstance(repos, str) and repos.strip():
+            values = [repos.strip()]
+        else:
+            values = []
+        if values:
+            normalized[project_key] = values
+    return normalized
+
+
 def project_secrets() -> dict[str, str]:
-    return store.project_secrets_map()
+    merged = dict(store.project_secrets_map())
+    merged.update(_normalize_secret_map(_main_global_dict("SIMULATOR_WEBHOOK_PROJECT_SECRETS")))
+    return merged
 
 
 def repo_allowlist() -> dict[str, list[str]]:
-    return store.repo_allowlist_map()
+    merged = dict(store.repo_allowlist_map())
+    merged.update(_normalize_allowlist_map(_main_global_dict("SIMULATOR_WEBHOOK_REPO_ALLOWLIST")))
+    return merged
 
 
 def match_project_for_repository(repository: str) -> str | None:

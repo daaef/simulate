@@ -9,6 +9,7 @@ This index maps every GUI `Flow` option to its operator guide. These guides docu
 | [load](load.md) | `load` | Multi-worker concurrency and churn testing |
 | [menus](menus.md) | `trace` | Menu and catalog validation suite |
 | [new-user](new-user.md) | `trace` | First-time user onboarding and setup path |
+| [place-order](place-order.md) | `trace` | Seed pending orders for manual store-app inspection |
 | [paid-no-coupon](paid-no-coupon.md) | `trace` | Paid returning-user order without coupon |
 | [paid-coupon](paid-coupon.md) | `trace` | Paid returning-user order with coupon |
 | [free-coupon](free-coupon.md) | `trace` | Free order path via coupon |

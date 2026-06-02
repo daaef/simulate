@@ -56,6 +56,7 @@ function schedulePhaseLabel(phase: string): string {
   if (phase === "queued") return "Queued";
   if (phase === "started") return "Starting";
   if (phase === "launched") return "Run launched";
+  if (phase === "overlap_skipped") return "Overlap skipped";
   if (phase === "failed") return "Launch failed";
   return phase;
 }
@@ -64,6 +65,7 @@ function schedulePhaseClass(phase: string): string {
   if (phase === "queued") return "status-info";
   if (phase === "started") return "status-warning";
   if (phase === "launched") return "status-success";
+  if (phase === "overlap_skipped") return "status-warning";
   if (phase === "failed") return "status-danger";
   return "status-info";
 }
@@ -175,23 +177,33 @@ export default function SchedulesPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const loadInFlightRef = useRef(false);
+  const scheduleListRef = useRef<HTMLElement>(null);
+  const [activeStatusFilter, setActiveStatusFilter] = useState<"all" | "active" | "paused" | "disabled">("all");
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
   const recentScheduleStates = useMemo(
     () => summary?.recent_schedule_states ?? [],
     [summary?.recent_schedule_states],
   );
-  const nextAutomaticSchedule = useMemo(() => {
+  const upcomingSchedules = useMemo(() => {
     return schedules
       .filter((schedule) => parseTimestamp(schedule.next_run_at) != null)
-      .sort((left, right) => {
-        const leftTime = parseTimestamp(left.next_run_at) ?? Number.POSITIVE_INFINITY;
-        const rightTime = parseTimestamp(right.next_run_at) ?? Number.POSITIVE_INFINITY;
-        return leftTime - rightTime;
-      })[0] ?? null;
+      .sort((a, b) => {
+        const at = parseTimestamp(a.next_run_at) ?? Number.POSITIVE_INFINITY;
+        const bt = parseTimestamp(b.next_run_at) ?? Number.POSITIVE_INFINITY;
+        return at - bt;
+      })
+      .slice(0, 3);
   }, [schedules]);
+
+  const filteredSchedules = useMemo(() => {
+    if (activeStatusFilter === "all") return schedules;
+    return schedules.filter((schedule) => schedule.status === activeStatusFilter);
+  }, [schedules, activeStatusFilter]);
 
   const timezoneOptions = useMemo(() => {
     if (!timezonePolicy) return ["UTC"];
@@ -289,6 +301,22 @@ export default function SchedulesPage() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
+
+  useEffect(() => {
+    if (openMenuId === null) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest(".action-menu")) setOpenMenuId(null);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [openMenuId]);
+
+  useEffect(() => {
+    if (!showForm) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") cancelEditSchedule(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [showForm]);
 
   const addCampaignStep = () => {
     const parsedProfileId = Number(stepProfileId);
@@ -406,6 +434,7 @@ export default function SchedulesPage() {
       setBlackoutDateInput("");
       setCampaignSteps([]);
       setEditingScheduleId(null);
+      setShowForm(false);
       await load();
       setError(null);
     } catch (caughtError) {
@@ -475,11 +504,13 @@ export default function SchedulesPage() {
         .filter((time) => Boolean(time));
       setDailyTimes(nextDaily.length ? nextDaily : ["09:00"]);
     }
+    setShowForm(true);
     setError(null);
   };
 
   const cancelEditSchedule = () => {
     setEditingScheduleId(null);
+    setShowForm(false);
     setName("");
     setDescription("");
     setAnchorStartAt("");
@@ -512,6 +543,11 @@ export default function SchedulesPage() {
     }
   };
 
+  const goToList = (filter: "all" | "active" | "paused" | "disabled") => {
+    setActiveStatusFilter(filter);
+    scheduleListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <div className="page-shell">
       <section className="page-header">
@@ -524,31 +560,274 @@ export default function SchedulesPage() {
 
       {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
-      <section className="panel next-trigger-panel">
-        <div className="next-trigger-copy">
-          <span className="stat-label">Next Automatic Trigger</span>
-          <strong className="next-trigger-time">
-            {nextAutomaticSchedule
-              ? formatDateTime(nextAutomaticSchedule.next_run_at, { timeZone: nextAutomaticSchedule.timezone || "UTC" })
-              : "No automatic trigger scheduled"}
-          </strong>
-          <span className="muted">
-            {nextAutomaticSchedule
-              ? `${nextAutomaticSchedule.name} - ${formatTimeUntil(nextAutomaticSchedule.next_run_at)}`
-              : "Create or resume a daily, weekly, or monthly schedule to see it here."}
-          </span>
+      <div className="schedules-metrics">
+        {(() => {
+          const total = summary?.total ?? 0;
+          const active = summary?.health.active ?? 0;
+          const paused = summary?.health.paused ?? 0;
+          const disabled = summary?.health.disabled ?? 0;
+          const degraded = summary?.health.degraded_campaigns ?? 0;
+          return (
+            <>
+              <button type="button" className={`metric-card metric-card--total${total === 0 ? " metric-card--zero" : ""}`} onClick={total > 0 ? () => goToList("all") : undefined} disabled={total === 0}>
+                <span className="stat-label">Total Schedules</span>
+                <strong className="stat-value">{total}</strong>
+                <span className="metric-card__cta muted">{total > 0 ? "View all →" : "No schedules yet"}</span>
+              </button>
+              <button type="button" className={`metric-card metric-card--active${active === 0 ? " metric-card--zero" : ""}`} onClick={active > 0 ? () => goToList("active") : undefined} disabled={active === 0}>
+                <span className="stat-label">Active</span>
+                <strong className="stat-value">{active}</strong>
+                <span className="metric-card__cta muted">{active > 0 ? "View active →" : "None active"}</span>
+              </button>
+              <button type="button" className={`metric-card metric-card--paused${paused === 0 ? " metric-card--zero" : ""}`} onClick={paused > 0 ? () => goToList("paused") : undefined} disabled={paused === 0}>
+                <span className="stat-label">Paused</span>
+                <strong className="stat-value">{paused}</strong>
+                <span className="metric-card__cta muted">{paused > 0 ? "View paused →" : "None paused"}</span>
+              </button>
+              <button type="button" className={`metric-card metric-card--disabled${disabled === 0 ? " metric-card--zero" : ""}`} onClick={disabled > 0 ? () => goToList("disabled") : undefined} disabled={disabled === 0}>
+                <span className="stat-label">Disabled</span>
+                <strong className="stat-value">{disabled}</strong>
+                <span className="metric-card__cta muted">{disabled > 0 ? "View disabled →" : "None disabled"}</span>
+              </button>
+              {degraded > 0 ? (
+                <button type="button" className="metric-card metric-card--degraded" onClick={() => goToList("all")}>
+                  <span className="stat-label">Degraded</span>
+                  <strong className="stat-value">{degraded}</strong>
+                  <span className="metric-card__cta muted">Needs attention →</span>
+                </button>
+              ) : null}
+            </>
+          );
+        })()}
+      </div>
+
+      <section className="grid two schedules-activity-row">
+        <div className="panel">
+          <span className="stat-label">Upcoming Triggers</span>
+          {upcomingSchedules.length ? (
+            <div className="upcoming-list">
+              {upcomingSchedules.map((schedule) => (
+                <div key={schedule.id} className="upcoming-item">
+                  <div className="upcoming-item__meta">
+                    <strong>{schedule.name}</strong>
+                    <span className="muted">{schedule.period ?? schedule.cadence} / {schedule.timezone}</span>
+                  </div>
+                  <div className="upcoming-item__detail">
+                    <span>{formatDateTime(schedule.next_run_at, { timeZone: schedule.timezone || "UTC" })}</span>
+                    <span className="muted">{formatTimeUntil(schedule.next_run_at)}</span>
+                    <span className={`status-pill ${statusClass(schedule.status)}`}>{schedule.status}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted" style={{ marginTop: "10px" }}>No automatic triggers scheduled. Create or resume a schedule to see upcoming runs here.</p>
+          )}
         </div>
-        {nextAutomaticSchedule ? (
-          <div className="next-trigger-context">
-            <span className={`status-pill ${statusClass(nextAutomaticSchedule.status)}`}>{nextAutomaticSchedule.status}</span>
-            <span className="muted">{(nextAutomaticSchedule.period ?? nextAutomaticSchedule.cadence)} / {nextAutomaticSchedule.timezone}</span>
-          </div>
-        ) : null}
+
+        <section className="panel">
+          <h2 className="section-title">Recent Executions</h2>
+          {recentScheduleStates.length ? (
+            <div className="schedule-execution-cards">
+              {recentScheduleStates.map((state) => {
+                const clickable = state.latest_run_id != null;
+                const title = clickable ? "View run" : "Run not created";
+                const handleNavigate = () => {
+                  if (!state.latest_run_id) return;
+                  router.push(`/runs/${state.latest_run_id}`);
+                };
+                return (
+                  <button
+                    key={`schedule-state-${state.schedule_id}`}
+                    type="button"
+                    className={`schedule-execution-card${clickable ? " clickable" : " disabled"}`}
+                    onClick={handleNavigate}
+                    disabled={!clickable}
+                    title={title}
+                    aria-label={title}
+                  >
+                    <div className="schedule-execution-card-main">
+                      <strong>{state.schedule_name || `Schedule #${state.schedule_id}`}</strong>
+                      <div className="schedule-execution-primary">
+                        {state.last_triggered_at ? formatDateTime(state.last_triggered_at) : "Not triggered yet"}
+                        {state.latest_run_finished_at ? ` - finished ${formatDateTime(state.latest_run_finished_at)}` : ""}
+                      </div>
+                      <div className="muted">
+                        {state.latest_run_id ? `Run #${state.latest_run_id}` : "No run created yet"}
+                      </div>
+                    </div>
+                    <div className="schedule-execution-card-statuses">
+                      <span className={`status-pill ${schedulePhaseClass(state.schedule_phase)}`}>
+                        {schedulePhaseLabel(state.schedule_phase)}
+                      </span>
+                      <span className={`status-pill ${runStatusClass(state.latest_run_status)}`}>
+                        {runStatusLabel(state.latest_run_status)}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="chart-empty">No schedule executions yet.</div>
+          )}
+        </section>
       </section>
 
-      <section className="grid two">
-        <form className="panel grid" onSubmit={submit}>
+      <section className="panel" ref={scheduleListRef} id="schedule-list">
+        <div className="schedule-list-header">
+          <h2 className="section-title">Schedule List</h2>
+          <div className="schedule-list-controls">
+            <div className="filter-tabs">
+              {(["all", "active", "paused", "disabled"] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`filter-tab${activeStatusFilter === f ? " filter-tab--active" : ""}`}
+                  onClick={() => setActiveStatusFilter(f)}
+                >
+                  {f}
+                  <span className="filter-tab__count">
+                  {f === "all" ? schedules.length : schedules.filter((s) => s.status === f).length}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={() => { setEditingScheduleId(null); setShowForm(true); }}>
+              + New Schedule
+            </button>
+          </div>
+        </div>
+        <div className="responsive-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Profile / Steps</th>
+                <th>Cadence</th>
+                <th>Next Trigger</th>
+                <th>Last Trigger</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSchedules.map((schedule) => {
+                  const isDisabled = schedule.status === "disabled";
+                  const isPaused = schedule.status === "paused";
+                  const canPause = !isDisabled && !isPaused;
+                  const canDisable = !isDisabled;
+                  const canEnable = isDisabled;
+                  const canTrigger = !isDisabled;
+                  return (
+                    <tr key={schedule.id}>
+                      <td>
+                        <strong>{schedule.name}</strong>
+                        {schedule.description ? <div className="muted">{schedule.description}</div> : null}
+                      </td>
+                      <td>{schedule.schedule_type}</td>
+                      <td><span className={`status-pill ${statusClass(schedule.status)}`}>{schedule.status}</span></td>
+                      <td>
+                        {schedule.schedule_type === "simple"
+                          ? profileById.get(schedule.profile_id ?? 0)?.name ?? schedule.profile_id ?? "--"
+                          : `${schedule.campaign_steps.length} steps`}
+                      </td>
+                      <td>
+                        <div>{(schedule.period ?? schedule.cadence)} / {schedule.timezone}</div>
+                        {schedule.anchor_start_at ? (
+                          <div className="muted">Start: {formatDateTime(schedule.anchor_start_at, { timeZone: schedule.timezone || "UTC" })}</div>
+                        ) : null}
+                        {schedule.stop_rule ? (
+                          <div className="muted">
+                            Stop: {schedule.stop_rule === "end_at" ? `End at ${schedule.end_at ? formatDateTime(schedule.end_at, { timeZone: schedule.timezone || "UTC" }) : "--"}` : schedule.stop_rule === "duration" ? `After ${(schedule.duration_seconds ?? 0) / 3600}h` : "Never"}
+                          </div>
+                        ) : (
+                          <div className="muted">{formatActiveRange(schedule)}</div>
+                        )}
+                        <div className="muted">Runs per period: {schedule.runs_per_period ?? 1}</div>
+                        {schedule.blackout_dates.length ? (
+                          <div className="muted">Blackouts: {schedule.blackout_dates.join(", ")}</div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <strong>{nextTriggerLabel(schedule)}</strong>
+                        <div className="muted">{nextTriggerMeta(schedule)}</div>
+                        {schedule.current_period_runs?.length ? (
+                          <div className="muted">Current period runs: {schedule.current_period_runs.length}</div>
+                        ) : null}
+                        <div className="muted">Mode: {schedule.execution_mode_label}</div>
+                      </td>
+                      <td>{schedule.last_triggered_at ? formatDateTime(schedule.last_triggered_at, { timeZone: schedule.timezone || "UTC" }) : "--"}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button className="small" disabled={busy || !canTrigger} onClick={() => runAction("trigger schedule", () => triggerSchedule(schedule.id))}>
+                            Trigger
+                          </button>
+                          <button className="secondary small" disabled={busy} onClick={() => startEditSchedule(schedule)}>
+                            Edit
+                          </button>
+                          <div className="action-menu">
+                            <button
+                              type="button"
+                              className="secondary small"
+                              aria-label="More actions"
+                              aria-expanded={openMenuId === schedule.id}
+                              onClick={() => setOpenMenuId(openMenuId === schedule.id ? null : schedule.id)}
+                            >
+                              ···
+                            </button>
+                            {openMenuId === schedule.id ? (
+                              <div className="action-menu__dropdown">
+                                {isPaused ? (
+                                  <button type="button" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("resume schedule", () => setScheduleStatus(schedule.id, "resume")); }}>Resume</button>
+                                ) : null}
+                                {canPause ? (
+                                  <button type="button" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("pause schedule", () => setScheduleStatus(schedule.id, "pause")); }}>Pause</button>
+                                ) : null}
+                                {canEnable ? (
+                                  <button type="button" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("enable schedule", () => setScheduleStatus(schedule.id, "resume")); }}>Enable</button>
+                                ) : null}
+                                {canDisable ? (
+                                  <button type="button" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("disable schedule", () => setScheduleStatus(schedule.id, "disable")); }}>Disable</button>
+                                ) : null}
+                                <button type="button" className="danger" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("delete schedule", () => setScheduleStatus(schedule.id, "delete")); }}>Delete</button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              {!filteredSchedules.length ? (
+                <tr><td colSpan={8} className="muted">
+                  {activeStatusFilter === "all" ? "No schedules configured." : `No ${activeStatusFilter} schedules.`}
+                </td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {showForm ? (
+        <div
+          className="drawer-overlay"
+          onClick={cancelEditSchedule}
+          aria-hidden="true"
+        />
+      ) : null}
+      <div
+        className={`drawer${showForm ? " drawer--open" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={editingScheduleId ? `Edit Schedule #${editingScheduleId}` : "Create Schedule"}
+      >
+        <div className="drawer__header">
           <h2 className="section-title">{editingScheduleId ? `Edit Schedule #${editingScheduleId}` : "Create Schedule"}</h2>
+          <button type="button" className="drawer__close secondary small" onClick={cancelEditSchedule} aria-label="Close drawer">×</button>
+        </div>
+        <form className="drawer__body grid" onSubmit={submit}>
           <label className="grid">
             <span className="muted">Name</span>
             <input value={name} onChange={(event) => setName(event.target.value)} required />
@@ -794,166 +1073,12 @@ export default function SchedulesPage() {
 
           <div className="row-actions">
             <button disabled={busy || !profiles.length}>{busy ? "Working..." : editingScheduleId ? "Save Changes" : "Create Schedule"}</button>
-            {editingScheduleId ? (
-              <button className="secondary" type="button" disabled={busy} onClick={cancelEditSchedule}>
-                Cancel Edit
-              </button>
-            ) : null}
+            <button className="secondary" type="button" disabled={busy} onClick={cancelEditSchedule}>
+              Cancel
+            </button>
           </div>
         </form>
-
-        <section className="panel">
-          <h2 className="section-title">Health</h2>
-          <div className="grid four">
-            <div className="stat"><span className="stat-label">Total</span><strong className="stat-value">{summary?.total ?? 0}</strong></div>
-            <div className="stat"><span className="stat-label">Active</span><strong className="stat-value">{summary?.health.active ?? 0}</strong></div>
-            <div className="stat"><span className="stat-label">Paused</span><strong className="stat-value">{summary?.health.paused ?? 0}</strong></div>
-            <div className="stat"><span className="stat-label">Disabled</span><strong className="stat-value">{summary?.health.disabled ?? 0}</strong></div>
-          </div>
-          <h2 className="section-title" style={{ marginTop: "20px" }}>Recent Executions</h2>
-          {recentScheduleStates.length ? (
-            <div className="schedule-execution-cards">
-              {recentScheduleStates.map((state) => {
-                const clickable = state.latest_run_id != null;
-                const title = clickable ? "View run" : "Run not created";
-                const handleNavigate = () => {
-                  if (!state.latest_run_id) return;
-                  router.push(`/runs/${state.latest_run_id}`);
-                };
-                return (
-                  <button
-                    key={`schedule-state-${state.schedule_id}`}
-                    type="button"
-                    className={`schedule-execution-card${clickable ? " clickable" : " disabled"}`}
-                    onClick={handleNavigate}
-                    disabled={!clickable}
-                    title={title}
-                    aria-label={title}
-                  >
-                    <div className="schedule-execution-card-main">
-                      <strong>{state.schedule_name || `Schedule #${state.schedule_id}`}</strong>
-                      <div className="schedule-execution-primary">
-                        {state.last_triggered_at ? formatDateTime(state.last_triggered_at) : "Not triggered yet"}
-                        {state.latest_run_finished_at ? ` - finished ${formatDateTime(state.latest_run_finished_at)}` : ""}
-                      </div>
-                      <div className="muted">
-                        {state.latest_run_id ? `Run #${state.latest_run_id}` : "No run created yet"}
-                      </div>
-                    </div>
-                    <div className="schedule-execution-card-statuses">
-                      <span className={`status-pill ${schedulePhaseClass(state.schedule_phase)}`}>
-                        {schedulePhaseLabel(state.schedule_phase)}
-                      </span>
-                      <span className={`status-pill ${runStatusClass(state.latest_run_status)}`}>
-                        {runStatusLabel(state.latest_run_status)}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="chart-empty">No schedule executions yet.</div>
-          )}
-        </section>
-      </section>
-
-      <section className="panel">
-        <h2 className="section-title">Schedule List</h2>
-        <div className="responsive-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Profile / Steps</th>
-                <th>Cadence</th>
-                <th>Next Trigger</th>
-                <th>Last Trigger</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {schedules.map((schedule) => {
-                  const isDisabled = schedule.status === "disabled";
-                  const isPaused = schedule.status === "paused";
-                  const canPause = !isDisabled && !isPaused;
-                  const canDisable = !isDisabled;
-                  const canEnable = isDisabled;
-                  const canTrigger = !isDisabled;
-                  return (
-                    <tr key={schedule.id}>
-                      <td>
-                        <strong>{schedule.name}</strong>
-                        {schedule.description ? <div className="muted">{schedule.description}</div> : null}
-                      </td>
-                      <td>{schedule.schedule_type}</td>
-                      <td><span className={`status-pill ${statusClass(schedule.status)}`}>{schedule.status}</span></td>
-                      <td>
-                        {schedule.schedule_type === "simple"
-                          ? profileById.get(schedule.profile_id ?? 0)?.name ?? schedule.profile_id ?? "--"
-                          : `${schedule.campaign_steps.length} steps`}
-                      </td>
-                      <td>
-                        <div>{(schedule.period ?? schedule.cadence)} / {schedule.timezone}</div>
-                        {schedule.anchor_start_at ? (
-                          <div className="muted">Start: {formatDateTime(schedule.anchor_start_at, { timeZone: schedule.timezone || "UTC" })}</div>
-                        ) : null}
-                        {schedule.stop_rule ? (
-                          <div className="muted">
-                            Stop: {schedule.stop_rule === "end_at" ? `End at ${schedule.end_at ? formatDateTime(schedule.end_at, { timeZone: schedule.timezone || "UTC" }) : "--"}` : schedule.stop_rule === "duration" ? `After ${(schedule.duration_seconds ?? 0) / 3600}h` : "Never"}
-                          </div>
-                        ) : (
-                          <div className="muted">{formatActiveRange(schedule)}</div>
-                        )}
-                        <div className="muted">Runs per period: {schedule.runs_per_period ?? 1}</div>
-                        {schedule.blackout_dates.length ? (
-                          <div className="muted">Blackouts: {schedule.blackout_dates.join(", ")}</div>
-                        ) : null}
-                      </td>
-                      <td>
-                        <strong>{nextTriggerLabel(schedule)}</strong>
-                        <div className="muted">{nextTriggerMeta(schedule)}</div>
-                        {schedule.current_period_runs?.length ? (
-                          <div className="muted">Current period runs: {schedule.current_period_runs.length}</div>
-                        ) : null}
-                        <div className="muted">Mode: {schedule.execution_mode_label}</div>
-                      </td>
-                      <td>{schedule.last_triggered_at ? formatDateTime(schedule.last_triggered_at, { timeZone: schedule.timezone || "UTC" }) : "--"}</td>
-                      <td>
-                        <div className="row-actions">
-                          <button className="small" disabled={busy || !canTrigger} onClick={() => runAction("trigger schedule", () => triggerSchedule(schedule.id))}>
-                            Trigger
-                          </button>
-                          <button className="secondary small" disabled={busy} onClick={() => startEditSchedule(schedule)}>
-                            Edit
-                          </button>
-                          {isPaused ? (
-                            <button className="secondary small" disabled={busy} onClick={() => runAction("resume schedule", () => setScheduleStatus(schedule.id, "resume"))}>Resume</button>
-                          ) : null}
-                          {canPause ? (
-                            <button className="secondary small" disabled={busy} onClick={() => runAction("pause schedule", () => setScheduleStatus(schedule.id, "pause"))}>Pause</button>
-                          ) : null}
-                          {canEnable ? (
-                            <button className="secondary small" disabled={busy} onClick={() => runAction("enable schedule", () => setScheduleStatus(schedule.id, "resume"))}>Enable</button>
-                          ) : null}
-                          {canDisable ? (
-                            <button className="secondary small" disabled={busy} onClick={() => runAction("disable schedule", () => setScheduleStatus(schedule.id, "disable"))}>Disable</button>
-                          ) : null}
-                          <button className="secondary small" disabled={busy} onClick={() => runAction("delete schedule", () => setScheduleStatus(schedule.id, "delete"))}>Delete</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              {!schedules.length ? (
-                <tr><td colSpan={8} className="muted">No schedules configured.</td></tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      </div>
     </div>
   );
 }

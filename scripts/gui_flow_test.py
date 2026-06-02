@@ -143,7 +143,7 @@ GUI_FLOWS: list[dict[str, Any]] = [
         "section": "4. Core Controls",
         "steps": [
             "Open Flow dropdown",
-            "Assert all 16 flow options present (audit, doctor, free-coupon, full, load, menus, new-user, paid-coupon, paid-no-coupon, payments, receipt-review, robot-complete, store-accept, store-dashboard, store-reject, store-setup)",
+            "Assert all 17 flow options present (audit, doctor, free-coupon, full, load, menus, new-user, place-order, paid-coupon, paid-no-coupon, payments, receipt-review, robot-complete, store-accept, store-dashboard, store-reject, store-setup)",
             "Select 'doctor'",
             "Assert resolved mode shows 'trace'",
         ],
@@ -348,7 +348,7 @@ GUI_FLOWS: list[dict[str, Any]] = [
         "name": "API – GET /api/v1/flows",
         "section": "API Smoke",
         "steps": [
-            "Assert response contains all 16 flow ids",
+            "Assert response contains all 17 flow ids",
             "Assert capabilities object present",
         ],
     },
@@ -788,7 +788,7 @@ class FlowRunner:
         try:
             expected_flows = [
                 "audit", "doctor", "free-coupon", "full", "load", "menus",
-                "new-user", "paid-coupon", "paid-no-coupon", "payments",
+                "new-user", "place-order", "paid-coupon", "paid-no-coupon", "payments",
                 "receipt-review", "robot-complete", "store-accept",
                 "store-dashboard", "store-reject", "store-setup",
             ]

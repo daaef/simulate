@@ -25,6 +25,9 @@ export function buildRunCommandPreview(form: RunCreateRequest): string {
   if (form.skip_store_dashboard_probes) parts.push("--skip-store-dashboard-probes");
   if (form.no_auto_provision) parts.push("--no-auto-provision");
   if (form.enforce_websocket_gates) parts.push("--enforce-websocket-gates");
+  if (form.timeout_fails) parts.push("--timeout-fails");
+  if (form.wait_for_store_action) parts.push("--wait-for-store-action");
+  if (form.store_auto_cancel) parts.push("--scenario", "auto_cancel");
   if (form.post_order_actions) parts.push("--post-order-actions");
   if (form.users !== undefined) parts.push("--users", String(form.users));
   if (form.orders !== undefined) parts.push("--orders", String(form.orders));

@@ -977,6 +977,15 @@ class RunRecorder:
 
         lines.append("")
         return lines
+
+    def _order_contract_issues(self) -> list[dict[str, Any]]:
+        return [
+            issue
+            for issue in self.issues
+            if str(issue.get("code") or "").startswith("order_contract_")
+            or str(issue.get("code") or "").startswith("websocket_lifecycle_")
+        ]
+
     def _render_markdown(self) -> str:
         actor_counts = Counter(event["actor"] for event in self.events)
         terminal = Counter(
@@ -1064,6 +1073,56 @@ class RunRecorder:
                 )
         else:
             lines.append(_table_row(["none", "", "", "", "", ""]))
+        lines.append("")
+        lines.extend(
+            [
+                "## Order Contract Enforcement",
+                _table_row(["Order ID", "Reference", "Final", "Contract status"]),
+                _table_row(["---", "---", "---", "---"]),
+            ]
+        )
+        unresolved_orders = [
+            order
+            for order in self.orders.values()
+            if str(order.get("final_status") or "").strip().lower()
+            not in {"completed", "rejected", "cancelled"}
+        ]
+        if unresolved_orders:
+            for order in unresolved_orders:
+                lines.append(
+                    _table_row(
+                        [
+                            order.get("order_db_id", ""),
+                            order.get("order_ref", "") or "",
+                            order.get("final_status", "") or "",
+                            "unresolved_non_terminal",
+                        ]
+                    )
+                )
+        else:
+            lines.append(_table_row(["none", "", "", "all_terminal"]))
+        lines.append("")
+        contract_issues = self._order_contract_issues()
+        lines.extend(
+            [
+                _table_row(["Severity", "Code", "Order", "Message"]),
+                _table_row(["---", "---", "---", "---"]),
+            ]
+        )
+        if contract_issues:
+            for issue in contract_issues:
+                lines.append(
+                    _table_row(
+                        [
+                            issue.get("severity", ""),
+                            issue.get("code", ""),
+                            issue.get("order_db_id") or issue.get("order_ref") or "",
+                            issue.get("message", ""),
+                        ]
+                    )
+                )
+        else:
+            lines.append(_table_row(["none", "", "", ""]))
         lines.append("")
         lines.extend(
             [
@@ -1424,11 +1483,36 @@ class RunRecorder:
         ]
         scenarios = self._scenario_records()
         if not scenarios:
+            unresolved = [
+                order
+                for order in self.orders.values()
+                if str(order.get("final_status") or "").strip().lower()
+                not in {"completed", "rejected", "cancelled"}
+            ]
+            contract_issues = self._order_contract_issues()
             lines.extend(
                 [
                     "## Load Run",
                     "",
                     "This run used load mode, so it mixed multiple actions together instead of walking one fixed story at a time.",
+                    "",
+                    "## Run-Level Contract Checks",
+                    "",
+                    (
+                        "All created orders ended in completed/rejected/cancelled."
+                        if not unresolved
+                        else f"{len(unresolved)} order(s) remained non-terminal at run end."
+                    ),
+                    "",
+                    (
+                        "No websocket lifecycle proof failures were recorded."
+                        if not [
+                            issue
+                            for issue in contract_issues
+                            if str(issue.get("code") or "").startswith("websocket_lifecycle_")
+                        ]
+                        else "Websocket lifecycle proof gaps were recorded."
+                    ),
                     "",
                 ]
             )
@@ -1456,6 +1540,32 @@ class RunRecorder:
             else:
                 lines.append("- No problems were detected in this scenario.")
             lines.append("")
+        unresolved = [
+            order
+            for order in self.orders.values()
+            if str(order.get("final_status") or "").strip().lower()
+            not in {"completed", "rejected", "cancelled"}
+        ]
+        contract_issues = self._order_contract_issues()
+        lines.extend(
+            [
+                "## Run-Level Contract Checks",
+                "",
+                (
+                    "All created orders ended in completed/rejected/cancelled."
+                    if not unresolved
+                    else f"{len(unresolved)} order(s) remained non-terminal at run end."
+                ),
+                "",
+            ]
+        )
+        if contract_issues:
+            lines.append("Contract findings:")
+            for issue in contract_issues:
+                lines.append(f"- {issue.get('message')}")
+        else:
+            lines.append("No order contract or websocket lifecycle proof failures were recorded.")
+        lines.append("")
         return "\n".join(lines) + "\n"
 
     def _story_summary_for_scenario(self, scenario: dict[str, Any]) -> str:
@@ -1478,10 +1588,17 @@ class RunRecorder:
                 "waiting for store action, so the platform should stop before payment "
                 "or preparation begins."
             )
+        if name == "backend_auto_cancel":
+            return (
+                "The customer placed an order and the store tablet stayed idle on pending "
+                "while a visible countdown ran. The simulator observed whether the backend "
+                "or customer moved the order to cancelled without any store accept or reject."
+            )
         if name == "auto_cancel":
             return (
-                "The simulator intentionally left the order untouched to see whether the "
-                "backend would cancel it on its own. This scenario is diagnostic and does "
-                "not count as a core failure when the backend does not support it."
+                "The customer placed an order, the store accepted it into payment processing, "
+                "and the simulator withheld customer payment while a visible awaiting-payment "
+                "countdown ran. The simulator then observed whether the backend or customer "
+                "moved the order to cancelled; the store tablet did not PATCH cancelled."
             )
         return "This scenario ran with a custom flow."

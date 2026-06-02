@@ -12,9 +12,11 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -25,7 +27,7 @@ import config
 from interaction_catalog import MENU_STATUSES, WORKING_DAYS
 from reporting import RunRecorder
 from scenarios import resolve_timing_profile
-from transport import RequestError, api_data, build_auth_proof, request_json
+from transport import RequestError, api_data, build_auth_proof, request_json, resolve_timeout
 
 console = Console()
 ENV_PATH = Path(__file__).parent / ".env"
@@ -55,12 +57,14 @@ class HttpApiError(RuntimeError):
         status_code: int,
         response_text: str,
         related_event_id: int | None = None,
+        reason_code: str | None = None,
     ) -> None:
         super().__init__(f"HTTP {status_code} from {url}: {response_text[:500]}")
         self.url = url
         self.status_code = status_code
         self.response_text = response_text
         self.related_event_id = related_event_id
+        self.reason_code = reason_code
 
 
 def _token(payload: dict[str, Any]) -> str | None:
@@ -94,13 +98,14 @@ async def _auth_request(
     track_order: bool = False,
 ) -> Any:
     if recorder is None:
+        timeout = resolve_timeout(None)
         response = await client.request(
             method=method.upper(),
             url=url,
             params=params,
             json=json_body,
             headers=headers,
-            timeout=30.0,
+            timeout=timeout,
         )
         try:
             response.raise_for_status()
@@ -141,12 +146,14 @@ async def _auth_request(
                 status_code=exc.result.response.status_code,
                 response_text=exc.result.response.text,
                 related_event_id=exc.event["id"] if exc.event else None,
+                reason_code=exc.reason_code,
             ) from exc
         raise HttpApiError(
             url=url,
             status_code=0,
             response_text=str(exc),
             related_event_id=exc.event["id"] if exc.event else None,
+            reason_code=exc.reason_code,
         ) from exc
     return result.payload
 
@@ -507,15 +514,18 @@ def build_menu_create_payload(
     category_id: int,
     status: str,
     name: str | None = None,
+    description: str | None = None,
+    price: float | None = None,
+    ingredients: str | None = None,
 ) -> dict[str, Any]:
     return {
         "category": category_id,
         "subentity": session.store_id,
         "name": name if name is not None else config.SIM_MENU_NAME,
-        "price": config.SIM_MENU_PRICE,
-        "description": config.SIM_MENU_DESCRIPTION,
+        "price": config.SIM_MENU_PRICE if price is None else price,
+        "description": config.SIM_MENU_DESCRIPTION if description is None else description,
         "currency_symbol": None,
-        "ingredients": config.SIM_MENU_INGREDIENTS,
+        "ingredients": config.SIM_MENU_INGREDIENTS if ingredients is None else ingredients,
         "discount": config.SIM_MENU_DISCOUNT,
         "discount_price": config.SIM_MENU_DISCOUNT_PRICE,
         "status": status,
@@ -745,6 +755,9 @@ async def create_menu(
     scenario: str,
     step: str = "create_menu",
     name: str | None = None,
+    description: str | None = None,
+    price: float | None = None,
+    ingredients: str | None = None,
 ) -> dict[str, Any]:
     if status not in MENU_STATUSES:
         raise RuntimeError(f"Unsupported menu status {status!r}")
@@ -754,6 +767,9 @@ async def create_menu(
         category_id=category_id,
         status=status,
         name=name,
+        description=description,
+        price=price,
+        ingredients=ingredients,
     )
     result = await request_json(
         client,

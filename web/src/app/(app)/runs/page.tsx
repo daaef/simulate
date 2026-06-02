@@ -62,6 +62,7 @@ const ARCHITECTURE_CONTENT = `# Complete Order Flow Simulator
 | \`doctor\` | Daily production health check: app probes, store setup/dashboard, menu gates, payments, store actions, robot completion, receipt/review/reorder |
 | \`full\` | Broadest suite including new-user setup and coupon scenarios |
 | \`receipt-review\` | Completed order plus receipt, review, and reorder probes |
+| \`place-order\` | Seeds 1-10 pending live orders for manual store-app inspection; intentionally leaves them pending after websocket proof |
 | \`store-dashboard\` | Store orders, statistics, and top-customer probes |
 
 Each simulator is **fully self-contained** — it owns its own auth, data seeding, and
@@ -106,7 +107,9 @@ Supported scenarios:
 | \`completed\` | Full happy path from order placement through robot completion |
 | \`rejected\` | Store rejects before payment |
 | \`cancelled\` | Customer cancels while the order is still pending |
-| \`auto_cancel\` | Diagnostic check for backend timeout cancellation without store action |
+| \`place_order\` | Seeds pending order(s) for manual store-app inspection; intentionally leaves them pending |
+| \`backend_auto_cancel\` | Store idle on pending, countdown, observe \`cancelled\` (no store PATCH) |
+| \`auto_cancel\` | Store accept, withhold payment, awaiting-payment countdown, observe \`cancelled\` (no store PATCH) |
 | \`app_bootstrap\` | Probe config, product auth, pricing, saved cards, coupons, active user orders |
 | \`store_dashboard\` | Probe store orders, store statistics, and top customers |
 | \`receipt_review_reorder\` | Full completed order plus receipt generation, review submission, and reorder fetch |
@@ -244,6 +247,7 @@ All rows below are supported flow presets exposed by CLI help.
 | \`payments\` | \`trace\` + suite \`payments\` | Paid no-coupon, paid with coupon, free with coupon payment routing | Stripe for paid branches; coupon for coupon branches (or auto-select coupon) | \`--timing\`, \`--phone\`, \`--store\`, \`--no-auto-provision\` | Same |
 | \`menus\` | \`trace\` + suite \`menus\` | Menu availability behavior (available/unavailable/sold-out/store-closed) | Valid fixtures (store + menu); auto-provision can repair missing setup/menu | \`--timing\`, \`--store\`, \`--no-auto-provision\` | Same |
 | \`new-user\` | \`trace\` + scenario \`new_user_setup\` | OTP + create-user path and first-time setup assertions | Phone in plan not fully onboarded (or backend forcing create path) | \`--phone\`, \`--timing\`, \`--store\`, \`--no-auto-provision\` | Same |
+| \`place-order\` | \`trace\` + scenario \`place_order\` | Seeds live pending order(s) for manual store-app inspection | Plan with at least one usable user and store | \`--orders\` 1..10, \`--store\`, \`--phone\`, \`--timing\` | Same |
 | \`paid-no-coupon\` | \`trace\` + scenario \`returning_paid_no_coupon\` | Standard paid checkout route | Stripe key and valid fixtures | \`--timing\`, \`--phone\`, \`--store\`, \`--post-order-actions\` | Same |
 | \`paid-coupon\` | \`trace\` + scenario \`returning_paid_with_coupon\` | Coupon checkout path with paid endpoint unless coupon fully covers total | Coupon configured/available (or auto-select coupon enabled) | \`--timing\`, \`--phone\`, \`--store\`, \`--no-auto-provision\` | Same |
 | \`free-coupon\` | \`trace\` + scenario \`returning_free_with_coupon\` | Coupon path targeting free-order behavior | Coupon configured/available (or auto-select coupon enabled) | \`--timing\`, \`--phone\`, \`--store\`, \`--no-auto-provision\` | Same |
@@ -267,6 +271,12 @@ Broad audit:
 
 \`\`\`bash
 python3 -m simulate full --plan sim_actors.json --timing fast
+\`\`\`
+
+Seed pending store-app orders:
+
+\`\`\`bash
+python3 -m simulate place-order --plan sim_actors.json --orders 3
 \`\`\`
 
 High-concurrency load:
@@ -319,6 +329,9 @@ const DEFAULT_FORM: RunCreateRequest = {
   skip_store_dashboard_probes: false,
   no_auto_provision: false,
   enforce_websocket_gates: false,
+  timeout_fails: false,
+  store_auto_cancel: false,
+  wait_for_store_action: false,
   post_order_actions: false,
   users: undefined,
   orders: undefined,
@@ -459,15 +472,21 @@ export default function App() {
   }, [form.mode, activeFlowCapability]);
 
   const modeValidationError = useMemo(() => {
+    const isPlaceOrderTrace = resolvedMode === "trace" && form.flow === "place-order";
     if (resolvedMode === "trace") {
       if (form.continuous) return "Continuous is only valid in load mode.";
       if (
         form.users !== undefined ||
-        form.orders !== undefined ||
         form.interval !== undefined ||
         form.reject !== undefined
       ) {
-        return "users/orders/interval/reject are only valid in load mode.";
+        return "users/interval/reject are only valid in load mode.";
+      }
+      if (form.orders !== undefined && !isPlaceOrderTrace) {
+        return "Orders are only valid in trace mode for place-order.";
+      }
+      if (isPlaceOrderTrace && form.orders !== undefined && form.orders > 10) {
+        return "Place-order supports at most 10 orders.";
       }
     }
     if (resolvedMode === "load" && ((form.scenarios?.length || 0) > 0 || (form.suite && form.suite.trim()))) {
@@ -709,6 +728,7 @@ export default function App() {
         skip_store_dashboard_probes: form.skip_store_dashboard_probes,
         no_auto_provision: form.no_auto_provision,
         enforce_websocket_gates: form.enforce_websocket_gates,
+        timeout_fails: form.timeout_fails,
         post_order_actions: form.post_order_actions,
         users: form.users,
         orders: form.orders,
@@ -748,6 +768,7 @@ export default function App() {
         skip_store_dashboard_probes: form.skip_store_dashboard_probes,
         no_auto_provision: form.no_auto_provision,
         enforce_websocket_gates: form.enforce_websocket_gates,
+        timeout_fails: form.timeout_fails,
         post_order_actions: form.post_order_actions,
         users: form.users,
         orders: form.orders,
@@ -783,6 +804,7 @@ export default function App() {
       skip_store_dashboard_probes: profile.skip_store_dashboard_probes,
       no_auto_provision: profile.no_auto_provision,
       enforce_websocket_gates: profile.enforce_websocket_gates,
+      timeout_fails: profile.timeout_fails,
       post_order_actions: profile.post_order_actions || false,
       users: profile.users ?? undefined,
       orders: profile.orders ?? undefined,

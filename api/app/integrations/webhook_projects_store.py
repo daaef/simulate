@@ -17,7 +17,10 @@ def _utc_now() -> str:
 
 
 def _projects_file() -> Path:
-    raw = os.getenv("SIMULATOR_WEBHOOK_PROJECTS_FILE", DEFAULT_FILE).strip()
+    raw = os.getenv("SIMULATOR_WEBHOOK_PROJECTS_FILE", "").strip()
+    if not raw:
+        project_dir = os.getenv("SIMULATOR_PROJECT_DIR", "").strip()
+        raw = str(Path(project_dir) / "data" / "webhook-projects.json") if project_dir else DEFAULT_FILE
     return Path(raw)
 
 
@@ -117,13 +120,14 @@ def _bootstrap_from_env_if_empty(data: dict[str, Any]) -> dict[str, Any]:
             "created_at": now,
             "updated_at": now,
         }
-    path = _projects_file()
-    _ensure_parent_dir(path)
-    path.write_text(json.dumps(bootstrapped, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    if os.getenv("SIMULATOR_WEBHOOK_PROJECTS_FILE", "").strip():
+        path = _projects_file()
+        _ensure_parent_dir(path)
+        path.write_text(json.dumps(bootstrapped, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
     return bootstrapped
 
 

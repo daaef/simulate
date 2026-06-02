@@ -150,6 +150,62 @@ Recommended stack:
 - [ ] In-app alerts surface operational and governance issues.
 - [ ] The redesigned platform remains Dockerized and deployable behind Nginx without Celery/Redis in v1.
 
+## Active Workstream: Universal Order-Closure + WebSocket-Proof Enforcement (2026-05-28)
+
+### Problem Statement
+
+Current runs can complete with open orders (`pending`/`payment_processing` etc.) and still be marked succeeded when process exit stays zero. This breaks operator trust because runtime outcome does not match user-visible order state.
+
+### Target Behavior
+
+- Every created order in any simulator run (`trace` or `load`) ends terminal as exactly one of:
+  - `completed`
+  - `rejected`
+  - `cancelled`
+- Websocket evidence is mandatory for order lifecycle proof from placement to terminal status.
+- If any created order remains non-terminal after cleanup attempts, the run exits non-zero and is marked failed.
+
+### Existing Behavior
+
+- Per-scenario checks exist, but global end-of-run terminal-order enforcement is missing.
+- Websocket gate/coverage checks can remain warning-level and allow success paths with open orders.
+- Payment context can drift when store context mutates across scenarios, causing payment-intent failures and stuck orders.
+
+### Proposed Approach
+
+1. Remove payment reliance on mutable global store context and pass per-order explicit store context (`subentity_id`, currency).
+2. Add centralized lifecycle finalization used by both `trace` and `load`:
+   - identify created non-terminal orders,
+   - wait briefly for natural settle,
+   - attempt cleanup (cancel first, reject fallback where valid),
+   - re-fetch status and record outcome.
+3. Enforce hard terminal guard after cleanup; unresolved non-terminal orders raise `RuntimeError`.
+4. Tighten websocket lifecycle proof so missing required order websocket proof is run-failing for order-producing runs.
+5. Extend report/story output with explicit unresolved-order and cleanup evidence sections.
+
+### Files to Modify (Workstream)
+
+| File | Purpose of Change |
+|---|---|
+| `trace_runner.py` | Preserve per-scenario store context and ensure no cross-scenario leakage |
+| `user_sim.py` | Pass per-order payment context and support cleanup/re-check primitives |
+| `stripe_sim.py` | Accept explicit payment store context instead of implicit globals |
+| `store_sim.py` | Reuse patch/fetch status helpers for cleanup/revalidation |
+| `__main__.py` | Add shared end-of-run lifecycle finalization + hard terminal guard |
+| `websocket_observer.py` | Promote strict websocket lifecycle proof outcomes for order-producing runs |
+| `reporting.py` | Add cleanup/unresolved summaries into run artifacts |
+| `tests/test_simulate.py` | Regression + lifecycle + websocket strictness coverage |
+| `README.md` | Document global terminal-order and websocket-proof contract |
+| `SIMULATOR_GUIDE.md` | Document operator semantics and failure behavior |
+
+### Acceptance Criteria (Workstream)
+
+- [ ] All created orders in run artifacts end as `completed`, `rejected`, or `cancelled`; otherwise run fails.
+- [ ] Payment intent uses correct store/subentity context after alternate-store/coupon-recovery paths.
+- [ ] Websocket lifecycle proof gaps for created orders fail order-producing runs.
+- [ ] End-of-run cleanup attempts and unresolved orders are visible in `events.json`, `report.md`, and `story.md`.
+- [ ] API run status reflects true failed outcome via non-zero simulator exit.
+
 ## Follow-on Initiative: Contract-Driven Runtime + Docs
 
 ### Goal
@@ -290,3 +346,55 @@ Align Config UX and load-mode runtime behavior with operator expectations while 
 - [ ] Pace presets map to interval values with manual override retained.
 - [ ] Runtime assignment policy matches approved `all_users` semantics.
 - [ ] README/SIMULATOR_GUIDE ownership split is applied in one patch.
+
+## Active Workstream: Pending Order Trace Flow (2026-06-02)
+
+### Problem Statement
+
+Operators need a deliberate flow that places live orders and leaves them pending for manual store-app inspection. Current simulator contracts automatically close or clean up non-terminal orders, so a pending-order seeding flow needs an explicit, narrow exception.
+
+### Target Behavior
+
+- `place-order` appears as a CLI/API/web flow.
+- The flow runs trace scenario `place_order`.
+- `--orders` / `orders` is valid only for this trace flow, defaults to `1`, and is capped at `10`.
+- Store and phone remain optional and follow current plan-random behavior when omitted.
+- Each seeded order must be created and websocket-verified as `pending`.
+- Seeded orders remain pending; standard cleanup is bypassed only for `place_order`.
+
+### Existing Behavior
+
+- `completed` already places an order but drives it through payment, store prep, robot lifecycle, and terminal completion.
+- `--orders` is currently load-only in CLI/API/UI validation.
+- End-of-run order-closure cleanup attempts to settle, cancel, or reject every non-terminal order.
+
+### Proposed Approach
+
+1. Add flow/scenario metadata (`FLOW_PRESETS`, `TRACE_SCENARIOS`, docs/catalog/help).
+2. Tighten validation so `orders` is valid for `place-order` trace runs only, with a max of `10`.
+3. Add a trace runner scenario that loops `SIM_ORDERS`, places orders, waits for pending websocket proof, and records seeded-order decisions.
+4. Add a narrow `order_contract` skip path for `place_order` orders and record cleanup bypass evidence.
+5. Update web launcher UI/help/impact text to expose Orders only for load mode or `place-order`.
+6. Add Python and web tests before implementation, then verify with targeted and full suites.
+
+### Files to Modify (Workstream)
+
+| File | Purpose of Change |
+|---|---|
+| `flow_presets.py` / `scenarios.py` | Add `place-order` preset and `place_order` scenario |
+| `__main__.py` / `api/app/main.py` | Validate trace orders only for `place-order` |
+| `trace_runner.py` / `order_contract.py` | Seed pending orders and skip cleanup only for this scenario |
+| `web/src/app/(app)/runs/page.tsx` / `web/src/components/runs/RunLaunchPanel.tsx` | Show/validate Orders for `place-order` |
+| `web/src/lib/*` | Update command preview, help, impact, tests, and types |
+| `tests/test_simulate.py` / `tests/test_web_api.py` | Regression coverage |
+| `README.md` / `SIMULATOR_GUIDE.md` / `docs/SIMULATOR_CAPABILITIES.md` / `docs/flows/*` | Operator-facing docs |
+
+### Acceptance Criteria (Workstream)
+
+- [ ] `place-order` resolves to `trace` + `place_order`.
+- [ ] `place_order` cannot be combined with suites or extra trace scenarios.
+- [ ] `orders` is accepted only for `place-order` trace mode and rejects values above `10`.
+- [ ] The trace runner places the requested number of orders and requires pending websocket proof.
+- [ ] End-of-run cleanup is bypassed only for `place_order` and logged in artifacts.
+- [ ] Runs UI exposes Orders for `place-order` and keeps it load-only elsewhere.
+- [ ] Docs explain the intentionally pending order behavior and cleanup responsibility.

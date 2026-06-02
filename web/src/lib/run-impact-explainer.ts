@@ -43,20 +43,27 @@ function prettyMode(form: RunCreateRequest, resolvedMode: "trace" | "load"): str
 
 function buildWarnings(form: RunCreateRequest, resolvedMode: "trace" | "load"): string[] {
   const warnings: string[] = [];
+  const isPlaceOrderTrace = resolvedMode === "trace" && form.flow === "place-order";
   if (resolvedMode === "trace" && form.continuous) {
     warnings.push("Continuous is invalid in trace mode.");
   }
   if (
     resolvedMode === "trace" &&
-    (form.users !== undefined || form.orders !== undefined || form.interval !== undefined || form.reject !== undefined)
+    (form.users !== undefined || form.interval !== undefined || form.reject !== undefined)
   ) {
-    warnings.push("users/orders/interval/reject are load-only controls.");
+    warnings.push("users/interval/reject are load-only controls.");
+  }
+  if (resolvedMode === "trace" && form.orders !== undefined && !isPlaceOrderTrace) {
+    warnings.push("Orders are only valid in trace mode for place-order.");
   }
   if (resolvedMode === "load" && ((form.scenarios || []).length > 0 || Boolean(form.suite?.trim()))) {
     warnings.push("suite/scenarios are trace-only controls.");
   }
   if (form.users !== undefined && form.users < 1) warnings.push("Users must be >= 1.");
   if (form.orders !== undefined && form.orders < 1) warnings.push("Orders must be >= 1.");
+  if (isPlaceOrderTrace && form.orders !== undefined && form.orders > 10) {
+    warnings.push("Place-order supports at most 10 orders.");
+  }
   if (form.reject !== undefined && (form.reject < 0 || form.reject > 1)) {
     warnings.push("Reject rate must be between 0 and 1.");
   }
@@ -85,60 +92,99 @@ export function buildExecutionImpact(
   const detailBlocks: ExecutionImpact["detailBlocks"] = [];
 
   if (resolvedMode === "trace") {
-    const suiteLabel = form.suite?.trim() || capability?.default_suite || "core (default)";
-    summaryLines.push(`Trace run using ${suiteLabel} suite context in deterministic order.`);
-    if (selectedScenarios.length) {
-      summaryLines.push(`Explicit scenarios: ${selectedScenarios.join(", ")} (deduped, in declaration order).`);
+    if (form.flow === "place-order") {
+      const orders = form.orders ?? "1";
+      summaryLines.push(`Place-order seeds ${orders} pending order(s) for manual store-app inspection.`);
+      summaryLines.push("Orders are intentionally left pending; simulator cleanup is bypassed only for this flow.");
+      summaryLines.push(
+        form.enforce_websocket_gates
+          ? "Pending websocket proof is required and websocket gates are enforced."
+          : "Pending websocket proof is required for seeded orders.",
+      );
+
+      detailBlocks.push({
+        title: "What Will Run",
+        lines: [
+          `Flow: ${form.flow}.`,
+          `Mode: ${modeLabel}.`,
+          `Orders: ${orders}.`,
+          "Scenario: place_order.",
+        ],
+      });
+
+      detailBlocks.push({
+        title: "Execution Behavior",
+        lines: [
+          "Each order is placed through the user order API and verified as pending via websocket evidence.",
+          "No store accept/reject, payment, robot, or cleanup action is simulated.",
+          "Use the store app or backend tools to inspect and clear the pending orders after the run.",
+        ],
+      });
+
+      detailBlocks.push({
+        title: "Expected Artifacts And Signals",
+        lines: [
+          "Artifacts: events.json, report.md, story.md.",
+          "Expected action signal: pending_order_seeded for each order.",
+          "Common blocking signature: pending websocket gate timeout.",
+        ],
+      });
     } else {
-      summaryLines.push("No explicit scenarios selected; runtime resolves suite/default scenario list.");
+      const suiteLabel = form.suite?.trim() || capability?.default_suite || "core (default)";
+      summaryLines.push(`Trace run using ${suiteLabel} suite context in deterministic order.`);
+      if (selectedScenarios.length) {
+        summaryLines.push(`Explicit scenarios: ${selectedScenarios.join(", ")} (deduped, in declaration order).`);
+      } else {
+        summaryLines.push("No explicit scenarios selected; runtime resolves suite/default scenario list.");
+      }
+      summaryLines.push(
+        form.enforce_websocket_gates
+          ? "Websocket gates enforced: missing required status events will fail the run."
+          : "Websocket gates relaxed: missing required status events are recorded as warnings and run continues.",
+      );
+
+      const payment = paymentSummary(form.flow);
+      if (payment) summaryLines.push(payment);
+
+      detailBlocks.push({
+        title: "What Will Run",
+        lines: [
+          `Flow: ${form.flow}.`,
+          `Mode: ${modeLabel}.`,
+          `Suite selector: ${suiteLabel}.`,
+          selectedScenarios.length
+            ? `Scenario override list: ${selectedScenarios.join(", ")}.`
+            : "Scenario override list: none.",
+        ],
+      });
+
+      detailBlocks.push({
+        title: "Execution Behavior",
+        lines: [
+          form.skip_app_probes
+            ? "App probes are skipped by flag; diagnostics on bootstrap APIs are reduced."
+            : "App probes are enabled; config/cards/coupon/active-order checks are included when scenario paths call them.",
+          form.skip_store_dashboard_probes
+            ? "Store dashboard probes are skipped by flag."
+            : "Store dashboard probes are enabled when relevant scenarios run.",
+          form.no_auto_provision
+            ? "Auto-provision is disabled; missing store/menu/setup prerequisites will fail fast."
+            : "Auto-provision is enabled; runtime may repair setup/menu prerequisites before assertions.",
+          form.post_order_actions
+            ? "Post-order actions are enabled (receipt/review/reorder verification)."
+            : "Post-order actions are disabled unless scenario preset forces them.",
+        ],
+      });
+
+      detailBlocks.push({
+        title: "Expected Artifacts And Signals",
+        lines: [
+          "Artifacts: events.json, report.md, story.md.",
+          "Common blocking signatures: websocket gate timeout (enforced mode), missing Stripe/coupon prerequisites, invalid plan scope.",
+          "Informational decision context may include unsupported_profile_fetch_contract when cached-token profile hydration is intentionally skipped.",
+        ],
+      });
     }
-    summaryLines.push(
-      form.enforce_websocket_gates
-        ? "Websocket gates enforced: missing required status events will fail the run."
-        : "Websocket gates relaxed: missing required status events are recorded as warnings and run continues.",
-    );
-
-    const payment = paymentSummary(form.flow);
-    if (payment) summaryLines.push(payment);
-
-    detailBlocks.push({
-      title: "What Will Run",
-      lines: [
-        `Flow: ${form.flow}.`,
-        `Mode: ${modeLabel}.`,
-        `Suite selector: ${suiteLabel}.`,
-        selectedScenarios.length
-          ? `Scenario override list: ${selectedScenarios.join(", ")}.`
-          : "Scenario override list: none.",
-      ],
-    });
-
-    detailBlocks.push({
-      title: "Execution Behavior",
-      lines: [
-        form.skip_app_probes
-          ? "App probes are skipped by flag; diagnostics on bootstrap APIs are reduced."
-          : "App probes are enabled; config/cards/coupon/active-order checks are included when scenario paths call them.",
-        form.skip_store_dashboard_probes
-          ? "Store dashboard probes are skipped by flag."
-          : "Store dashboard probes are enabled when relevant scenarios run.",
-        form.no_auto_provision
-          ? "Auto-provision is disabled; missing store/menu/setup prerequisites will fail fast."
-          : "Auto-provision is enabled; runtime may repair setup/menu prerequisites before assertions.",
-        form.post_order_actions
-          ? "Post-order actions are enabled (receipt/review/reorder verification)."
-          : "Post-order actions are disabled unless scenario preset forces them.",
-      ],
-    });
-
-    detailBlocks.push({
-      title: "Expected Artifacts And Signals",
-      lines: [
-        "Artifacts: events.json, report.md, story.md.",
-        "Common blocking signatures: websocket gate timeout (enforced mode), missing Stripe/coupon prerequisites, invalid plan scope.",
-        "Informational decision context may include unsupported_profile_fetch_contract when cached-token profile hydration is intentionally skipped.",
-      ],
-    });
   } else {
     const bounded = hasFlag(form.extra_args, "--bounded-load-smoke-policy");
     const users = form.users ?? "plan/env default";

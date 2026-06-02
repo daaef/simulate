@@ -38,7 +38,10 @@ export type LauncherFieldId =
   | "no_auto_provision"
   | "post_order_actions"
   | "continuous"
-  | "enforce_websocket_gates";
+  | "enforce_websocket_gates"
+  | "timeout_fails"
+  | "wait_for_store_action"
+  | "store_auto_cancel";
 
 export type LauncherFieldOption = {
   value: string;
@@ -89,7 +92,10 @@ export const SCENARIO_HELP: Record<string, string> = {
   completed: "Happy-path order through store accept and robot completion.",
   rejected: "Order rejected by store; validates rejection handling.",
   cancelled: "User-initiated cancellation while order is still pending.",
-  auto_cancel: "Backend auto-cancel window when order stays pending too long.",
+  backend_auto_cancel:
+    "Store idle on pending: countdown in the run log, then observe cancelled from backend or customer (primary backend auto-cancel test).",
+  auto_cancel:
+    "Store accept, withhold payment, awaiting-payment countdown in the run log, then observe cancelled (optional; may time out if backend only cancels pending orders).",
   new_user_setup: "OTP/signup path and first-order readiness for a new phone.",
   returning_paid_no_coupon: "Returning user paid order without coupon (Stripe).",
   returning_paid_with_coupon: "Returning user paid order with coupon discount.",
@@ -105,6 +111,7 @@ export const SCENARIO_HELP: Record<string, string> = {
   app_bootstrap: "Config, pricing, cards, coupons, and active-order probes.",
   store_dashboard: "Store dashboard APIs: stats, revenue, top customers.",
   receipt_review_reorder: "Receipt fetch, review/rating, and reorder after completion.",
+  place_order: "Seed pending live orders for manual store-app inspection.",
 };
 
 const FIELD_META: Record<
@@ -165,7 +172,8 @@ const FIELD_META: Record<
   },
   orders: {
     title: "Orders",
-    whenToChange: "Load-only: total orders to place across workers (bounded load).",
+    whenToChange:
+      "Load-only for bounded load; for place-order trace, number of pending orders to seed for manual inspection (max 10).",
     flagKey: "--orders",
   },
   interval: {
@@ -219,6 +227,24 @@ const FIELD_META: Record<
     whenToChange:
       "When enabled, missing required websocket status events fail the run. When off, gaps are recorded as warnings and the run continues.",
     flagKey: "--enforce-websocket-gates / --no-enforce-websocket-gates",
+  },
+  timeout_fails: {
+    title: "Timeout fails",
+    whenToChange:
+      "When enabled, requests use timeout protection and timeout events fail the run. When off, requests wait indefinitely for endpoint responses.",
+    flagKey: "--timeout-fails",
+  },
+  wait_for_store_action: {
+    title: "Wait for real store",
+    whenToChange:
+      "Trace only: disables simulator store actions and waits for a real store operator to accept, reject, or mark orders ready from their app. Use when testing the actual store app against a live run.",
+    flagKey: "--wait-for-store-action",
+  },
+  store_auto_cancel: {
+    title: "Store auto cancel",
+    whenToChange:
+      "Trace only: adds the auto_cancel scenario — store accepts the order, payment is withheld, then the simulator watches to see whether the backend cancels the awaiting-payment order. Off by default.",
+    flagKey: "--scenario",
   },
 };
 
@@ -301,6 +327,12 @@ export function getFieldValue(form: RunCreateRequest, fieldId: LauncherFieldId):
       return Boolean(form.continuous);
     case "enforce_websocket_gates":
       return Boolean(form.enforce_websocket_gates);
+    case "timeout_fails":
+      return Boolean(form.timeout_fails);
+    case "wait_for_store_action":
+      return Boolean(form.wait_for_store_action);
+    case "store_auto_cancel":
+      return Boolean(form.store_auto_cancel);
     default:
       return undefined;
   }
@@ -334,6 +366,19 @@ function checkboxSelectedHelp(
           valueLabel: "Off",
           description:
             "Missing websocket gate events are recorded as warnings and the run continues (default in many environments).",
+        };
+  }
+  if (fieldId === "timeout_fails") {
+    return checked
+      ? {
+          valueLabel: "On",
+          description:
+            "HTTP request timeouts are enforced and timeout events fail the run.",
+        }
+      : {
+          valueLabel: "Off",
+          description:
+            "HTTP requests wait indefinitely for endpoint responses; timeout failures are not enforced.",
         };
   }
   return {
@@ -381,6 +426,9 @@ export function getSelectedOptionHelp(
     "post_order_actions",
     "continuous",
     "enforce_websocket_gates",
+    "timeout_fails",
+    "wait_for_store_action",
+    "store_auto_cancel",
   ];
   if (checkboxFields.includes(fieldId)) {
     return checkboxSelectedHelp(fieldId, Boolean(value), context);
@@ -457,7 +505,10 @@ export function getSelectedOptionHelp(
     if (value === undefined || value === "") {
       return {
         valueLabel: "(not set)",
-        description: "Uses the flow or environment default for this load parameter.",
+        description:
+          fieldId === "orders" && context.resolvedMode === "trace" && context.form.flow === "place-order"
+            ? "Uses the place-order default of 1 pending order."
+            : "Uses the flow or environment default for this load parameter.",
       };
     }
     const numericLabel = String(value);
@@ -514,7 +565,9 @@ export function getLauncherFieldHelp(
   if (!meta) return null;
 
   const capability = context.flowCapabilities[context.form.flow] || null;
-  const constraints: string[] = [...flagConstraints(meta.flagKey)];
+  const isPlaceOrderOrders =
+    fieldId === "orders" && context.resolvedMode === "trace" && context.form.flow === "place-order";
+  const constraints: string[] = isPlaceOrderOrders ? [] : [...flagConstraints(meta.flagKey)];
 
   let options: LauncherFieldOption[] | undefined;
 
@@ -636,7 +689,15 @@ export function getLauncherFieldHelp(
       break;
     }
     case "users":
+      constraints.push(...loadOnlyConstraint(context.resolvedMode));
+      break;
     case "orders":
+      if (context.resolvedMode === "trace" && context.form.flow === "place-order") {
+        constraints.push("Place-order trace only; value must be between 1 and 10.");
+      } else {
+        constraints.push(...loadOnlyConstraint(context.resolvedMode));
+      }
+      break;
     case "reject":
     case "continuous":
       constraints.push(...loadOnlyConstraint(context.resolvedMode));

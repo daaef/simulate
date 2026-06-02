@@ -15,6 +15,7 @@ const baseForm: RunCreateRequest = {
   skip_store_dashboard_probes: false,
   no_auto_provision: false,
   enforce_websocket_gates: false,
+  timeout_fails: false,
   post_order_actions: false,
   continuous: false,
   extra_args: [],
@@ -34,5 +35,24 @@ describe("buildRunCommandPreview", () => {
     const preview = buildRunCommandPreview(baseForm);
     expect(preview).not.toContain("--no-random-phone");
     expect(preview).not.toContain("--no-random-store");
+  });
+
+  it("includes timeout-fails flag when enabled", () => {
+    const preview = buildRunCommandPreview({
+      ...baseForm,
+      timeout_fails: true,
+    });
+    expect(preview).toContain("--timeout-fails");
+  });
+
+  it("includes orders for place-order trace runs", () => {
+    const preview = buildRunCommandPreview({
+      ...baseForm,
+      flow: "place-order",
+      orders: 3,
+    });
+
+    expect(preview).toContain("simulate place-order");
+    expect(preview).toContain("--orders 3");
   });
 });

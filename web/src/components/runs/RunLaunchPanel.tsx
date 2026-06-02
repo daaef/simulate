@@ -112,6 +112,8 @@ export default function RunLaunchPanel({
   const scenarioOptions = capability?.available_scenarios || [];
   const isTraceMode = resolvedMode === "trace";
   const isLoadMode = resolvedMode === "load";
+  const isPlaceOrderTrace = isTraceMode && form.flow === "place-order";
+  const showOrdersField = isLoadMode || isPlaceOrderTrace;
   const loadPaceSelection = resolveLoadPaceSelection(form.interval);
   const focus = (fieldId: LauncherFieldId) => launcherFieldFocusHandlers(fieldId, onFocusField);
   const touch = (fieldId: LauncherFieldId) => notifyLauncherField(fieldId, onFocusField);
@@ -134,13 +136,14 @@ export default function RunLaunchPanel({
                   onFormChange((prev) => {
                     const nextFlow = event.target.value;
                     const nextMode = flowCapabilities[nextFlow]?.resolved_mode || "trace";
+                    const allowsOrders = nextMode === "load" || nextFlow === "place-order";
                     return {
                       ...prev,
                       flow: nextFlow,
                       suite: undefined,
                       scenarios: [],
                       users: nextMode === "trace" ? undefined : prev.users,
-                      orders: nextMode === "trace" ? undefined : prev.orders,
+                      orders: allowsOrders ? prev.orders : undefined,
                       interval: nextMode === "trace" ? undefined : prev.interval,
                       reject: nextMode === "trace" ? undefined : prev.reject,
                       continuous: nextMode === "trace" ? false : prev.continuous,
@@ -216,7 +219,10 @@ export default function RunLaunchPanel({
                       suite: event.target.value === "load" ? undefined : prev.suite,
                       scenarios: event.target.value === "load" ? [] : prev.scenarios,
                       users: event.target.value === "trace" ? undefined : prev.users,
-                      orders: event.target.value === "trace" ? undefined : prev.orders,
+                      orders:
+                        event.target.value === "trace" && prev.flow !== "place-order"
+                          ? undefined
+                          : prev.orders,
                       interval: event.target.value === "trace" ? undefined : prev.interval,
                       reject: event.target.value === "trace" ? undefined : prev.reject,
                       continuous: event.target.value === "trace" ? false : prev.continuous,
@@ -345,12 +351,13 @@ export default function RunLaunchPanel({
                 />
               </label>
             ) : null}
-            {isLoadMode ? (
+            {showOrdersField ? (
               <label {...focus("orders")}>
                 <div>Orders</div>
                 <input
                   type="number"
                   min={1}
+                  max={isPlaceOrderTrace ? 10 : undefined}
                   value={form.orders ?? ""}
                   onChange={(event) => {
                     touch("orders");
@@ -359,7 +366,7 @@ export default function RunLaunchPanel({
                       orders: event.target.value ? Number(event.target.value) : undefined,
                     }));
                   }}
-                  placeholder="e.g. 50"
+                  placeholder={isPlaceOrderTrace ? "e.g. 3" : "e.g. 50"}
                 />
               </label>
             ) : null}
@@ -541,6 +548,49 @@ export default function RunLaunchPanel({
                   }}
                 />
                 Enforce Websocket Gates
+              </label>
+            </div>
+            {isTraceMode ? (
+              <div className="launcher-field-group" {...focus("store_auto_cancel")}>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={form.store_auto_cancel || false}
+                    onChange={(event) => {
+                      touch("store_auto_cancel");
+                      onFormChange((prev) => ({ ...prev, store_auto_cancel: event.target.checked }));
+                    }}
+                  />
+                  Store auto cancel
+                </label>
+              </div>
+            ) : null}
+            {isTraceMode ? (
+              <div className="launcher-field-group" {...focus("wait_for_store_action")}>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={form.wait_for_store_action || false}
+                    onChange={(event) => {
+                      touch("wait_for_store_action");
+                      onFormChange((prev) => ({ ...prev, wait_for_store_action: event.target.checked }));
+                    }}
+                  />
+                  Wait for real store action
+                </label>
+              </div>
+            ) : null}
+            <div className="launcher-field-group" {...focus("timeout_fails")}>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.timeout_fails || false}
+                  onChange={(event) => {
+                    touch("timeout_fails");
+                    onFormChange((prev) => ({ ...prev, timeout_fails: event.target.checked }));
+                  }}
+                />
+                Timeout Fails
               </label>
             </div>
           </div>

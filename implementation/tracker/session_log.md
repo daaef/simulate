@@ -2809,3 +2809,192 @@ python3 __main__.py new-user --plan sim_actors.json --timing fast
 
 1. Run regression script; review `runs/flow-reliability-<date>.md`.
 2. Optionally copy summary to `docs/reports/`.
+
+## 2026-05-28 16:10
+
+### Summary
+
+Started implementation workstream for universal terminal-order enforcement and strict websocket lifecycle proof. Synced existing tracker/docs/code, confirmed current run-status semantics, and aligned tracker files to the new no-open-order contract.
+
+### Files Created / Modified
+
+- `implementation/tracker/README.md`
+- `implementation/tracker/implementation_plan.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '1,220p' README.md
+sed -n '1,260p' SIMULATOR_GUIDE.md
+sed -n '1,220p' ARCHITECTURE.md
+sed -n '1,260p' .agents/skills/implementation-tracker/SKILL.md
+ls -la implementation/tracker
+sed -n '1,260p' implementation/tracker/README.md
+sed -n '1,320p' implementation/tracker/implementation_plan.md
+sed -n '1,320p' implementation/tracker/tasks.md
+tail -n 260 implementation/tracker/session_log.md
+```
+
+### Results
+
+- Tracker now reflects active Phase 35 objective:
+  - every created order must end terminal (`completed`/`rejected`/`cancelled`),
+  - websocket lifecycle proof required for order-producing runs,
+  - unresolved non-terminal orders force run failure.
+- Ready to begin code/test implementation in runtime modules.
+
+### Issues / Blockers
+
+- None currently blocking implementation.
+
+### Next Steps
+
+1. Add tests for shared terminal-order guard and unresolved non-terminal failure behavior.
+2. Implement shared finalization/cleanup guard in runtime path (`trace` + `load`).
+3. Fix payment context leakage by passing explicit store context through payment functions.
+
+## 2026-05-28 16:35
+
+### Summary
+
+Implemented Phase 35 universal contract enforcement across simulator runtime paths. Added explicit per-order payment context propagation, end-of-run order lifecycle finalization/cleanup, strict websocket lifecycle proof validation for order-producing runs, and run-failing guard propagation via process exit.
+
+### Files Created / Modified
+
+- `order_contract.py` (new)
+- `__main__.py`
+- `trace_runner.py`
+- `user_sim.py`
+- `stripe_sim.py`
+- `websocket_observer.py`
+- `reporting.py`
+- `tests/test_simulate.py`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+PYTHONPYCACHEPREFIX=/private/tmp/pycache_sim python3 -m py_compile __main__.py trace_runner.py user_sim.py stripe_sim.py websocket_observer.py reporting.py order_contract.py tests/test_simulate.py
+PYTHONPYCACHEPREFIX=/private/tmp/pycache_sim python3 -m unittest tests.test_simulate.WebsocketValidationStrictTests tests.test_simulate.OrderContractTests tests.test_simulate.PaymentContextPropagationTests tests.test_simulate.FlowReliabilityPolicyTests -v
+PYTHONPYCACHEPREFIX=/private/tmp/pycache_sim python3 -m unittest tests.test_simulate.TraceBootstrapTests.test_auto_provision_runs_before_fixtures_for_app_like_scenarios -v
+PYTHONPYCACHEPREFIX=/private/tmp/pycache_sim python3 -m unittest tests.test_simulate -v
+```
+
+### Results
+
+- Compile check passed.
+- Targeted new tests passed.
+- Full simulator unit suite passed: 96 tests.
+
+### Issues / Blockers
+
+- None in local unit scope.
+
+### Next Steps
+
+1. Run a controlled live `trace`/`full` command and verify no pending orders remain in app after run completion.
+2. Confirm failed-notification path triggers on intentionally induced websocket lifecycle proof failure.
+
+## 2026-06-02 00:04
+
+### Summary
+
+Started Phase 36 implementation for the approved `place-order` trace flow. This flow is a deliberate exception to the universal terminal-order contract: it seeds pending orders for manual inspection while preserving terminal cleanup enforcement for all other simulator flows.
+
+### Files Planned
+
+- `flow_presets.py`
+- `scenarios.py`
+- `__main__.py`
+- `api/app/main.py`
+- `trace_runner.py`
+- `order_contract.py`
+- `web/src/app/(app)/runs/page.tsx`
+- `web/src/components/runs/RunLaunchPanel.tsx`
+- `web/src/lib/run-command-preview.ts`
+- `web/src/lib/run-launcher-config.ts`
+- `web/src/lib/run-impact-explainer.ts`
+- `tests/test_simulate.py`
+- `tests/test_web_api.py`
+- `web/src/lib/*.test.ts`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `docs/SIMULATOR_CAPABILITIES.md`
+- `docs/flows/*`
+
+### Validation Plan
+
+```bash
+PYTHONPYCACHEPREFIX=/private/tmp/pycache_sim python3 -m unittest tests.test_simulate tests.test_web_api -v
+cd web && npm test
+```
+
+### Risks / Notes
+
+- Worktree is already dirty across many target files; preserve existing uncommitted changes.
+- `place_order` must be the only allowed non-terminal order contract bypass.
+- `orders` must remain invalid for all other trace flows.
+
+## 2026-06-02 00:34
+
+### Summary
+
+Implemented Phase 36 `place-order` pending-order trace flow. Added the `place-order` flow preset and `place_order` trace scenario, trace-only `orders` validation capped at 10, pending-order seeding in `trace_runner`, and an explicit order-contract exception that only preserves websocket-proven `place_order` orders left in `pending`.
+
+Updated Runs UI behavior so the Orders field is visible for `place-order` trace runs, command preview/help/impact text explains the pending-order side effect, and flow capabilities advertise the special `orders` allowance.
+
+### Files Created / Modified In This Workstream
+
+- `docs/flows/place-order.md` (new)
+- `flow_presets.py`
+- `scenarios.py`
+- `__main__.py`
+- `api/app/main.py`
+- `api/app/integrations/webhook_config.py`
+- `api/app/integrations/webhook_projects_store.py`
+- `trace_runner.py`
+- `order_contract.py`
+- `web/src/app/(app)/runs/page.tsx`
+- `web/src/components/runs/RunLaunchPanel.tsx`
+- `web/src/lib/command-guide.ts`
+- `web/src/lib/run-impact-explainer.ts`
+- `web/src/lib/run-launcher-config.ts`
+- `web/src/lib/run-command-preview.test.ts`
+- `web/src/lib/run-launcher-config.test.ts`
+- `tests/test_simulate.py`
+- `tests/test_web_api.py`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `ARCHITECTURE.md`
+- `docs/SIMULATOR_CAPABILITIES.md`
+- `docs/SIMULATION_TEST_GUIDE.md`
+- `docs/HOW_IT_WORKS.md`
+- `docs/flows/README.md`
+- `scripts/gui_flow_test.py`
+
+### Verification
+
+```bash
+PYTHONPYCACHEPREFIX=/private/tmp/pycache_sim python3 -m py_compile __main__.py flow_presets.py scenarios.py trace_runner.py order_contract.py api/app/main.py api/app/integrations/webhook_config.py api/app/integrations/webhook_projects_store.py tests/test_simulate.py tests/test_web_api.py scripts/gui_flow_test.py
+python3 scripts/check_flow_docs.py
+PYTHONPYCACHEPREFIX=/private/tmp/pycache_sim python3 -m unittest tests.test_simulate.RunPlanTests.test_place_order_flow_resolves_to_pending_trace_scenario tests.test_simulate.RunPlanTests.test_place_order_scenario_cannot_mix_with_suite tests.test_simulate.OrderContractTests.test_order_contract_preserves_place_order_pending_orders tests.test_simulate.TracePlaceOrderTests.test_run_place_order_seeds_requested_pending_orders tests.test_web_api.RunExecutionSnapshotTests.test_build_command_rejects_invalid_mode_combinations tests.test_web_api.RunExecutionSnapshotTests.test_build_command_allows_place_order_trace_orders_with_cap tests.test_web_api.FlowCapabilitiesTests.test_flows_payload_includes_capabilities -v
+cd web && npm test
+PYTHONPYCACHEPREFIX=/private/tmp/pycache_sim python3 -m unittest tests.test_simulate tests.test_web_api -v
+```
+
+### Results
+
+- Compile check passed.
+- Flow-doc parity check passed: 17 flow docs present.
+- Focused `place-order` Python/API tests passed: 7 tests.
+- Web suite passed: 8 files, 56 tests.
+- Full requested Python suite ran 212 tests with one remaining failure: `tests.test_web_api.SchedulesApiTests.test_new_contract_schedule_shifts_into_run_window`.
+
+### Remaining Caveat
+
+The remaining Python failure is unrelated to `place-order`. It is a midnight-edge schedule-window assertion: at current UTC time near midnight, the scheduler returns `2026-06-02 00:00` for a `00:00` slot inside a wrapping run window, while the test expects a shift to the current-day window start (`2026-06-01 23:33` during the final run).

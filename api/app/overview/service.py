@@ -12,9 +12,13 @@ from ..runs import service as runs_service
 
 FindingBucket = Literal["critical", "operational"]
 
-CRITICAL_FINDINGS_CAP = 10
-OPERATIONAL_FINDINGS_CAP = 25
-ARTIFACT_ISSUES_SCAN_LIMIT = 24
+LATEST_RUN_CRITICAL_FINDINGS_CAP = 10
+LATEST_RUN_OPERATIONAL_FINDINGS_CAP = 25
+LATEST_RUN_ARTIFACT_ISSUES_SCAN_LIMIT = 24
+
+RUN_DETAIL_CRITICAL_FINDINGS_CAP = 500
+RUN_DETAIL_OPERATIONAL_FINDINGS_CAP = 500
+RUN_DETAIL_ARTIFACT_ISSUES_SCAN_LIMIT: int | None = None
 
 ACTOR_KEYS = ("user", "store", "robot")
 CRITICAL_ISSUE_CODES = frozenset(
@@ -289,6 +293,9 @@ def _issue_row_from_artifact(
         "route": route,
     }
     row.update(_issue_context_fields(issue=issue, related_event=related_event, events=events))
+    related_id = _related_event_id(issue)
+    if related_id is not None:
+        row["related_event_id"] = related_id
     return row
 
 
@@ -318,7 +325,17 @@ def _issue_row_from_event(event: dict[str, Any], events: list[dict[str, Any]]) -
     }
     if flow_label:
         row["flow_label"] = flow_label
+    event_id = _event_id(event)
+    if event_id is not None:
+        row["related_event_id"] = event_id
     return row
+
+
+def _finding_related_event_id(row: dict[str, Any]) -> int | None:
+    try:
+        return int(row.get("related_event_id"))
+    except (TypeError, ValueError):
+        return None
 
 
 def _event_timestamp(event: dict[str, Any]) -> str:
@@ -683,7 +700,11 @@ def _build_findings(
     events: list[dict[str, Any]],
     artifact_issues: list[dict[str, Any]],
     run: dict[str, Any],
-) -> dict[str, list[dict[str, Any]]]:
+    *,
+    critical_cap: int,
+    operational_cap: int,
+    artifact_issues_scan_limit: int | None,
+) -> dict[str, Any]:
     critical: list[dict[str, Any]] = []
     operational: list[dict[str, Any]] = []
     event_by_id: dict[int, dict[str, Any]] = {}
@@ -694,21 +715,26 @@ def _build_findings(
         if event_id is not None:
             event_by_id[event_id] = event
 
-    for issue in artifact_issues[:ARTIFACT_ISSUES_SCAN_LIMIT]:
+    issues_to_scan = artifact_issues
+    if artifact_issues_scan_limit is not None:
+        issues_to_scan = artifact_issues[:artifact_issues_scan_limit]
+
+    for issue in issues_to_scan:
         try:
             related_id = _related_event_id(issue)
             if related_id is not None:
                 represented_event_ids.add(related_id)
             row = _issue_row_from_artifact(issue, event_by_id, events)
             if _finding_bucket_issue(issue) == "critical":
-                critical.append(row)
-            else:
+                if len(critical) < critical_cap:
+                    critical.append(row)
+            elif len(operational) < operational_cap:
                 operational.append(row)
         except Exception:
             continue
 
     for event in events:
-        if len(critical) >= CRITICAL_FINDINGS_CAP:
+        if len(critical) >= critical_cap:
             break
         event_id = _event_id(event)
         if event_id is not None and event_id in represented_event_ids:
@@ -723,7 +749,7 @@ def _build_findings(
             continue
 
     for event in events:
-        if len(operational) >= OPERATIONAL_FINDINGS_CAP:
+        if len(operational) >= operational_cap:
             break
         event_id = _event_id(event)
         if event_id is not None and event_id in represented_event_ids:
@@ -739,34 +765,111 @@ def _build_findings(
         except Exception:
             continue
 
+    failed_event_ids = {
+        event_id
+        for event in events
+        if (event_id := _event_id(event)) is not None and is_metric_failed_event(event)
+    }
+    for event in events:
+        if len(operational) >= operational_cap:
+            break
+        event_id = _event_id(event)
+        if event_id is None or event_id in represented_event_ids:
+            continue
+        if event_id not in failed_event_ids:
+            continue
+        try:
+            row = _issue_row_from_event(event, events)
+            row["code"] = "unclassified_failed_event"
+            row["message"] = (
+                _event_message(event)
+                or "Failed event was not classified into critical/operational buckets."
+            )
+            operational.append(row)
+            represented_event_ids.add(event_id)
+        except Exception:
+            continue
+
     if run.get("error") and _is_server_api_failure_issue({"code": "run_error", "message": _str(run.get("error"))}):
-        critical.insert(
-            0,
-            {
-                "severity": "error",
-                "code": "run_error",
-                "message": run.get("error"),
-                "actor": "system",
-                "at": run.get("finished_at") or run.get("created_at"),
-                "route": None,
-                "flow": None,
-                "step": None,
-                "method": None,
-                "http_status": None,
-                "order_ref": None,
-                "preceding_steps": [],
-            },
-        )
+        if len(critical) < critical_cap:
+            critical.insert(
+                0,
+                {
+                    "severity": "error",
+                    "code": "run_error",
+                    "message": run.get("error"),
+                    "actor": "system",
+                    "at": run.get("finished_at") or run.get("created_at"),
+                    "route": None,
+                    "flow": None,
+                    "step": None,
+                    "method": None,
+                    "http_status": None,
+                    "order_ref": None,
+                    "preceding_steps": [],
+                },
+            )
+
+    critical_out = critical[:critical_cap]
+    operational_out = operational[:operational_cap]
+    represented_in_findings = {
+        event_id
+        for row in critical_out + operational_out
+        if (event_id := _finding_related_event_id(row)) is not None
+    }
+    failed_events_total = len(failed_event_ids)
+    represented_failed_events = len(failed_event_ids & represented_in_findings)
+    findings_rows_shown = len(critical_out) + len(operational_out)
 
     return {
-        "critical": critical[:CRITICAL_FINDINGS_CAP],
-        "operational": operational[:OPERATIONAL_FINDINGS_CAP],
+        "critical": critical_out,
+        "operational": operational_out,
+        "meta": {
+            "failed_events_total": failed_events_total,
+            "represented_failed_events": represented_failed_events,
+            "findings_rows_shown": findings_rows_shown,
+            "truncated": represented_failed_events < failed_events_total,
+        },
     }
+
+
+def _build_findings_latest(
+    events: list[dict[str, Any]],
+    artifact_issues: list[dict[str, Any]],
+    run: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    payload = _build_findings(
+        events,
+        artifact_issues,
+        run,
+        critical_cap=LATEST_RUN_CRITICAL_FINDINGS_CAP,
+        operational_cap=LATEST_RUN_OPERATIONAL_FINDINGS_CAP,
+        artifact_issues_scan_limit=LATEST_RUN_ARTIFACT_ISSUES_SCAN_LIMIT,
+    )
+    return {
+        "critical": payload["critical"],
+        "operational": payload["operational"],
+    }
+
+
+def _build_findings_run_detail(
+    events: list[dict[str, Any]],
+    artifact_issues: list[dict[str, Any]],
+    run: dict[str, Any],
+) -> dict[str, Any]:
+    return _build_findings(
+        events,
+        artifact_issues,
+        run,
+        critical_cap=RUN_DETAIL_CRITICAL_FINDINGS_CAP,
+        operational_cap=RUN_DETAIL_OPERATIONAL_FINDINGS_CAP,
+        artifact_issues_scan_limit=RUN_DETAIL_ARTIFACT_ISSUES_SCAN_LIMIT,
+    )
 
 
 def _issues(events: list[dict[str, Any]], artifact_issues: list[dict[str, Any]], run: dict[str, Any]) -> list[dict[str, Any]]:
     """Backward-compatible alias: critical findings only."""
-    return _build_findings(events, artifact_issues, run)["critical"]
+    return _build_findings_latest(events, artifact_issues, run)["critical"]
 
 
 def _derived_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -817,23 +920,38 @@ def latest_run_overview() -> dict[str, Any]:
             "lifecycle": [],
             "issues": [],
             "findings": {"critical": [], "operational": []},
+            "findings_meta": {},
             "run_meta": {},
         }
 
-    return _build_overview_payload(run)
+    return _build_overview_payload(run, use_run_detail_findings=False)
 
 
 def run_overview(run_id: int) -> dict[str, Any]:
     run = runs_service.get_run(run_id)
-    return _build_overview_payload(run)
+    return _build_overview_payload(run, use_run_detail_findings=True)
 
 
-def _build_overview_payload(run: dict[str, Any]) -> dict[str, Any]:
+def _build_overview_payload(
+    run: dict[str, Any],
+    *,
+    use_run_detail_findings: bool,
+) -> dict[str, Any]:
     run_id = int(run["id"])
     events, artifact_issues, run_meta = _load_events(run_id)
     metrics = _load_metrics(run_id) or _derived_metrics(events)
 
-    findings = _build_findings(events, artifact_issues, run)
+    if use_run_detail_findings:
+        findings_payload = _build_findings_run_detail(events, artifact_issues, run)
+    else:
+        findings_payload = _build_findings(
+            events,
+            artifact_issues,
+            run,
+            critical_cap=LATEST_RUN_CRITICAL_FINDINGS_CAP,
+            operational_cap=LATEST_RUN_OPERATIONAL_FINDINGS_CAP,
+            artifact_issues_scan_limit=LATEST_RUN_ARTIFACT_ISSUES_SCAN_LIMIT,
+        )
 
     return {
         "run": {
@@ -850,7 +968,11 @@ def _build_overview_payload(run: dict[str, Any]) -> dict[str, Any]:
             "websocket": _websocket_summary(events),
         },
         "lifecycle": _build_lifecycle(events, run),
-        "findings": findings,
-        "issues": findings["critical"],
+        "findings": {
+            "critical": findings_payload["critical"],
+            "operational": findings_payload["operational"],
+        },
+        "findings_meta": findings_payload.get("meta") or {},
+        "issues": findings_payload["critical"],
         "run_meta": run_meta,
     }

@@ -22,7 +22,7 @@ from rich.console import Console
 import config
 from reporting import RunRecorder
 from scenarios import resolve_timing_profile
-from transport import RequestError, api_data, build_auth_proof, request_json
+from transport import RequestError, api_data, build_auth_proof, request_json, resolve_timeout
 
 console = Console()
 
@@ -54,12 +54,14 @@ class HttpApiError(RuntimeError):
         status_code: int,
         response_text: str,
         related_event_id: int | None = None,
+        reason_code: str | None = None,
     ) -> None:
         super().__init__(f"HTTP {status_code} from {url}: {response_text[:500]}")
         self.url = url
         self.status_code = status_code
         self.response_text = response_text
         self.related_event_id = related_event_id
+        self.reason_code = reason_code
 
 
 def _token(payload: dict[str, Any]) -> str | None:
@@ -93,13 +95,14 @@ async def _auth_request(
     track_order: bool = False,
 ) -> Any:
     if recorder is None:
+        timeout = resolve_timeout(None)
         response = await client.request(
             method=method.upper(),
             url=url,
             params=params,
             json=json_body,
             headers=headers,
-            timeout=30.0,
+            timeout=timeout,
         )
         try:
             response.raise_for_status()
@@ -140,12 +143,14 @@ async def _auth_request(
                 status_code=exc.result.response.status_code,
                 response_text=exc.result.response.text,
                 related_event_id=exc.event["id"] if exc.event else None,
+                reason_code=exc.reason_code,
             ) from exc
         raise HttpApiError(
             url=url,
             status_code=0,
             response_text=str(exc),
             related_event_id=exc.event["id"] if exc.event else None,
+            reason_code=exc.reason_code,
         ) from exc
     return result.payload
 

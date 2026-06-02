@@ -54,6 +54,27 @@ class RunPlanTests(unittest.TestCase):
         assert resolved is not None
         self.assertEqual(resolved["name"], "robot-complete")
 
+    def test_place_order_flow_resolves_to_pending_trace_scenario(self) -> None:
+        resolved = resolve_flow("place-order")
+        self.assertIsNotNone(resolved)
+        assert resolved is not None
+        self.assertEqual(resolved["name"], "place-order")
+        self.assertEqual(resolved["mode"], "trace")
+        self.assertEqual(resolved.get("scenarios"), ["place_order"])
+        self.assertEqual(
+            resolve_trace_scenarios(
+                suite=resolved.get("suite"),
+                scenarios=resolved.get("scenarios"),
+            ),
+            ["place_order"],
+        )
+
+    def test_place_order_scenario_cannot_mix_with_suite(self) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            resolve_trace_scenarios(suite="core", scenarios=["place_order"])
+
+        self.assertIn("place_order cannot be combined", str(raised.exception))
+
     def test_loads_json_plan_with_user_gps_and_store_ids(self) -> None:
         from run_plan import load_run_plan
 
@@ -229,6 +250,7 @@ class RunPlanTests(unittest.TestCase):
             "SIM_RUN_STORE_DASHBOARD_PROBES",
             "SIM_RUN_POST_ORDER_ACTIONS",
             "SIM_ENFORCE_WEBSOCKET_GATES",
+            "SIM_TIMEOUT_FAILS",
             "SIM_AUTO_SELECT_STORE",
             "SIM_AUTO_SELECT_COUPON",
             "SIM_AUTO_PROVISION_FIXTURES",
@@ -276,6 +298,7 @@ class RunPlanTests(unittest.TestCase):
                     "run_store_dashboard_probes": false,
                     "run_post_order_actions": true,
                     "run_enforce_websocket_gates": true,
+                    "run_timeout_fails": true,
                     "auto_select_store": false,
                     "auto_select_coupon": false,
                     "auto_provision_fixtures": false
@@ -321,6 +344,7 @@ class RunPlanTests(unittest.TestCase):
                 self.assertFalse(config.SIM_RUN_STORE_DASHBOARD_PROBES)
                 self.assertTrue(config.SIM_RUN_POST_ORDER_ACTIONS)
                 self.assertTrue(config.SIM_ENFORCE_WEBSOCKET_GATES)
+                self.assertTrue(config.SIM_TIMEOUT_FAILS)
                 self.assertFalse(config.SIM_AUTO_SELECT_STORE)
                 self.assertFalse(config.SIM_AUTO_SELECT_COUPON)
                 self.assertFalse(config.SIM_AUTO_PROVISION_FIXTURES)
@@ -822,16 +846,21 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
         async def fake_store_first_setup(*args, **kwargs):
             calls.append("setup")
 
+        async def fake_provision_menus(*args, **kwargs):
+            return _fixtures()
+
         originals = (
             trace_runner.user_sim.bootstrap_auth,
             trace_runner.store_sim.bootstrap_auth,
             trace_runner.user_sim.bootstrap_fixtures,
             trace_runner._run_store_first_setup,
+            trace_runner._provision_menus_flow_inventory,
         )
         trace_runner.user_sim.bootstrap_auth = fake_user_auth
         trace_runner.store_sim.bootstrap_auth = fake_store_auth
         trace_runner.user_sim.bootstrap_fixtures = fake_bootstrap_fixtures
         trace_runner._run_store_first_setup = fake_store_first_setup
+        trace_runner._provision_menus_flow_inventory = fake_provision_menus
         try:
             await trace_runner.run(
                 recorder=recorder,
@@ -845,6 +874,7 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 trace_runner.store_sim.bootstrap_auth,
                 trace_runner.user_sim.bootstrap_fixtures,
                 trace_runner._run_store_first_setup,
+                trace_runner._provision_menus_flow_inventory,
             ) = originals
 
         self.assertLess(calls.index("setup"), calls.index("fixtures"))
@@ -887,16 +917,21 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
         async def fake_store_first_setup(*args, **kwargs):
             calls.append("setup")
 
+        async def fake_provision_menus(*args, **kwargs):
+            return _fixtures()
+
         originals = (
             trace_runner.user_sim.bootstrap_auth,
             trace_runner.store_sim.bootstrap_auth,
             trace_runner.user_sim.bootstrap_fixtures,
             trace_runner._run_store_first_setup,
+            trace_runner._provision_menus_flow_inventory,
         )
         trace_runner.user_sim.bootstrap_auth = fake_user_auth
         trace_runner.store_sim.bootstrap_auth = fake_store_auth
         trace_runner.user_sim.bootstrap_fixtures = fake_bootstrap_fixtures
         trace_runner._run_store_first_setup = fake_store_first_setup
+        trace_runner._provision_menus_flow_inventory = fake_provision_menus
         config.SIM_AUTO_PROVISION_FIXTURES = True
         config.SIM_MUTATE_STORE_SETUP = False
         config.SIM_MUTATE_MENU_SETUP = False
@@ -913,6 +948,7 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 trace_runner.store_sim.bootstrap_auth,
                 trace_runner.user_sim.bootstrap_fixtures,
                 trace_runner._run_store_first_setup,
+                trace_runner._provision_menus_flow_inventory,
             ) = originals
             if previous_auto is None:
                 delattr(config, "SIM_AUTO_PROVISION_FIXTURES")
@@ -1060,16 +1096,21 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
         async def fake_store_first_setup(*args, **kwargs):
             return None
 
+        async def fake_provision_menus(*args, **kwargs):
+            return _fixtures()
+
         originals = (
             trace_runner.user_sim.bootstrap_auth,
             trace_runner.store_sim.bootstrap_auth,
             trace_runner.user_sim.bootstrap_fixtures,
             trace_runner._run_store_first_setup,
+            trace_runner._provision_menus_flow_inventory,
         )
         trace_runner.user_sim.bootstrap_auth = fake_user_auth
         trace_runner.store_sim.bootstrap_auth = fake_store_auth
         trace_runner.user_sim.bootstrap_fixtures = fake_bootstrap_fixtures
         trace_runner._run_store_first_setup = fake_store_first_setup
+        trace_runner._provision_menus_flow_inventory = fake_provision_menus
         config.STORE_ID = "FZY_BAD"
         config.SIM_ACTORS = {
             "defaults": {},
@@ -1094,6 +1135,7 @@ class TraceBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 trace_runner.store_sim.bootstrap_auth,
                 trace_runner.user_sim.bootstrap_fixtures,
                 trace_runner._run_store_first_setup,
+                trace_runner._provision_menus_flow_inventory,
             ) = originals
             config.STORE_ID = previous_store_id
             if previous_actors is None:
@@ -1615,6 +1657,8 @@ class DecisionConsoleLogTests(unittest.IsolatedAsyncioTestCase):
                     token_source="test",
                     order_ref="#123456",
                     order_db_id=99,
+                    store_subentity_id=7,
+                    currency="jpy",
                     recorder=RunRecorder.bootstrap(),
                     scenario="returning_free_with_coupon",
                     step="complete_free_order",
@@ -1866,6 +1910,74 @@ class AppProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recorder.issues[0]["code"], "probe_failed")
         self.assertIn(spec.name, recorder.issues[0]["message"])
 
+    async def test_probe_timeout_is_warning_when_timeout_fails_is_off(self) -> None:
+        import config
+        from app_probes import probe_spec, run_probe
+        from transport import RequestError
+
+        recorder = RunRecorder.bootstrap()
+        spec = probe_spec("global_config")
+
+        async def timeout_request(*args, **kwargs):
+            event = recorder.record_event(
+                actor="probe",
+                action=spec.action,
+                category="probe",
+                ok=False,
+                track_order=False,
+            )
+            raise RequestError("timed out", event=event, reason_code="http_timeout")
+
+        previous = config.SIM_TIMEOUT_FAILS
+        try:
+            config.SIM_TIMEOUT_FAILS = False
+            result = await run_probe(
+                object(),
+                recorder=recorder,
+                spec=spec,
+                request_func=timeout_request,
+            )
+        finally:
+            config.SIM_TIMEOUT_FAILS = previous
+
+        self.assertIsNone(result)
+        self.assertTrue(any(issue["code"] == "probe_failed" for issue in recorder.issues))
+        self.assertEqual(recorder.decisions[-1]["next_action"], "record_warning_and_continue")
+
+    async def test_probe_timeout_fails_run_when_timeout_fails_is_on(self) -> None:
+        import config
+        from app_probes import ProbeTimeoutFatalError, probe_spec, run_probe
+        from transport import RequestError
+
+        recorder = RunRecorder.bootstrap()
+        spec = probe_spec("global_config")
+
+        async def timeout_request(*args, **kwargs):
+            event = recorder.record_event(
+                actor="probe",
+                action=spec.action,
+                category="probe",
+                ok=False,
+                track_order=False,
+            )
+            raise RequestError("timed out", event=event, reason_code="http_timeout")
+
+        previous = config.SIM_TIMEOUT_FAILS
+        try:
+            config.SIM_TIMEOUT_FAILS = True
+            with self.assertRaises(ProbeTimeoutFatalError):
+                await run_probe(
+                    object(),
+                    recorder=recorder,
+                    spec=spec,
+                    request_func=timeout_request,
+                )
+        finally:
+            config.SIM_TIMEOUT_FAILS = previous
+
+        self.assertTrue(any(issue["code"] == "probe_timeout_failed" for issue in recorder.issues))
+        self.assertEqual(recorder.decisions[-1]["next_action"], "fail_run")
+
     async def test_probe_4xx_with_documented_variant_is_passed(self) -> None:
         from app_probes import probe_spec, run_probe
         from transport import RequestError
@@ -2068,6 +2180,56 @@ class WebsocketGateEnforcementTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(ok)
         self.assertTrue(any(issue["severity"] == "error" for issue in recorder.issues))
+
+
+class WebsocketRequiredSourcesTests(unittest.IsolatedAsyncioTestCase):
+    async def test_wait_for_required_sources_connected_succeeds(self) -> None:
+        from websocket_observer import REQUIRED_WEBSOCKET_SOURCES, WebsocketObserver
+
+        recorder = RunRecorder.bootstrap()
+        observer = WebsocketObserver(recorder=recorder, user_id=1, store_id=2)
+        for source in REQUIRED_WEBSOCKET_SOURCES:
+            observer._set_source_status(source, status="connected")
+
+        ready = await observer.wait_for_sources_connected(
+            sources=set(REQUIRED_WEBSOCKET_SOURCES),
+            timeout_seconds=0.1,
+        )
+        self.assertEqual(sorted(ready["connected_sources"]), sorted(REQUIRED_WEBSOCKET_SOURCES))
+
+    async def test_wait_for_required_sources_connected_times_out(self) -> None:
+        from websocket_observer import REQUIRED_WEBSOCKET_SOURCES, WebsocketObserver
+
+        recorder = RunRecorder.bootstrap()
+        observer = WebsocketObserver(recorder=recorder, user_id=1, store_id=2)
+
+        with self.assertRaises(RuntimeError) as raised:
+            await observer.wait_for_sources_connected(
+                sources=set(REQUIRED_WEBSOCKET_SOURCES),
+                timeout_seconds=0.05,
+            )
+
+        self.assertIn("websocket_sources_timeout", str(raised.exception))
+
+    async def test_monitor_required_sources_fails_after_retry_window(self) -> None:
+        from websocket_observer import REQUIRED_WEBSOCKET_SOURCES, WebsocketObserver
+
+        recorder = RunRecorder.bootstrap()
+        observer = WebsocketObserver(recorder=recorder, user_id=1, store_id=2)
+        for source in REQUIRED_WEBSOCKET_SOURCES:
+            observer._set_source_status(source, status="connected")
+
+        task = asyncio.create_task(
+            observer.monitor_required_sources(
+                sources=set(REQUIRED_WEBSOCKET_SOURCES),
+                retry_window_seconds=0.05,
+            )
+        )
+        observer._set_source_status("store_stats", status="failed", reason="socket closed")
+
+        with self.assertRaises(RuntimeError) as raised:
+            await task
+        self.assertIn("websocket_required_sources_timeout", str(raised.exception))
 
 
 class PostOrderActionTests(unittest.TestCase):
@@ -2503,6 +2665,340 @@ class WebsocketStatusPrimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(queue.get_nowait(), "completed")
 
 
+class WebsocketValidationStrictTests(unittest.TestCase):
+    def test_strict_validation_returns_blocking_failures_for_missing_lifecycle(self) -> None:
+        recorder = RunRecorder.bootstrap()
+        recorder.set_fixtures(_fixtures())
+        recorder.record_event(
+            actor="user",
+            action="place_order",
+            category="status",
+            scenario="completed",
+            step="place_order",
+            order_db_id=901,
+            order_ref="#901",
+            observed_status="pending",
+            expect_websocket=True,
+        )
+
+        summary = validate_websocket_events(
+            recorder,
+            strict=True,
+            require_lifecycle_proof=True,
+        )
+
+        self.assertGreater(summary["blocking_failures"], 0)
+        issue_codes = [issue["code"] for issue in recorder.issues]
+        self.assertIn("websocket_event_missing", issue_codes)
+        self.assertIn("websocket_lifecycle_pending_missing", issue_codes)
+
+    def test_lifecycle_proof_skips_unsupported_diagnostic_orders(self) -> None:
+        from websocket_observer import validate_websocket_events
+
+        recorder = RunRecorder.bootstrap()
+        recorder.set_fixtures(_fixtures())
+        recorder.record_event(
+            actor="user",
+            action="place_order",
+            category="status",
+            scenario="auto_cancel",
+            step="place_order",
+            order_db_id=902,
+            order_ref="#902",
+            observed_status="pending",
+            expect_websocket=True,
+        )
+        recorder.finish_scenario(
+            "auto_cancel",
+            verdict="unsupported",
+            actual_final_status="payment_processing",
+            order_db_id=902,
+            order_ref="#902",
+        )
+        recorder.orders["902"]["final_status"] = "payment_processing"
+
+        summary = validate_websocket_events(
+            recorder,
+            strict=True,
+            require_lifecycle_proof=True,
+        )
+
+        lifecycle_codes = [
+            issue["code"]
+            for issue in recorder.issues
+            if str(issue.get("code", "")).startswith("websocket_lifecycle_")
+            and issue.get("order_db_id") == 902
+        ]
+        self.assertEqual(lifecycle_codes, [])
+        self.assertGreater(summary.get("blocking_failures", 0), 0)
+
+
+class OrderContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_order_contract_resolves_after_cancel(self) -> None:
+        import order_contract
+        import user_sim
+
+        recorder = RunRecorder.bootstrap()
+        recorder.set_fixtures(_fixtures())
+        recorder.record_event(
+            actor="user",
+            action="place_order",
+            category="status",
+            scenario="load",
+            step="place_order",
+            order_db_id=777,
+            order_ref="#777",
+            observed_status="pending",
+            expect_websocket=True,
+        )
+        session = user_sim.UserSession(
+            token="user-token",
+            user_id=13,
+            user={"id": 13},
+            token_source="test",
+        )
+
+        states = iter(["payment_processing", "cancelled"])
+
+        async def fake_fetch(*args, **kwargs):
+            return next(states)
+
+        async def fake_cancel(*args, **kwargs):
+            return True
+
+        with (
+            mock.patch.object(order_contract, "_fetch_order_state", side_effect=fake_fetch),
+            mock.patch.object(user_sim, "cancel_order", side_effect=fake_cancel),
+        ):
+            unresolved = await order_contract.enforce_order_closure(
+                recorder=recorder,
+                user_sessions_by_id={13: session},
+                store_sessions_by_subentity_id={},
+                settle_attempts=1,
+            )
+
+        self.assertEqual(unresolved, [])
+        self.assertTrue(
+            any(event.get("action") == "order_contract_cleanup_resolved" for event in recorder.events)
+        )
+
+    async def test_order_contract_reports_unresolved_after_cleanup(self) -> None:
+        import order_contract
+        import user_sim
+
+        recorder = RunRecorder.bootstrap()
+        recorder.set_fixtures(_fixtures())
+        recorder.record_event(
+            actor="user",
+            action="place_order",
+            category="status",
+            scenario="load",
+            step="place_order",
+            order_db_id=778,
+            order_ref="#778",
+            observed_status="pending",
+            expect_websocket=True,
+        )
+        session = user_sim.UserSession(
+            token="user-token",
+            user_id=13,
+            user={"id": 13},
+            token_source="test",
+        )
+
+        async def fake_fetch(*args, **kwargs):
+            return "payment_processing"
+
+        async def fake_cancel(*args, **kwargs):
+            return False
+
+        with (
+            mock.patch.object(order_contract, "_fetch_order_state", side_effect=fake_fetch),
+            mock.patch.object(user_sim, "cancel_order", side_effect=fake_cancel),
+        ):
+            unresolved = await order_contract.enforce_order_closure(
+                recorder=recorder,
+                user_sessions_by_id={13: session},
+                store_sessions_by_subentity_id={},
+                settle_attempts=1,
+            )
+
+        self.assertEqual(len(unresolved), 1)
+        self.assertEqual(unresolved[0]["order_db_id"], 778)
+        self.assertTrue(any(issue["code"] == "order_contract_unresolved" for issue in recorder.issues))
+
+    async def test_order_contract_preserves_place_order_pending_orders(self) -> None:
+        import order_contract
+        import user_sim
+
+        recorder = RunRecorder.bootstrap()
+        recorder.set_fixtures(_fixtures())
+        recorder.record_event(
+            actor="user",
+            action="place_order",
+            category="status",
+            scenario="place_order",
+            step="place_order_1",
+            order_db_id=779,
+            order_ref="#779",
+            observed_status="pending",
+            expect_websocket=True,
+        )
+        session = user_sim.UserSession(
+            token="user-token",
+            user_id=13,
+            user={"id": 13},
+            token_source="test",
+        )
+
+        with (
+            mock.patch.object(order_contract, "_fetch_order_state") as fetch_order_state,
+            mock.patch.object(user_sim, "cancel_order") as cancel_order,
+        ):
+            unresolved = await order_contract.enforce_order_closure(
+                recorder=recorder,
+                user_sessions_by_id={13: session},
+                store_sessions_by_subentity_id={},
+                settle_attempts=1,
+            )
+
+        self.assertEqual(unresolved, [])
+        fetch_order_state.assert_not_called()
+        cancel_order.assert_not_called()
+        self.assertTrue(
+            any(
+                event.get("action") == "order_contract_non_terminal_allowed"
+                and event.get("order_db_id") == 779
+                for event in recorder.events
+            )
+        )
+
+
+class TracePlaceOrderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_place_order_seeds_requested_pending_orders(self) -> None:
+        import config
+        import trace_runner
+        import user_sim
+
+        recorder = RunRecorder.bootstrap()
+        fixtures = _fixtures()
+        session = user_sim.UserSession(
+            token="user-token",
+            user_id=13,
+            user={"id": 13},
+            token_source="test",
+        )
+        orders = [
+            {
+                "order_db_id": 901,
+                "order_ref": "#901",
+                "order_total": 100.0,
+                "store_subentity_id": 1,
+                "store_currency": "jpy",
+            },
+            {
+                "order_db_id": 902,
+                "order_ref": "#902",
+                "order_total": 125.0,
+                "store_subentity_id": 1,
+                "store_currency": "jpy",
+            },
+        ]
+        saved_orders = config.SIM_ORDERS
+        config.SIM_ORDERS = 2
+
+        async def fake_place_order(*args, **kwargs):
+            order = orders[len(place_calls)]
+            place_calls.append(kwargs)
+            recorder.record_event(
+                actor="user",
+                action="place_order",
+                category="status",
+                scenario=kwargs["scenario"],
+                step=kwargs["step"],
+                order_db_id=order["order_db_id"],
+                order_ref=order["order_ref"],
+                observed_status="pending",
+                expect_websocket=True,
+            )
+            return order
+
+        async def fake_wait_for_ws_gate(*args, **kwargs):
+            gate_calls.append(kwargs)
+            return True
+
+        place_calls: list[dict[str, object]] = []
+        gate_calls: list[dict[str, object]] = []
+        try:
+            with (
+                mock.patch.object(trace_runner.user_sim, "place_order", side_effect=fake_place_order),
+                mock.patch.object(trace_runner, "_wait_for_ws_gate", side_effect=fake_wait_for_ws_gate),
+            ):
+                async with httpx.AsyncClient() as client:
+                    await trace_runner._run_place_order(
+                        client,
+                        user_session=session,
+                        fixtures=fixtures,
+                        recorder=recorder,
+                        observer=object(),
+                    )
+        finally:
+            config.SIM_ORDERS = saved_orders
+
+        self.assertEqual(len(place_calls), 2)
+        self.assertEqual([call["scenario"] for call in place_calls], ["place_order", "place_order"])
+        self.assertEqual([call["step"] for call in place_calls], ["place_order_1", "place_order_2"])
+        self.assertEqual([call["expected_status"] for call in gate_calls], ["pending", "pending"])
+        seeded_events = [
+            event for event in recorder.events if event.get("action") == "pending_order_seeded"
+        ]
+        self.assertEqual([event.get("order_db_id") for event in seeded_events], [901, 902])
+        scenario = recorder.scenarios["place_order"]
+        self.assertEqual(scenario["base_verdict"], "passed")
+        self.assertEqual(scenario["actual_final_status"], "pending")
+
+
+class PaymentContextPropagationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_handle_order_payment_uses_order_store_context_for_stripe(self) -> None:
+        import user_sim
+
+        recorder = RunRecorder.bootstrap()
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        order = {
+            "order_db_id": 880,
+            "order_ref": "#880",
+            "order_total": 4200.0,
+            "store_subentity_id": 44,
+            "store_currency": "jpy",
+            "scenario": "load",
+        }
+
+        async def fake_wait_for_status(*args, **kwargs):
+            expected = kwargs.get("expected_statuses") or set()
+            if "payment_processing" in expected:
+                return "payment_processing"
+            return "completed"
+
+        with (
+            mock.patch.object(user_sim, "prime_ws_status_from_order", new=mock.AsyncMock(return_value="payment_processing")),
+            mock.patch.object(user_sim, "wait_for_status_ws", side_effect=fake_wait_for_status),
+            mock.patch.object(user_sim.stripe_sim, "pay_order", new=mock.AsyncMock(return_value=True)) as pay_order,
+        ):
+            ok = await user_sim.handle_order_payment(
+                object(),
+                user_token="user-token",
+                token_source="test",
+                order=order,
+                recorder=recorder,
+                status_queue=queue,
+            )
+
+        self.assertTrue(ok)
+        _, kwargs = pay_order.call_args
+        self.assertEqual(kwargs["store_subentity_id"], 44)
+        self.assertEqual(kwargs["currency"], "jpy")
+
+
 class CliArgPrecedenceTests(unittest.TestCase):
     def test_explicit_trace_flags_not_overridden_by_flow_preset(self) -> None:
         sim_main = _load_simulate_entrypoint_module()
@@ -2552,6 +3048,7 @@ class CliArgPrecedenceTests(unittest.TestCase):
                 "--scenario",
                 "cancelled",
                 "--scenario",
+                "backend_auto_cancel",
                 "auto_cancel",
                 "--phone",
                 "+15550000001",
@@ -2562,7 +3059,7 @@ class CliArgPrecedenceTests(unittest.TestCase):
                 flow="full",
                 mode="trace",
                 suite="full",
-                scenario=["completed", "rejected", "cancelled", "auto_cancel"],
+                scenario=["completed", "rejected", "cancelled", "backend_auto_cancel", "auto_cancel"],
                 timing="fast",
                 users=1,
                 interval=30.0,
@@ -2591,7 +3088,7 @@ class CliArgPrecedenceTests(unittest.TestCase):
             self.assertEqual(config.SIM_TRACE_SUITE, "full")
             self.assertEqual(
                 config.SIM_TRACE_SCENARIOS,
-                ["completed", "rejected", "cancelled", "auto_cancel"],
+                ["completed", "rejected", "cancelled", "backend_auto_cancel", "auto_cancel"],
             )
         finally:
             config.load_sim_actors = original_loader
@@ -2767,6 +3264,332 @@ class CliArgPrecedenceTests(unittest.TestCase):
                 setattr(config, name, value)
 
 
+class StoreAutoCancelTests(unittest.TestCase):
+    def test_realistic_profile_store_auto_cancel_window_is_120_seconds(self) -> None:
+        from scenarios import resolve_timing_profile
+
+        realistic = resolve_timing_profile("realistic")
+        self.assertEqual(realistic.auto_cancel_wait_seconds, 120.0)
+
+    def test_plan_override_applied_to_effective_timing_profile(self) -> None:
+        import config
+        from scenarios import resolve_effective_timing_profile, resolve_timing_profile
+
+        previous = config.SIM_PLAN_STORE_AUTO_CANCEL_SECONDS
+        try:
+            config.SIM_PLAN_STORE_AUTO_CANCEL_SECONDS = 88.0
+            effective = resolve_effective_timing_profile("fast")
+            self.assertEqual(effective.auto_cancel_wait_seconds, 88.0)
+            self.assertEqual(resolve_timing_profile("fast").auto_cancel_wait_seconds, 30.0)
+        finally:
+            config.SIM_PLAN_STORE_AUTO_CANCEL_SECONDS = previous
+
+    def test_plan_runtime_defaults_sets_and_clears_store_auto_cancel_seconds(self) -> None:
+        import config
+        from run_plan import load_run_plan
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir) / "plan.json"
+            path.write_text(
+                """
+                {
+                  "schema_version": 2,
+                  "defaults": {"user_phone": "+100", "store_id": "FZY_1"},
+                  "runtime_defaults": {
+                    "timing_profile": "fast",
+                    "store_auto_cancel_seconds": 99
+                  },
+                  "users": [{"phone": "+100"}],
+                  "stores": [{"store_id": "FZY_1"}]
+                }
+                """,
+                encoding="utf-8",
+            )
+            plan = load_run_plan(path)
+            config.apply_plan_defaults(plan)
+            self.assertEqual(config.SIM_PLAN_STORE_AUTO_CANCEL_SECONDS, 99.0)
+
+            path.write_text(
+                """
+                {
+                  "schema_version": 2,
+                  "defaults": {"user_phone": "+100", "store_id": "FZY_1"},
+                  "runtime_defaults": {"timing_profile": "fast"},
+                  "users": [{"phone": "+100"}],
+                  "stores": [{"store_id": "FZY_1"}]
+                }
+                """,
+                encoding="utf-8",
+            )
+            plan = load_run_plan(path)
+            config.apply_plan_defaults(plan)
+            self.assertIsNone(config.SIM_PLAN_STORE_AUTO_CANCEL_SECONDS)
+
+    def test_awaiting_payment_auto_cancel_countdown_times_out_without_store_patch(self) -> None:
+        import store_sim
+        import trace_runner
+        import user_sim
+
+        async def run() -> None:
+            recorder = RunRecorder.bootstrap()
+            user_session = user_sim.UserSession(
+                token="user-token",
+                user_id=1,
+                user={"id": 1},
+                token_source="test",
+            )
+
+            async def fake_fetch(*_args, **_kwargs):
+                return {"status": "payment_processing"}
+
+            with (
+                mock.patch.object(user_sim, "fetch_order", side_effect=fake_fetch),
+                mock.patch.object(store_sim, "patch_status", return_value=True) as patch_mock,
+                mock.patch("trace_runner.asyncio.sleep", new=mock.AsyncMock()),
+            ):
+                outcome, terminal_status = (
+                    await trace_runner._run_awaiting_payment_auto_cancel_countdown(
+                        httpx.AsyncClient(),
+                        user_session=user_session,
+                        order_db_id=42,
+                        order_ref="ORD-42",
+                        recorder=recorder,
+                        scenario="auto_cancel",
+                        total_seconds=1.0,
+                        tick_interval=1.0,
+                        eligible_status="payment_processing",
+                    )
+                )
+
+            self.assertEqual(outcome, "timeout")
+            self.assertEqual(terminal_status, "payment_processing")
+            patch_mock.assert_not_awaited()
+            actions = [event["action"] for event in recorder.events]
+            self.assertIn("awaiting_payment_auto_cancel_armed", actions)
+            self.assertIn("awaiting_payment_auto_cancel_tick", actions)
+            self.assertIn("awaiting_payment_auto_cancel_timeout", actions)
+
+        asyncio.run(run())
+
+    def test_awaiting_payment_auto_cancel_countdown_observes_cancelled(self) -> None:
+        import store_sim
+        import trace_runner
+        import user_sim
+
+        async def run() -> None:
+            recorder = RunRecorder.bootstrap()
+            user_session = user_sim.UserSession(
+                token="user-token",
+                user_id=1,
+                user={"id": 1},
+                token_source="test",
+            )
+
+            async def fake_fetch(*_args, **_kwargs):
+                return {"status": "cancelled"}
+
+            with (
+                mock.patch.object(user_sim, "fetch_order", side_effect=fake_fetch),
+                mock.patch.object(store_sim, "patch_status", return_value=True) as patch_mock,
+                mock.patch("trace_runner.asyncio.sleep", new=mock.AsyncMock()),
+            ):
+                outcome, terminal_status = (
+                    await trace_runner._run_awaiting_payment_auto_cancel_countdown(
+                        httpx.AsyncClient(),
+                        user_session=user_session,
+                        order_db_id=43,
+                        order_ref="ORD-43",
+                        recorder=recorder,
+                        scenario="auto_cancel",
+                        total_seconds=5.0,
+                        tick_interval=1.0,
+                        eligible_status="payment_processing",
+                    )
+                )
+
+            self.assertEqual(outcome, "cancelled")
+            self.assertEqual(terminal_status, "cancelled")
+            patch_mock.assert_not_awaited()
+            actions = [event["action"] for event in recorder.events]
+            self.assertIn("awaiting_payment_auto_cancel_observed", actions)
+
+        asyncio.run(run())
+
+    def test_awaiting_payment_auto_cancel_terminal_early_when_payment_completes(self) -> None:
+        import store_sim
+        import trace_runner
+        import user_sim
+
+        async def run() -> None:
+            recorder = RunRecorder.bootstrap()
+            user_session = user_sim.UserSession(
+                token="user-token",
+                user_id=1,
+                user={"id": 1},
+                token_source="test",
+            )
+
+            async def fake_fetch(*_args, **_kwargs):
+                return {"status": "order_processing"}
+
+            with (
+                mock.patch.object(user_sim, "fetch_order", side_effect=fake_fetch),
+                mock.patch.object(store_sim, "patch_status", return_value=True) as patch_mock,
+                mock.patch("trace_runner.asyncio.sleep", new=mock.AsyncMock()),
+            ):
+                outcome, terminal_status = (
+                    await trace_runner._run_awaiting_payment_auto_cancel_countdown(
+                        httpx.AsyncClient(),
+                        user_session=user_session,
+                        order_db_id=44,
+                        order_ref="ORD-44",
+                        recorder=recorder,
+                        scenario="auto_cancel",
+                        total_seconds=5.0,
+                        tick_interval=1.0,
+                        eligible_status="payment_processing",
+                    )
+                )
+
+            self.assertEqual(outcome, "terminal_early")
+            self.assertEqual(terminal_status, "order_processing")
+            patch_mock.assert_not_awaited()
+            actions = [event["action"] for event in recorder.events]
+            self.assertIn("awaiting_payment_auto_cancel_terminal_early", actions)
+
+        asyncio.run(run())
+
+    def test_wait_for_ws_gate_forwards_custom_timeout(self) -> None:
+        import trace_runner
+
+        async def run() -> None:
+            observer = mock.AsyncMock()
+            observer.wait_for_order_status = mock.AsyncMock(
+                return_value={"source": "store_orders", "status": "cancelled"}
+            )
+            recorder = RunRecorder.bootstrap()
+            ok = await trace_runner._wait_for_ws_gate(
+                observer,
+                recorder=recorder,
+                scenario="auto_cancel",
+                step="wait_store_auto_cancel",
+                order_db_id=1,
+                order_ref="ORD-1",
+                expected_status="cancelled",
+                sources={"user_orders", "store_orders"},
+                phase="result",
+                timeout_seconds=90.0,
+            )
+            self.assertTrue(ok)
+            observer.wait_for_order_status.assert_awaited_once()
+            self.assertEqual(
+                observer.wait_for_order_status.await_args.kwargs["timeout_seconds"],
+                90.0,
+            )
+
+        asyncio.run(run())
+
+    def test_pending_backend_auto_cancel_countdown_times_out_without_store_patch(self) -> None:
+        import store_sim
+        import trace_runner
+        import user_sim
+
+        async def run() -> None:
+            recorder = RunRecorder.bootstrap()
+            user_session = user_sim.UserSession(
+                token="user-token",
+                user_id=1,
+                user={"id": 1},
+                token_source="test",
+            )
+
+            async def fake_fetch(*_args, **_kwargs):
+                return {"status": "pending"}
+
+            with (
+                mock.patch.object(user_sim, "fetch_order", side_effect=fake_fetch),
+                mock.patch.object(store_sim, "patch_status", return_value=True) as patch_mock,
+                mock.patch("trace_runner.asyncio.sleep", new=mock.AsyncMock()),
+            ):
+                outcome, terminal_status = (
+                    await trace_runner._run_backend_auto_cancel_observe_countdown(
+                        httpx.AsyncClient(),
+                        user_session=user_session,
+                        order_db_id=45,
+                        order_ref="ORD-45",
+                        recorder=recorder,
+                        scenario="backend_auto_cancel",
+                        total_seconds=1.0,
+                        event_prefix="pending_backend_auto_cancel",
+                        phase_label="pending",
+                        tick_interval=1.0,
+                        eligible_status="pending",
+                    )
+                )
+
+            self.assertEqual(outcome, "timeout")
+            self.assertEqual(terminal_status, "pending")
+            patch_mock.assert_not_awaited()
+            actions = [event["action"] for event in recorder.events]
+            self.assertIn("pending_backend_auto_cancel_armed", actions)
+            self.assertIn("pending_backend_auto_cancel_tick", actions)
+            self.assertIn("pending_backend_auto_cancel_timeout", actions)
+
+        asyncio.run(run())
+
+    def test_pending_backend_auto_cancel_countdown_observes_cancelled(self) -> None:
+        import store_sim
+        import trace_runner
+        import user_sim
+
+        async def run() -> None:
+            recorder = RunRecorder.bootstrap()
+            user_session = user_sim.UserSession(
+                token="user-token",
+                user_id=1,
+                user={"id": 1},
+                token_source="test",
+            )
+
+            async def fake_fetch(*_args, **_kwargs):
+                return {"status": "cancelled"}
+
+            with (
+                mock.patch.object(user_sim, "fetch_order", side_effect=fake_fetch),
+                mock.patch.object(store_sim, "patch_status", return_value=True) as patch_mock,
+                mock.patch("trace_runner.asyncio.sleep", new=mock.AsyncMock()),
+            ):
+                outcome, terminal_status = (
+                    await trace_runner._run_backend_auto_cancel_observe_countdown(
+                        httpx.AsyncClient(),
+                        user_session=user_session,
+                        order_db_id=46,
+                        order_ref="ORD-46",
+                        recorder=recorder,
+                        scenario="backend_auto_cancel",
+                        total_seconds=5.0,
+                        event_prefix="pending_backend_auto_cancel",
+                        phase_label="pending",
+                        tick_interval=1.0,
+                        eligible_status="pending",
+                    )
+                )
+
+            self.assertEqual(outcome, "cancelled")
+            self.assertEqual(terminal_status, "cancelled")
+            patch_mock.assert_not_awaited()
+            actions = [event["action"] for event in recorder.events]
+            self.assertIn("pending_backend_auto_cancel_observed", actions)
+
+        asyncio.run(run())
+
+    def test_full_suite_includes_backend_auto_cancel_scenarios(self) -> None:
+        resolved = resolve_trace_scenarios(suite="full", scenarios=None)
+        self.assertIn("backend_auto_cancel", resolved)
+        self.assertIn("auto_cancel", resolved)
+        self.assertIn("completed", resolved)
+
+
 class LoadModeTimingTests(unittest.TestCase):
     def test_fast_timing_profile_uses_sub_second_delays(self) -> None:
         from scenarios import resolve_timing_profile
@@ -2833,14 +3656,34 @@ class InteractionCatalogueTests(unittest.TestCase):
 
 
 class MenusFlowProvisioningTests(unittest.IsolatedAsyncioTestCase):
-    async def test_menus_flow_creates_new_menu_item_before_probes(self) -> None:
-        import config
+    _FIXED_CATALOG_ENTRY = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import menu_catalog
+
+        cls._FIXED_CATALOG_ENTRY = menu_catalog.MenuCatalogEntry(
+            "Drinks",
+            "Sparkling Yuzu",
+            "Citrus soda with yuzu.",
+            450.0,
+            "yuzu, sparkling water",
+        )
+
+    async def _provision_with_roll(
+        self,
+        *,
+        roll: float,
+        categories: list[dict[str, object]],
+        chosen_category_id: int = 12,
+    ) -> tuple[list[str], dict[str, object], RunRecorder]:
         import trace_runner
         import user_sim
         import store_sim
 
         recorder = RunRecorder.bootstrap()
         calls: list[str] = []
+        menu_kwargs: dict[str, object] = {}
         user_session = user_sim.UserSession(
             token="user-token",
             user_id=13,
@@ -2866,10 +3709,15 @@ class MenusFlowProvisioningTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_fetch_categories(*args, **kwargs):
             calls.append("fetch_categories")
-            return [{"id": 11, "name": "Drinks"}]
+            return categories
+
+        async def fake_create_category(*args, **kwargs):
+            calls.append("create_category")
+            return {"id": 21, "name": kwargs.get("name")}
 
         async def fake_create_menu(*args, **kwargs):
             calls.append("create_menu")
+            menu_kwargs.update(kwargs)
             return {"id": 99, "name": kwargs.get("name"), "status": "available"}
 
         async def fake_bootstrap_fixtures(*args, **kwargs):
@@ -2880,48 +3728,86 @@ class MenusFlowProvisioningTests(unittest.IsolatedAsyncioTestCase):
             store_sim.ensure_store_setup,
             store_sim.open_store_for_simulation,
             store_sim.fetch_categories,
+            store_sim.create_category,
             store_sim.create_menu,
             user_sim.bootstrap_fixtures,
         )
         store_sim.ensure_store_setup = fake_ensure_store_setup
         store_sim.open_store_for_simulation = fake_open_store
         store_sim.fetch_categories = fake_fetch_categories
+        store_sim.create_category = fake_create_category
         store_sim.create_menu = fake_create_menu
         user_sim.bootstrap_fixtures = fake_bootstrap_fixtures
         try:
-            result = await trace_runner._provision_menus_flow_inventory(
-                object(),
-                store_session=store_session,
-                user_session=user_session,
-                recorder=recorder,
-            )
+            with (
+                mock.patch("trace_runner.random.random", return_value=roll),
+                mock.patch(
+                    "trace_runner.random.choice",
+                    return_value={"id": chosen_category_id, "name": "Sides"},
+                ),
+                mock.patch(
+                    "menu_catalog.pick_entry",
+                    return_value=self._FIXED_CATALOG_ENTRY,
+                ),
+                mock.patch(
+                    "menu_catalog.pick_entry_for_category",
+                    return_value=self._FIXED_CATALOG_ENTRY,
+                ),
+            ):
+                result = await trace_runner._provision_menus_flow_inventory(
+                    object(),
+                    store_session=store_session,
+                    user_session=user_session,
+                    recorder=recorder,
+                )
         finally:
             (
                 store_sim.ensure_store_setup,
                 store_sim.open_store_for_simulation,
                 store_sim.fetch_categories,
+                store_sim.create_category,
                 store_sim.create_menu,
                 user_sim.bootstrap_fixtures,
             ) = originals
 
         self.assertIs(result, refreshed_fixtures)
-        self.assertEqual(
-            calls,
-            [
-                "ensure_store_setup",
-                "open_store",
-                "fetch_categories",
-                "create_menu",
-                "bootstrap_fixtures",
-            ],
-        )
         create_events = [
             event
             for event in recorder.events
             if event.get("action") == "menus_run_item_created"
         ]
         self.assertEqual(len(create_events), 1)
-        self.assertEqual(create_events[0]["details"]["menu_id"], 99)
+        return calls, create_events[0]["details"], recorder
+
+    async def test_menus_flow_creates_category_when_roll_high(self) -> None:
+        calls, details, _recorder = await self._provision_with_roll(
+            roll=0.9,
+            categories=[{"id": 11, "name": "Drinks"}],
+        )
+        self.assertIn("create_category", calls)
+        self.assertEqual(details["category_strategy"], "new_category")
+        self.assertEqual(details["menu_name"], "Sparkling Yuzu")
+        self.assertNotIn("Simulator", str(details["menu_name"]))
+
+    async def test_menus_flow_uses_existing_category_when_roll_low(self) -> None:
+        calls, details, _recorder = await self._provision_with_roll(
+            roll=0.1,
+            categories=[{"id": 11, "name": "Drinks"}, {"id": 12, "name": "Sides"}],
+            chosen_category_id=12,
+        )
+        self.assertNotIn("create_category", calls)
+        self.assertEqual(details["category_strategy"], "existing_category")
+        self.assertEqual(details["category_id"], 12)
+        self.assertEqual(details["menu_name"], "Sparkling Yuzu")
+
+    async def test_menus_flow_creates_category_when_empty_despite_low_roll(self) -> None:
+        calls, details, _recorder = await self._provision_with_roll(
+            roll=0.1,
+            categories=[],
+        )
+        self.assertIn("create_category", calls)
+        self.assertEqual(details["category_strategy"], "new_category")
+        self.assertEqual(details["roll"], 0.1)
 
     def test_is_menus_flow_run_detects_menus_suite(self) -> None:
         import trace_runner
@@ -3005,6 +3891,7 @@ class FlowReliabilityPolicyTests(unittest.IsolatedAsyncioTestCase):
         trace_runner._bootstrap_store_auth = fake_store_auth
         trace_runner.user_sim.bootstrap_fixtures = fake_fixtures
         trace_runner._run_completed = fake_run_completed
+        observed_after: dict[str, object] = {}
         try:
             await trace_runner._run_payment_scenario(
                 object(),
@@ -3028,6 +3915,11 @@ class FlowReliabilityPolicyTests(unittest.IsolatedAsyncioTestCase):
                 timing=resolve_timing_profile("fast"),
                 observer=None,
             )
+            observed_after = {
+                "subentity_id": config.SUBENTITY_ID,
+                "store_currency": config.STORE_CURRENCY,
+                "store_id": config.STORE_ID,
+            }
         finally:
             trace_runner._ensure_coupon_for_scenario = original_ensure
             trace_runner._trace_store_candidates = original_candidates
@@ -3050,6 +3942,149 @@ class FlowReliabilityPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(api_issues), 1)
         self.assertEqual(api_issues[0]["failure_class"], "api_fault")
         self.assertIn("completed", calls)
+
+    async def test_coupon_retry_restores_global_store_context_after_run(self) -> None:
+        import config
+        import trace_runner
+        import user_sim
+        import store_sim
+        from scenarios import resolve_timing_profile
+
+        recorder = RunRecorder.bootstrap()
+        previous = (
+            config.SIM_FAILURE_POLICY,
+            config.SIM_PREFLIGHT_STRATEGY,
+            config.SIM_STORE_EXPLICIT,
+            config.SIM_COUPON_ID,
+            config.SIM_PAYMENT_MODE,
+            config.SIM_PAYMENT_CASE,
+            config.SUBENTITY_ID,
+            config.STORE_CURRENCY,
+            config.STORE_ID,
+            getattr(config, "SIM_ACTORS", None),
+        )
+        original_ensure = trace_runner._ensure_coupon_for_scenario
+        original_candidates = trace_runner._trace_store_candidates
+        original_store_auth = trace_runner._bootstrap_store_auth
+        original_fixtures = trace_runner.user_sim.bootstrap_fixtures
+        original_run_completed = trace_runner._run_completed
+        ensure_attempts = {"count": 0}
+
+        async def fake_ensure_coupon(*args, **kwargs):
+            ensure_attempts["count"] += 1
+            if ensure_attempts["count"] >= 2:
+                config.SIM_COUPON_ID = 301
+                return True
+            return False
+
+        def fake_candidates():
+            return ["FZY_PRIMARY", "FZY_ALT"]
+
+        async def fake_store_auth(client, recorder, store_id=None):
+            if store_id == "FZY_ALT":
+                config.SUBENTITY_ID = 99
+                config.STORE_CURRENCY = "usd"
+                config.STORE_ID = "FZY_ALT"
+                return store_sim.StoreSession(
+                    last_mile_token="store-token-alt",
+                    fainzy_token=None,
+                    subentity={"id": 99, "setup": True, "currency": "usd"},
+                    store_id=99,
+                    token_source="test",
+                    store_login_id="FZY_ALT",
+                )
+            return store_sim.StoreSession(
+                last_mile_token="store-token-primary",
+                fainzy_token=None,
+                subentity={"id": 7, "setup": True, "currency": "jpy"},
+                store_id=7,
+                token_source="test",
+                store_login_id="FZY_PRIMARY",
+            )
+
+        async def fake_fixtures(*args, **kwargs):
+            fixture = _fixtures()
+            fixture.store = {
+                "id": 99,
+                "name": "Alt Store",
+                "branch": "Alt",
+                "currency": "usd",
+            }
+            fixture.currency = "usd"
+            return fixture
+
+        async def fake_run_completed(*args, **kwargs):
+            return None
+
+        config.SIM_FAILURE_POLICY = "api_only"
+        config.SIM_PREFLIGHT_STRATEGY = "auto_recover"
+        config.SIM_STORE_EXPLICIT = False
+        config.SIM_COUPON_ID = None
+        config.SIM_PAYMENT_MODE = "stripe"
+        config.SIM_PAYMENT_CASE = "paid_no_coupon"
+        config.SUBENTITY_ID = 7
+        config.STORE_CURRENCY = "jpy"
+        config.STORE_ID = "FZY_PRIMARY"
+        config.SIM_ACTORS = {
+            "stores": [{"store_id": "FZY_PRIMARY"}, {"store_id": "FZY_ALT"}],
+            "users": [{"phone": "+100"}],
+        }
+        trace_runner._ensure_coupon_for_scenario = fake_ensure_coupon
+        trace_runner._trace_store_candidates = fake_candidates
+        trace_runner._bootstrap_store_auth = fake_store_auth
+        trace_runner.user_sim.bootstrap_fixtures = fake_fixtures
+        trace_runner._run_completed = fake_run_completed
+        observed_after: dict[str, object] = {}
+        try:
+            await trace_runner._run_payment_scenario(
+                object(),
+                scenario="returning_paid_with_coupon",
+                user_session=user_sim.UserSession(
+                    token="user-token",
+                    user_id=13,
+                    user={"id": 13},
+                    token_source="test",
+                ),
+                store_session=store_sim.StoreSession(
+                    last_mile_token="store-token-primary",
+                    fainzy_token=None,
+                    subentity={"id": 7, "setup": True, "currency": "jpy"},
+                    store_id=7,
+                    token_source="test",
+                    store_login_id="FZY_PRIMARY",
+                ),
+                fixtures=_fixtures(),
+                recorder=recorder,
+                timing=resolve_timing_profile("fast"),
+                observer=None,
+            )
+            observed_after = {
+                "subentity_id": config.SUBENTITY_ID,
+                "store_currency": config.STORE_CURRENCY,
+                "store_id": config.STORE_ID,
+            }
+        finally:
+            trace_runner._ensure_coupon_for_scenario = original_ensure
+            trace_runner._trace_store_candidates = original_candidates
+            trace_runner._bootstrap_store_auth = original_store_auth
+            trace_runner.user_sim.bootstrap_fixtures = original_fixtures
+            trace_runner._run_completed = original_run_completed
+            (
+                config.SIM_FAILURE_POLICY,
+                config.SIM_PREFLIGHT_STRATEGY,
+                config.SIM_STORE_EXPLICIT,
+                config.SIM_COUPON_ID,
+                config.SIM_PAYMENT_MODE,
+                config.SIM_PAYMENT_CASE,
+                config.SUBENTITY_ID,
+                config.STORE_CURRENCY,
+                config.STORE_ID,
+                config.SIM_ACTORS,
+            ) = previous
+
+        self.assertEqual(observed_after["subentity_id"], 7)
+        self.assertEqual(observed_after["store_currency"], "jpy")
+        self.assertEqual(observed_after["store_id"], "FZY_PRIMARY")
 
     async def test_coupon_exhaustion_finishes_unsupported_without_raise(self) -> None:
         import config

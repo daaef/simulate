@@ -34,7 +34,7 @@ from interaction_catalog import (
 )
 import stripe_sim
 from reporting import RunRecorder
-from transport import RequestError, api_data, build_auth_proof, request_json
+from transport import RequestError, api_data, build_auth_proof, request_json, resolve_timeout
 
 console = Console()
 ENV_PATH = Path(__file__).parent / ".env"
@@ -60,12 +60,14 @@ class HttpApiError(RuntimeError):
         status_code: int,
         response_text: str,
         related_event_id: int | None = None,
+        reason_code: str | None = None,
     ) -> None:
         super().__init__(f"HTTP {status_code} from {url}: {response_text[:500]}")
         self.url = url
         self.status_code = status_code
         self.response_text = response_text
         self.related_event_id = related_event_id
+        self.reason_code = reason_code
 
 
 def _token(payload: dict[str, Any]) -> str | None:
@@ -160,13 +162,14 @@ async def _auth_request(
     track_order: bool = False,
 ) -> Any:
     if recorder is None:
+        timeout = resolve_timeout(None)
         response = await client.request(
             method=method.upper(),
             url=url,
             params=params,
             json=json_body,
             headers=headers,
-            timeout=30.0,
+            timeout=timeout,
         )
         try:
             response.raise_for_status()
@@ -207,12 +210,14 @@ async def _auth_request(
                 status_code=exc.result.response.status_code,
                 response_text=exc.result.response.text,
                 related_event_id=exc.event["id"] if exc.event else None,
+                reason_code=exc.reason_code,
             ) from exc
         raise HttpApiError(
             url=url,
             status_code=0,
             response_text=str(exc),
             related_event_id=exc.event["id"] if exc.event else None,
+            reason_code=exc.reason_code,
         ) from exc
     return result.payload
 
@@ -786,7 +791,12 @@ async def _seed_get_json(
         auth_header_name: f"{auth_scheme} {token}" if auth_scheme else token,
     }
     if recorder is None:
-        resp = await client.get(url, params=params, headers=headers, timeout=30.0)
+        resp = await client.get(
+            url,
+            params=params,
+            headers=headers,
+            timeout=resolve_timeout(None),
+        )
         try:
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -1453,10 +1463,15 @@ async def place_order_with_payload(
     )
     order_ref = payload["order_id"]
     order_total = payload["total_price"]
+    restaurant = payload.get("restaurant") if isinstance(payload, dict) else None
+    if not isinstance(restaurant, dict):
+        raise RuntimeError("payload.restaurant must be an object before placing an order.")
+    store_subentity_id = int(restaurant.get("id"))
+    store_currency = str(restaurant.get("currency") or fixtures.currency or config.STORE_CURRENCY).lower()
 
     console.print(
         f"[cyan]user[{worker_id}]:[/] Placing order {order_ref}  "
-        f"({len(payload['menu'])} items, {config.STORE_CURRENCY} {order_total:,.0f})"
+        f"({len(payload['menu'])} items, {store_currency} {order_total:,.0f})"
     )
 
     try:
@@ -1486,7 +1501,8 @@ async def place_order_with_payload(
                 "worker_id": worker_id,
                 "items": len(payload["menu"]),
                 "total": order_total,
-                "currency": config.STORE_CURRENCY,
+                "currency": store_currency,
+                "subentity_id": store_subentity_id,
             },
         )
     except RequestError as exc:
@@ -1532,6 +1548,8 @@ async def place_order_with_payload(
         "order_db_id": int(order_db_id),
         "order_ref": str(returned_ref),
         "order_total": float(order_total),
+        "store_subentity_id": store_subentity_id,
+        "store_currency": store_currency,
         "scenario": scenario,
     }
 
@@ -1701,6 +1719,8 @@ async def complete_free_order(
     token_source: str,
     order_ref: str,
     order_db_id: int,
+    store_subentity_id: int,
+    currency: str,
     recorder: RunRecorder,
     scenario: str,
     step: str,
@@ -1714,8 +1734,8 @@ async def complete_free_order(
     body: dict[str, Any] = {
         "amount": config.SIM_FREE_ORDER_AMOUNT,
         "order_id": order_ref,
-        "currency": config.STORE_CURRENCY,
-        "subentity_id": config.SUBENTITY_ID,
+        "currency": str(currency).lower(),
+        "subentity_id": int(store_subentity_id),
     }
     if config.SIM_COUPON_ID is not None:
         body["coupon"] = config.SIM_COUPON_ID
@@ -1724,7 +1744,7 @@ async def complete_free_order(
     console.print(
         f"[cyan]user:[/] Completing free order {order_ref} "
         f"(db_id={order_db_id}, amount={config.SIM_FREE_ORDER_AMOUNT:g}, "
-        f"{config.STORE_CURRENCY}, coupon={coupon_label}) ..."
+        f"{str(currency).lower()}, coupon={coupon_label}) ..."
     )
     try:
         await request_json(
@@ -1832,6 +1852,8 @@ async def handle_order_payment(
             order_ref=order_ref,
             order_db_id=order_db_id,
             amount=float(order["order_total"]),
+            store_subentity_id=int(order["store_subentity_id"]),
+            currency=str(order["store_currency"]),
             recorder=recorder,
             scenario=scenario,
             step="complete_payment",
@@ -1843,6 +1865,8 @@ async def handle_order_payment(
             token_source=token_source,
             order_ref=order_ref,
             order_db_id=order_db_id,
+            store_subentity_id=int(order["store_subentity_id"]),
+            currency=str(order["store_currency"]),
             recorder=recorder,
             scenario=scenario,
             step="complete_free_order",

@@ -9,6 +9,79 @@
 
 ## Tasks
 
+## Next Immediate Task
+
+Review or harden unrelated midnight-edge schedule test if required.
+
+### Phase 36: Pending Order Trace Flow
+
+- [x] Add failing tests for `place-order` flow/scenario/API/order-contract/web behavior
+  - Dependency: User-approved plan.
+  - Notes: Cover resolver, API validation, order cleanup exception, command preview, and launcher help/validation.
+  - Completion evidence: Focused tests fail before implementation for missing `place-order` behavior.
+
+- [x] Implement CLI/API trace flow metadata and validation
+  - Dependency: Failing tests.
+  - Notes: Add `place-order`, `place_order`, and trace-only `orders` exception capped at 10.
+  - Completion evidence: Focused Python tests pass.
+
+- [x] Implement trace runner pending seeding and cleanup bypass
+  - Dependency: Flow metadata and validation.
+  - Notes: Loop `SIM_ORDERS`, call `user_sim.place_order`, require `pending` websocket gate, record seeded/bypass events.
+  - Completion evidence: Trace runner and order-contract tests pass.
+
+- [x] Update Runs UI launcher and web helpers
+  - Dependency: API/flow contract.
+  - Notes: Show Orders for load mode or `place-order`; update validation, command preview, impact/help text.
+  - Completion evidence: Web tests pass.
+
+- [x] Update docs
+  - Dependency: Behavior stabilized.
+  - Notes: Update README, SIMULATOR_GUIDE, SIMULATOR_CAPABILITIES, and flow docs.
+  - Completion evidence: Docs mention `place-order`, `place_order`, `--orders` cap, and pending-order responsibility.
+
+- [x] Run verification and final tracker update
+  - Dependency: Implementation and docs.
+  - Notes: Run planned Python and web tests; record output and remaining risks.
+  - Completion evidence: Verification outputs logged in `session_log.md`; full Python suite has one unrelated schedule-window edge failure.
+
+### Phase 35: Universal Order-Closure + WebSocket-Proof Enforcement
+
+- [x] Implement global terminal-order contract across `trace` and `load`
+  - Dependency: Tracker update + current runtime assessment.
+  - Notes: Every created order must end in `{completed, rejected, cancelled}`; unresolved non-terminal orders must fail run regardless of `failure_policy`.
+  - Completion evidence: Shared end-of-run finalization invoked by both modes and enforced by tests.
+
+- [x] Fix payment/store context leakage
+  - Dependency: Global terminal contract wiring.
+  - Notes: Remove mutable-global context reliance; pass per-order explicit `subentity_id`/currency/store context through payment paths.
+  - Completion evidence: Regression test proving no subentity drift after alternate-store coupon recovery.
+
+- [x] Add lifecycle finalization and cleanup attempts
+  - Dependency: Cleanup/fetch helpers and order inventory extraction.
+  - Notes: Per non-terminal order: natural-settle wait, cancel-first, reject fallback (when valid), re-check.
+  - Completion evidence: Tests for cleanup success and cleanup unresolved failure path.
+
+- [x] Enforce strict websocket lifecycle proof for created orders
+  - Dependency: Finalization wiring.
+  - Notes: Missing/late websocket proof for required order lifecycle checkpoints becomes run-failing for order-producing runs.
+  - Completion evidence: Tests where missing websocket terminal proof fails run.
+
+- [x] Update run artifact narratives for cleanup/unresolved evidence
+  - Dependency: Finalization + websocket strictness implementation.
+  - Notes: Add explicit report/story sections for cleanup attempts and unresolved non-terminal orders.
+  - Completion evidence: Report/story assertions in tests.
+
+- [x] Update operator docs for always-on contract
+  - Dependency: Runtime behavior complete.
+  - Notes: Document no-open-order success rule and websocket lifecycle proof requirement.
+  - Completion evidence: `README.md` + `SIMULATOR_GUIDE.md` updated and reviewed.
+
+- [x] Run full verification suite
+  - Dependency: All implementation tasks complete.
+  - Notes: Targeted new tests + full unit tests + compile + CLI help + diff check.
+  - Completion evidence: command outputs recorded in `session_log.md`.
+
 ### Phase 1: Preparation
 
 - [x] Inspect current simulator structure and supplied session files

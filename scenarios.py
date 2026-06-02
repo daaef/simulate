@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import random
+
+import config
 
 
 TRACE_SCENARIOS = (
@@ -11,6 +13,8 @@ TRACE_SCENARIOS = (
     "rejected",
     "cancelled",
     "auto_cancel",
+    "backend_auto_cancel",
+    "place_order",
     "new_user_setup",
     "returning_paid_no_coupon",
     "returning_paid_with_coupon",
@@ -28,11 +32,12 @@ TRACE_SCENARIOS = (
     "receipt_review_reorder",
 )
 TRACE_SUITES = {
-    "core": ("completed", "rejected", "cancelled"),
+    "core": ("completed", "rejected", "cancelled", "backend_auto_cancel"),
     "payments": (
         "returning_paid_no_coupon",
         "returning_paid_with_coupon",
         "returning_free_with_coupon",
+        "backend_auto_cancel",
     ),
     "menus": (
         "menu_available",
@@ -40,7 +45,7 @@ TRACE_SUITES = {
         "menu_sold_out",
         "menu_store_closed",
     ),
-    "store": ("store_first_setup", "store_accept", "store_reject"),
+    "store": ("store_first_setup", "store_accept", "store_reject", "backend_auto_cancel"),
     "audit": (
         "app_bootstrap",
         "new_user_setup",
@@ -57,6 +62,7 @@ TRACE_SUITES = {
         "store_reject",
         "robot_complete",
         "receipt_review_reorder",
+        "backend_auto_cancel",
     ),
     "doctor": (
         "app_bootstrap",
@@ -71,6 +77,7 @@ TRACE_SUITES = {
         "store_reject",
         "robot_complete",
         "receipt_review_reorder",
+        "backend_auto_cancel",
     ),
     "full": (
         "app_bootstrap",
@@ -88,6 +95,11 @@ TRACE_SUITES = {
         "store_reject",
         "robot_complete",
         "receipt_review_reorder",
+        "completed",
+        "rejected",
+        "cancelled",
+        "backend_auto_cancel",
+        "auto_cancel",
     ),
 }
 
@@ -141,7 +153,7 @@ TIMING_PROFILES = {
             "robot_arrived_for_delivery": DelayRange(5.0, 20.0),
             "completed": DelayRange(2.0, 8.0),
         },
-        auto_cancel_wait_seconds=180.0,
+        auto_cancel_wait_seconds=120.0,
     ),
 }
 
@@ -169,6 +181,10 @@ def resolve_trace_scenarios(
             )
         if name not in unique:
             unique.append(name)
+    if "place_order" in unique and len(unique) > 1:
+        raise RuntimeError(
+            "place_order cannot be combined with other trace scenarios or suites."
+        )
     return unique
 
 
@@ -180,3 +196,12 @@ def resolve_timing_profile(name: str) -> TimingProfile:
             f"Expected one of {', '.join(sorted(TIMING_PROFILES))}."
         )
     return profile
+
+
+def resolve_effective_timing_profile(name: str) -> TimingProfile:
+    """Timing profile with plan-only auto_cancel awaiting-payment observe override when set."""
+    profile = resolve_timing_profile(name)
+    override = getattr(config, "SIM_PLAN_STORE_AUTO_CANCEL_SECONDS", None)
+    if override is None:
+        return profile
+    return replace(profile, auto_cancel_wait_seconds=float(override))

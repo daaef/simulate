@@ -93,6 +93,15 @@ export const GUIDE_FLOW_MATRIX: GuideFlowRow[] = [
     artifacts: "events.json, report.md, story.md"
   },
   {
+    flow: "place-order",
+    resolved_mode: "trace",
+    suite_or_scenarios: "scenarios=[place_order]",
+    what_it_tests: "It seeds live pending order(s) for manual store-app inspection. Unlike standard proof flows, it intentionally stops at pending after websocket proof.",
+    prerequisites: "Plan with at least one user and one store; use --store/--phone only when you need pinned actors.",
+    optional_flags: "--orders, --store, --phone, --timing",
+    artifacts: "events.json, report.md, story.md"
+  },
+  {
     flow: "paid-no-coupon",
     resolved_mode: "trace",
     suite_or_scenarios: "scenarios=[returning_paid_no_coupon]",
@@ -214,6 +223,13 @@ export const GUIDE_COMMAND_ROWS: GuideCommandRow[] = [
     common_failure: "Store auth/profile lookup fails for missing/invalid store_id."
   },
   {
+    command: "python3 -m simulate place-order --plan sim_actors.json --orders 3",
+    purpose: "Seed pending live order(s) for manual store-app inspection.",
+    when_to_use: "Use when a store operator needs pending orders visible in the real store app.",
+    expected_result: "Each requested order is created, websocket-verified as pending, and intentionally left pending.",
+    common_failure: "Pending websocket proof is missing or the selected plan has no usable user/store."
+  },
+  {
     command: "python3 -m simulate load --plan sim_actors.json --users 5 --orders 50 --interval 5 --reject 0.1",
     purpose: "Bounded concurrent load test with deterministic scale knobs.",
     when_to_use: "Performance and stability checks under realistic multi-user traffic.",
@@ -269,7 +285,7 @@ export const GUIDE_FLAG_ROWS: GuideFlagRow[] = [
     flag: "--timing",
     type: "enum(fast|realistic)",
     default_value: "from .env SIM_TIMING_PROFILE",
-    effect: "Controls delay ranges and auto-cancel wait windows.",
+    effect: "Controls delay ranges and auto_cancel awaiting-payment observe window (plan store_auto_cancel_seconds overrides).",
     constraints: "Affects both trace and flow presets."
   },
   {
@@ -283,8 +299,8 @@ export const GUIDE_FLAG_ROWS: GuideFlagRow[] = [
     flag: "--orders",
     type: "int",
     default_value: "from .env SIM_ORDERS",
-    effect: "Total orders to place in bounded load mode.",
-    constraints: "Load mode only; value must be >= 1."
+    effect: "Total orders to place in bounded load mode, or pending orders to seed for place-order.",
+    constraints: "Load mode value must be >= 1. Trace mode supports this only for place-order, with value 1..10."
   },
   {
     flag: "--interval",
@@ -368,7 +384,14 @@ export const GUIDE_FLAG_ROWS: GuideFlagRow[] = [
     type: "boolean switch",
     default_value: "from .env SIM_ENFORCE_WEBSOCKET_GATES (false)",
     effect: "Controls whether websocket gate failures fail fast or are recorded as warnings and bypassed.",
-    constraints: "Affects trace/doctor progression behavior when websocket source is unavailable or delayed."
+    constraints: "When enabled, required websocket channels must stay active or the run fails after retry window."
+  },
+  {
+    flag: "--timeout-fails",
+    type: "boolean switch",
+    default_value: "from .env SIM_TIMEOUT_FAILS (false)",
+    effect: "Enforces HTTP request timeout policy and fails the run when request timeouts occur.",
+    constraints: "When disabled, HTTP requests wait indefinitely for endpoint responses."
   },
   {
     flag: "--no-auto-provision",
@@ -401,8 +424,8 @@ export const GUIDE_COMBO_RULES: GuideComboRule[] = [
   {
     combination: "trace flow + --users/--orders/--reject/--interval",
     verdict: "conditional",
-    explanation: "These flags are parsed but do not drive trace scenario scheduling.",
-    fix: "Use these only for load mode unless intentionally keeping defaults aligned."
+    explanation: "Load knobs do not drive trace scenario scheduling. The only exception is --orders for place-order pending seeding.",
+    fix: "Use these only for load mode, or use --orders 1..10 with place-order."
   },
   {
     combination: "--no-auto-provision + store without setup/menu",
@@ -489,6 +512,9 @@ export const TIMING_REFERENCE = [
     store_decision_delay: "3s to 12s",
     store_prep_delay: "20s to 90s",
     robot_progression_delay: "5s to 120s per status hop",
-    auto_cancel_wait: "180s"
+    auto_cancel_wait: "120s (override in plan runtime_defaults.store_auto_cancel_seconds)"
   }
 ];
+
+export const PLAN_STORE_AUTO_CANCEL_NOTE =
+  "Set runtime_defaults.store_auto_cancel_seconds in the run plan to override the timing-profile awaiting-payment observe window for auto_cancel (no env var).";

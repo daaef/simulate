@@ -35,8 +35,14 @@ python3 -m simulate doctor --plan sim_actors.json --timing fast
 
 - Default run-failure policy is API-focused: `SIM_FAILURE_POLICY=api_only`.
 - Default preflight behavior is recovery-first: `SIM_PREFLIGHT_STRATEGY=auto_recover`.
+- HTTP timeout enforcement is opt-in: `SIM_TIMEOUT_FAILS=false` by default.
 - Plan rules can override both per run profile: `rules.failure_policy` and `rules.preflight_strategy`.
 - Under `api_only`, precondition misses (coupon unavailable, already-setup new-user phone, GPS fallback) downgrade to **degraded/unsupported** with exit code `0`. Transport/timeouts/HTTP 5xx still hard-fail (exit `1`). See [SIMULATOR_GUIDE.md](SIMULATOR_GUIDE.md#flow-reliability-and-named-flow-regression).
+- `SIM_TIMEOUT_FAILS=true` (or `--timeout-fails`) applies request timeout protection and fails the run on timeout; when off, requests wait indefinitely for endpoint responses.
+- `SIM_ENFORCE_WEBSOCKET_GATES=true` now requires websocket startup readiness (`user_orders`, `store_orders`, `store_stats`) and fails the run if required channels drop beyond the retry window.
+- Universal order contract (always on): every created order must end in `completed`, `rejected`, or `cancelled` before run success, except the explicit `place-order` trace flow, which intentionally leaves websocket-proven pending orders for manual store-app inspection.
+- End-of-run lifecycle cleanup is automatic: non-terminal orders get settle + cleanup attempts (`cancel`, then `reject` fallback). Any remaining non-terminal order forces run `failed` (non-zero exit).
+- Websocket lifecycle proof is required for order-producing runs: missing/late lifecycle evidence now fails the run even when gate enforcement is not explicitly enabled.
 
 ## Flow reliability regression (local CLI)
 
@@ -61,6 +67,10 @@ On **Runs → {id} → Overview**, **Failed Events** uses the same failure rules
 Run artifact paths (`report.md`, `story.md`, `events.json`) are hydrated from run logs, including long wrapped path lines from launcher console output.
 
 On **Overview**, **Attention Queue** and **Alerts** rows now include explicit date/time stamps for easier triage ordering.
+
+Run ownership/liveness is now persisted (`process_pid`, launcher instance, heartbeat, ownership state). The API reconciler uses detached-process recovery before failing runs; unresolved infra loss is reported as `detached_process_dead_no_terminal_evidence` instead of generic orphan wording.
+
+Scheduled launches now serialize identical active schedule/profile/command combinations. Overlap skips are recorded in schedule execution history with status `overlap_skipped`.
 
 ## Archive-First Delete/Restore
 

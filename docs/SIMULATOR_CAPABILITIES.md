@@ -95,6 +95,7 @@ Each row is a key in `FLOW_PRESETS`. Passing this as the first positional argume
 | `load` | load | — | — | — |
 | `menus` | trace | `menus` | — | — |
 | `new-user` | trace | — | `new_user_setup` | `user_role`: `new_user` |
+| `place-order` | trace | — | `place_order` | Seeds pending orders for manual inspection; `--orders` allowed 1..10 |
 | `paid-no-coupon` | trace | — | `returning_paid_no_coupon` | `payment_mode`: stripe, `payment_case`: paid_no_coupon, `coupon_id`: null |
 | `paid-coupon` | trace | — | `returning_paid_with_coupon` | `payment_mode`: stripe, `payment_case`: paid_with_coupon; preset also sets `coupon_required` in data (operators still need coupon id or auto-select) |
 | `free-coupon` | trace | — | `returning_free_with_coupon` | `payment_mode`: free, `payment_case`: free_with_coupon, `free_order_amount`: 0.0; `coupon_required` in preset data |
@@ -121,6 +122,7 @@ Passing an alias normalizes to the canonical preset name (`normalise_flow` → `
 | `coupon` | `paid-coupon` |
 | `free` | `free-coupon` |
 | `new_user` | `new-user` |
+| `place_order` | `place-order` |
 | `store_setup` | `store-setup` |
 | `store_accept` | `store-accept` |
 | `store_reject` | `store-reject` |
@@ -140,9 +142,9 @@ Hyphens vs underscores: keys are normalized with `.lower().replace("_", "-")` be
 
 `allowed_optional_flags` per resolved mode (from `FLOW_OPTIONAL_FLAGS`):
 
-**Trace:** `timing`, `store_id`, `phone`, `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `no_auto_provision`, `enforce_websocket_gates`, `post_order_actions`, `no_random_phone`, `no_random_store`, `all_users`, `extra_args`
+**Trace:** `timing`, `store_id`, `phone`, `suite`, `scenarios`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `no_auto_provision`, `enforce_websocket_gates`, `timeout_fails`, `post_order_actions`, `no_random_phone`, `no_random_store`, `all_users`, `extra_args`; `orders` is additionally allowed only for `place-order`.
 
-**Load:** `timing`, `store_id`, `phone`, `all_users`, `users`, `orders`, `interval`, `reject`, `continuous`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `no_auto_provision`, `enforce_websocket_gates`, `post_order_actions`, `no_random_phone`, `no_random_store`, `extra_args`
+**Load:** `timing`, `store_id`, `phone`, `all_users`, `users`, `orders`, `interval`, `reject`, `continuous`, `strict_plan`, `skip_app_probes`, `skip_store_dashboard_probes`, `no_auto_provision`, `enforce_websocket_gates`, `timeout_fails`, `post_order_actions`, `no_random_phone`, `no_random_store`, `extra_args`
 
 Note: CLI uses `--store` and `--phone` (not `store_id`). Web API uses `store_id` / `phone` field names.
 
@@ -208,7 +210,9 @@ All names must appear in `TRACE_SCENARIOS`. Unsupported names raise at resolve t
 | `completed` | Full happy path: place order, payment, store ready path, robot lifecycle to `completed` (`_run_completed`). |
 | `rejected` | Store rejects before payment; expect terminal `rejected`. |
 | `cancelled` | Customer cancels while pending. |
-| `auto_cancel` | Waits for backend timeout cancellation without store action (timing profile sets wait duration). |
+| `backend_auto_cancel` | Store idle on `pending`, logs pending-backend countdown ticks, observes `cancelled` from backend or customer (no store PATCH; shared observe window via `auto_cancel_wait_seconds` / plan `store_auto_cancel_seconds`). |
+| `auto_cancel` | Store accepts to `payment_processing`, withholds customer payment, logs awaiting-payment countdown ticks, observes `cancelled` (optional diagnostic; may finish `unsupported` if backend does not cancel awaiting-payment orders). |
+| `place_order` | Places `SIM_ORDERS` pending order(s), requires pending websocket proof, records `pending_order_seeded`, and intentionally leaves orders pending for manual store-app inspection. Cannot be combined with other scenarios or suites. |
 | `new_user_setup` | Validates new-user bootstrap path; user auth uses `scenario=bootstrap` hint when present in list. |
 | `returning_paid_no_coupon` | Paid Stripe path without coupon (`_run_payment_scenario`). |
 | `returning_paid_with_coupon` | Paid Stripe path with coupon (`_run_payment_scenario`). |
@@ -227,7 +231,7 @@ All names must appear in `TRACE_SCENARIOS`. Unsupported names raise at resolve t
 
 **Fixture-heavy scenarios** (`FIXTURE_REQUIRED_SCENARIOS` in `trace_runner.py`): includes all order/payment/menu paths above except `store_dashboard` and `store_first_setup` (which has its own bootstrap path). Used to decide store preflight / fixture bootstrap behavior.
 
-**Websocket observer:** Started when the resolved list contains any of: `completed`, `rejected`, `cancelled`, `auto_cancel`, `returning_paid_no_coupon`, `returning_paid_with_coupon`, `returning_free_with_coupon`, `store_accept`, `store_reject`, `robot_complete`, `receipt_review_reorder`.
+**Websocket observer:** Started when the resolved list contains any of: `completed`, `rejected`, `cancelled`, `backend_auto_cancel`, `auto_cancel`, `place_order`, `returning_paid_no_coupon`, `returning_paid_with_coupon`, `returning_free_with_coupon`, `store_accept`, `store_reject`, `robot_complete`, `receipt_review_reorder`.
 
 ---
 
@@ -236,7 +240,7 @@ All names must appear in `TRACE_SCENARIOS`. Unsupported names raise at resolve t
 | Profile | `store_decision_delay` | `store_prep_delay` | `auto_cancel_wait_seconds` | Robot step delays (summary) |
 |---------|------------------------|--------------------|------------------------------|------------------------------|
 | `fast` | 0.2–0.5 s | 0.2–0.5 s | 30 | ~0.2–0.6 s per robot status step |
-| `realistic` | 3–12 s | 20–90 s | 180 | tens of seconds per robot step |
+| `realistic` | 3–12 s | 20–90 s | 120 | tens of seconds per robot step |
 
 Robot statuses configured: `enroute_pickup`, `robot_arrived_for_pickup`, `enroute_delivery`, `robot_arrived_for_delivery`, `completed`.
 
@@ -256,7 +260,7 @@ Invocation: `python3 __main__.py …` from the repo root (same entry as `python3
 | `--users` | int | Load only; default `N_USERS` |
 | `--interval` | float | Load only; seconds between orders |
 | `--reject` | float | Load only; 0.0–1.0 reject probability |
-| `--orders` | int | Load only; bounded total orders |
+| `--orders` | int | Load bounded total orders; trace only for `place-order`, 1..10 pending orders |
 | `--continuous` | flag | Load only; run until interrupted |
 | `--phone` | string | Must be in plan `users[]` |
 | `--store` | string | Must be in plan `stores[]` |
@@ -270,9 +274,10 @@ Invocation: `python3 __main__.py …` from the repo root (same entry as `python3
 | `--post-order-actions` | flag | Sets `SIM_RUN_POST_ORDER_ACTIONS` true |
 | `--enforce-websocket-gates` | flag (mutex group) | Fail fast on gate failures |
 | `--no-enforce-websocket-gates` | flag (mutex group) | Continue with warnings |
+| `--timeout-fails` | flag | Sets `SIM_TIMEOUT_FAILS` true |
 | `--no-auto-provision` | flag | Sets `SIM_AUTO_PROVISION_FIXTURES` false |
 
-**Websocket flags:** Default in argparse is `None`; only explicit CLI sets `SIM_ENFORCE_WEBSOCKET_GATES`. Otherwise env/plan applies.
+**Websocket flags:** Default in argparse is `None`; only explicit CLI sets `SIM_ENFORCE_WEBSOCKET_GATES`. Otherwise env/plan applies. With enforcement on, startup waits for `user_orders` + `store_orders` + `store_stats`; runtime drops fail after retry window.
 
 **Explicit CLI wins:** `_explicit_config_overrides` + per-flag `if _has_cli_flag` ensures plan does not overwrite explicit CLI for mapped options.
 
@@ -287,6 +292,7 @@ Invocation: `python3 __main__.py …` from the repo root (same entry as `python3
 | Coupon | If trace includes `returning_paid_with_coupon` or `returning_free_with_coupon`, need `SIM_COUPON_ID` **or** `SIM_AUTO_SELECT_COUPON=true` |
 | Reject rate | `0 <= REJECT_RATE <= 1` |
 | Load bounds | `N_USERS >= 1`, `SIM_ORDERS >= 1` in load mode |
+| Place-order bounds | `SIM_ORDERS` must be 1..10 and only `place_order` may use `--orders` in trace mode |
 | Continuous + trace | Forbidden |
 
 ---
@@ -339,6 +345,8 @@ Sensitive keys containing `secret`, `token`, `password`, `api_key`, or `private_
 | `run_post_order_actions` | `SIM_RUN_POST_ORDER_ACTIONS` |
 | `run_enforce_websocket_gates` | `SIM_ENFORCE_WEBSOCKET_GATES` |
 | `enforce_websocket_gates` | `SIM_ENFORCE_WEBSOCKET_GATES` (second accepted key for the same global) |
+| `run_timeout_fails` | `SIM_TIMEOUT_FAILS` |
+| `timeout_fails` | `SIM_TIMEOUT_FAILS` |
 | `app_autopilot` | `SIM_APP_AUTOPILOT` |
 | `auto_select_store` | `SIM_AUTO_SELECT_STORE` |
 | `auto_select_coupon` | `SIM_AUTO_SELECT_COUPON` |
@@ -436,6 +444,7 @@ Values load from `.env` via `python-dotenv`. **README guidance:** keep normal si
 | `SIM_RUN_STORE_DASHBOARD_PROBES` | true |
 | `SIM_RUN_POST_ORDER_ACTIONS` | false |
 | `SIM_ENFORCE_WEBSOCKET_GATES` | false |
+| `SIM_TIMEOUT_FAILS` | false |
 | `SIM_STRICT_PLAN` | false |
 | `SIM_FAILURE_POLICY` | `api_only` |
 | `SIM_PREFLIGHT_STRATEGY` | `auto_recover` |
@@ -507,6 +516,7 @@ Model: `api/app/runs/models.py`. Command builder: `_build_command` in `api/app/m
 | `skip_store_dashboard_probes` | `--skip-store-dashboard-probes` |
 | `no_auto_provision` | `--no-auto-provision` |
 | `enforce_websocket_gates` | `--enforce-websocket-gates` only when true (false does not emit `--no-enforce-websocket-gates`) |
+| `timeout_fails` | `--timeout-fails` when true |
 | `post_order_actions` | `--post-order-actions` when true |
 | `users` | `--users` |
 | `orders` | `--orders` |
@@ -525,7 +535,9 @@ Mirrors `_build_command` guards:
 
 - `reject` ∈ [0, 1]; `users` ≥ 1; `orders` ≥ 1 when provided
 - Trace + `continuous` forbidden
-- Trace + any of `users`, `orders`, `interval`, `reject` forbidden
+- Trace + any of `users`, `interval`, `reject` forbidden
+- Trace + `orders` allowed only for `place-order`, capped at `10`
+- `place-order` cannot combine `suite` or extra `scenarios`
 - Load + `suite` or non-empty `scenarios` forbidden
 
 ---

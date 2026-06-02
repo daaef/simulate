@@ -14,6 +14,7 @@
 | `doctor` | Daily production health check: app probes, store setup/dashboard, menu gates, payments, store actions, robot completion, receipt/review/reorder |
 | `full` | Broadest suite including new-user setup and coupon scenarios |
 | `receipt-review` | Completed order plus receipt, review, and reorder probes |
+| `place-order` | Seeds 1-10 pending live orders for manual store-app inspection; intentionally leaves them pending after websocket proof |
 | `store-dashboard` | Store orders, statistics, and top-customer probes |
 
 Each simulator is **fully self-contained** — it owns its own auth, data seeding, and
@@ -64,7 +65,9 @@ Supported scenarios:
 | `completed` | Full happy path from order placement through robot completion |
 | `rejected` | Store rejects before payment |
 | `cancelled` | Customer cancels while the order is still pending |
-| `auto_cancel` | Diagnostic check for backend timeout cancellation without store action |
+| `place_order` | Seeds pending order(s) for manual store-app inspection; intentionally leaves them pending |
+| `backend_auto_cancel` | Store idle on pending, countdown, observe `cancelled` (no store PATCH) |
+| `auto_cancel` | Store accept, withhold payment, awaiting-payment countdown, observe `cancelled` (no store PATCH) |
 | `app_bootstrap` | Probe config, product auth, pricing, saved cards, coupons, active user orders |
 | `store_dashboard` | Probe store orders, store statistics, and top customers |
 | `receipt_review_reorder` | Full completed order plus receipt generation, review submission, and reorder fetch |
@@ -203,6 +206,7 @@ python3 -m simulate --mode trace --suite core --timing fast
 python3 -m simulate --mode trace --scenario completed --scenario cancelled --timing realistic
 python3 -m simulate doctor --plan sim_actors.json --timing fast
 python3 -m simulate receipt-review --plan sim_actors.json --post-order-actions
+python3 -m simulate place-order --plan sim_actors.json --orders 3
 python3 -m simulate store-dashboard --plan sim_actors.json
 ```
 

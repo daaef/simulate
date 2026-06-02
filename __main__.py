@@ -29,15 +29,23 @@ from failure_policy import VALID_FAILURE_POLICIES, VALID_PREFLIGHT_STRATEGIES
 from flow_presets import FLOW_PRESETS, resolve_flow
 from interaction_catalog import PAYMENT_CASES
 from load_worker_assignment import build_worker_user_index_assignment
+import order_contract
 from reporting import RunRecorder
 import robot_sim
-from scenarios import resolve_trace_scenarios
+from scenarios import resolve_effective_timing_profile, resolve_trace_scenarios
 import store_sim
 import trace_runner
 import user_sim
-from websocket_observer import WebsocketObserver, validate_websocket_events
+from websocket_observer import (
+    REQUIRED_WEBSOCKET_SOURCES,
+    WebsocketObserver,
+    validate_websocket_events,
+)
 
 console = Console()
+
+PLACE_ORDER_FLOW = "place-order"
+PLACE_ORDER_MAX_ORDERS = 10
 
 
 def _parse_args() -> argparse.Namespace:
@@ -170,6 +178,21 @@ def _parse_args() -> argparse.Namespace:
         help="Do not fail on websocket gate failures; continue scenarios and record websocket warnings.",
     )
     parser.add_argument(
+        "--timeout-fails",
+        action="store_true",
+        default=False,
+        help="Apply HTTP timeout policy and fail the run when request timeouts occur.",
+    )
+    parser.add_argument(
+        "--wait-for-store-action",
+        action="store_true",
+        default=False,
+        help=(
+            "Do not simulate store actions. Wait for a real store operator to act "
+            "from their app for each order in this run (trace mode only)."
+        ),
+    )
+    parser.add_argument(
         "--no-auto-provision",
         action="store_true",
         default=False,
@@ -249,6 +272,8 @@ def _explicit_config_overrides(argv: list[str]) -> set[str]:
         "--post-order-actions": "SIM_RUN_POST_ORDER_ACTIONS",
         "--enforce-websocket-gates": "SIM_ENFORCE_WEBSOCKET_GATES",
         "--no-enforce-websocket-gates": "SIM_ENFORCE_WEBSOCKET_GATES",
+        "--timeout-fails": "SIM_TIMEOUT_FAILS",
+        "--wait-for-store-action": "SIM_WAIT_FOR_STORE_ACTION",
         "--no-auto-provision": "SIM_AUTO_PROVISION_FIXTURES",
         "--no-random-phone": "SIM_DISABLE_RANDOM_PHONE",
         "--no-random-store": "SIM_DISABLE_RANDOM_STORE",
@@ -309,6 +334,10 @@ def _apply_args(args: argparse.Namespace) -> None:
         config.SIM_RUN_POST_ORDER_ACTIONS = args.post_order_actions
     if _has_cli_flag(argv, "--enforce-websocket-gates", "--no-enforce-websocket-gates"):
         config.SIM_ENFORCE_WEBSOCKET_GATES = bool(args.enforce_websocket_gates)
+    if _has_cli_flag(argv, "--timeout-fails") and args.timeout_fails:
+        config.SIM_TIMEOUT_FAILS = True
+    if _has_cli_flag(argv, "--wait-for-store-action") and args.wait_for_store_action:
+        config.SIM_WAIT_FOR_STORE_ACTION = True
     if _has_cli_flag(argv, "--no-auto-provision") and args.no_auto_provision:
         config.SIM_AUTO_PROVISION_FIXTURES = False
     if _has_cli_flag(argv, "--no-random-phone"):
@@ -434,11 +463,28 @@ def _validate_config() -> None:
             raise RuntimeError("--users must be >= 1.")
         if config.SIM_ORDERS < 1:
             raise RuntimeError("--orders must be >= 1.")
-    if config.SIM_RUN_MODE == "trace" and config.SIM_CONTINUOUS:
-        raise RuntimeError("--continuous is only supported in load mode.")
+    if config.SIM_RUN_MODE == "trace":
+        if config.SIM_CONTINUOUS:
+            raise RuntimeError("--continuous is only supported in load mode.")
+        if trace_scenarios == ["place_order"]:
+            if config.SIM_ORDERS < 1:
+                raise RuntimeError("--orders must be >= 1.")
+            if config.SIM_ORDERS > PLACE_ORDER_MAX_ORDERS:
+                raise RuntimeError(
+                    f"--orders must be <= {PLACE_ORDER_MAX_ORDERS} for place-order."
+                )
+        elif _has_cli_flag(sys.argv[1:], "--orders"):
+            raise RuntimeError(
+                "--orders is only supported in trace mode for place-order."
+            )
 
 
 async def _run_load_mode(*, recorder: RunRecorder) -> None:
+    def _is_timeout_fatal(exc: Exception) -> bool:
+        if isinstance(exc, app_probes.ProbeTimeoutFatalError):
+            return True
+        return str(getattr(exc, "reason_code", "")).strip().lower() == "http_timeout"
+
     # Phase 0: Use already-loaded actors from argument/application bootstrap.
     actors = getattr(config, "SIM_ACTORS", {}) or {}
     if not actors:
@@ -534,6 +580,10 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
                             raw_store=ss.subentity,
                         )
                 except Exception as exc:
+                    if config.SIM_TIMEOUT_FAILS and _is_timeout_fatal(exc):
+                        raise RuntimeError(
+                            f"Store bootstrap timed out with timeout-fails enabled (store_id={sid})."
+                        ) from exc
                     console.print(
                         f"[yellow]main:[/] Store {sid} login failed: {exc}  (skipping)"
                     )
@@ -620,6 +670,10 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
                 user_bundles_by_phone[phone] = (us, fixtures)
                 authenticated_user_order.append(phone)
             except Exception as exc:
+                if config.SIM_TIMEOUT_FAILS and _is_timeout_fatal(exc):
+                    raise RuntimeError(
+                        f"User bootstrap timed out with timeout-fails enabled (phone={phone})."
+                    ) from exc
                 console.print(
                     f"[yellow]main:[/] User {phone} auth failed: {exc}  (skipping)"
                 )
@@ -637,6 +691,12 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
         raise RuntimeError("No worker assignments could be built from authenticated users.")
 
     total_user_workers = sum(worker_counts_by_phone.values())
+    user_sessions_by_id = {
+        session.user_id: session for session, _fixtures in user_bundles_by_phone.values()
+    }
+    store_sessions_by_subentity_id = {
+        session.store_id: session for session in store_sessions
+    }
     console.print(
         f"[green]main:[/] {len(user_bundles_by_phone)} user(s) authenticated successfully."
     )
@@ -687,6 +747,47 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
         store_id=primary_store_id,
     )
     await observer.start()
+    websocket_health_task: asyncio.Task[None] | None = None
+    if config.SIM_ENFORCE_WEBSOCKET_GATES:
+        try:
+            startup = await observer.wait_for_sources_connected(
+                sources=set(REQUIRED_WEBSOCKET_SOURCES),
+            )
+        except RuntimeError as exc:
+            recorder.record_issue(
+                severity="error",
+                code="websocket_sources_timeout",
+                actor="websocket",
+                scenario="load",
+                step="websocket_startup_gate",
+                message=f"Required websocket channels did not become active: {exc}",
+                details={
+                    "required_sources": sorted(REQUIRED_WEBSOCKET_SOURCES),
+                    "enforced": True,
+                },
+            )
+            raise RuntimeError(
+                "websocket_enforcement_startup_failed: "
+                f"required_sources={sorted(REQUIRED_WEBSOCKET_SOURCES)} reason={exc}"
+            ) from exc
+        recorder.record_event(
+            actor="websocket",
+            action="websocket_startup_gate_ready",
+            category="websocket_gate",
+            scenario="load",
+            step="websocket_startup_gate",
+            details={
+                "required_sources": startup.get("required_sources"),
+                "connected_sources": startup.get("connected_sources"),
+                "enforced": True,
+            },
+            track_order=False,
+        )
+        websocket_health_task = asyncio.create_task(
+            observer.monitor_required_sources(
+                sources=set(REQUIRED_WEBSOCKET_SOURCES),
+            )
+        )
 
     # Store listeners.
     for ss in store_sessions:
@@ -722,11 +823,51 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
 
     try:
         if config.SIM_CONTINUOUS:
-            await asyncio.gather(*all_tasks)
+            if websocket_health_task is not None:
+                await asyncio.gather(*all_tasks, websocket_health_task)
+            else:
+                await asyncio.gather(*all_tasks)
             return
 
         # In bounded mode, wait for all user tasks to finish, then drain.
-        await asyncio.gather(*user_tasks)
+        pending_users = set(user_tasks)
+        while pending_users:
+            wait_set = list(pending_users)
+            if websocket_health_task is not None:
+                wait_set.append(websocket_health_task)
+            done, _pending = await asyncio.wait(
+                wait_set,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if websocket_health_task is not None and websocket_health_task in done:
+                try:
+                    await websocket_health_task
+                except RuntimeError as exc:
+                    recorder.record_issue(
+                        severity="error",
+                        code="websocket_required_sources_timeout",
+                        actor="websocket",
+                        scenario="load",
+                        step="websocket_runtime_gate",
+                        message=(
+                            "Required websocket channels dropped and did not recover "
+                            f"within retry window: {exc}"
+                        ),
+                        details={
+                            "required_sources": sorted(REQUIRED_WEBSOCKET_SOURCES),
+                            "enforced": True,
+                        },
+                    )
+                    raise RuntimeError(
+                        "websocket_enforcement_runtime_failed: "
+                        f"required_sources={sorted(REQUIRED_WEBSOCKET_SOURCES)} reason={exc}"
+                    ) from exc
+            for task in done:
+                if task is websocket_health_task:
+                    continue
+                pending_users.discard(task)
+                task.result()
+
         console.print("[bold green]main:[/] All user sim(s) finished.")
         if config.SIM_BOUNDED_LOAD_POLICY:
             summary = config.bounded_load_summary()
@@ -746,7 +887,42 @@ async def _run_load_mode(*, recorder: RunRecorder) -> None:
                 )
         if config.SIM_WEBSOCKET_DRAIN_SECONDS > 0:
             await asyncio.sleep(config.SIM_WEBSOCKET_DRAIN_SECONDS)
+
+        # Run a single backend auto-cancel probe at the end of every load run.
+        console.print("[cyan]main:[/] Running backend auto-cancel probe …")
+        probe_user_phone = authenticated_user_order[0]
+        probe_user_session, probe_fixtures = user_bundles_by_phone[probe_user_phone]
+        probe_store_session = store_sessions[0]
+        probe_timing = resolve_effective_timing_profile(config.SIM_TIMING_PROFILE)
+        async with httpx.AsyncClient() as probe_client:
+            await trace_runner._run_backend_auto_cancel(
+                probe_client,
+                user_session=probe_user_session,
+                store_session=probe_store_session,
+                fixtures=probe_fixtures,
+                recorder=recorder,
+                timing=probe_timing,
+                observer=observer,
+            )
+
+        unresolved_orders = await order_contract.enforce_order_closure(
+            recorder=recorder,
+            user_sessions_by_id=user_sessions_by_id,
+            store_sessions_by_subentity_id=store_sessions_by_subentity_id,
+            scenario="simulation_cleanup",
+        )
+        if unresolved_orders:
+            unresolved_ids = ", ".join(
+                f"{item['order_db_id']}:{item['status']}" for item in unresolved_orders
+            )
+            raise RuntimeError(
+                "order_contract_failed: unresolved non-terminal orders remain after cleanup: "
+                f"{unresolved_ids}"
+            )
     finally:
+        if websocket_health_task is not None:
+            websocket_health_task.cancel()
+            await asyncio.gather(websocket_health_task, return_exceptions=True)
         await observer.stop()
         recorder.set_websocket_coverage(observer.coverage_summary())
 
@@ -784,6 +960,8 @@ async def main() -> None:
             f"  Store       : {config.STORE_ID or 'all from sim_actors.json'}\n"
             f"  Random phone: {'off' if config.SIM_DISABLE_RANDOM_PHONE else 'on'}\n"
             f"  Random store: {'off' if config.SIM_DISABLE_RANDOM_STORE else 'on'}\n"
+            f"  Timeout fails: {'on' if config.SIM_TIMEOUT_FAILS else 'off'}\n"
+        f"  Store mode  : {'wait-for-real-store' if config.SIM_WAIT_FOR_STORE_ACTION else 'simulated'}\n"
             f"  Interval    : {config.ORDER_INTERVAL_SECONDS}s\n"
             f"  Orders      : {'continuous' if config.SIM_CONTINUOUS else config.SIM_ORDERS}\n"
             f"  Reject rate : {config.REJECT_RATE:.0%}\n"
@@ -797,6 +975,8 @@ async def main() -> None:
     recorder = RunRecorder.bootstrap()
 
     console.print("[bold green]main:[/] Launching simulation ...\n")
+    run_error: Exception | None = None
+    websocket_validation: dict[str, object] = {}
     try:
         if config.SIM_RUN_MODE == "trace":
             await trace_runner.run(
@@ -807,12 +987,26 @@ async def main() -> None:
             )
         else:
             await _run_load_mode(recorder=recorder)
+    except Exception as exc:
+        run_error = exc
     finally:
-        validate_websocket_events(recorder)
+        order_producing_run = bool(recorder.orders)
+        websocket_validation = validate_websocket_events(
+            recorder,
+            strict=order_producing_run,
+            require_lifecycle_proof=order_producing_run,
+        )
         events_path, report_path, story_path = recorder.write()
         console.print(f"[green]main:[/] events: {events_path}")
         console.print(f"[green]main:[/] report: {report_path}")
         console.print(f"[green]main:[/] story: {story_path}")
+    if run_error is not None:
+        raise run_error
+    if int(websocket_validation.get("blocking_failures", 0)) > 0:
+        raise RuntimeError(
+            "websocket_lifecycle_proof_failed: missing or late websocket evidence "
+            "for one or more order lifecycle states."
+        )
 
 
 if __name__ == "__main__":

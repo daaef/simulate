@@ -20,6 +20,10 @@ FLOW_PRESETS: dict[str, dict[str, Any]] = {
         "scenarios": ["new_user_setup"],
         "user_role": "new_user",
     },
+    "place-order": {
+        "mode": "trace",
+        "scenarios": ["place_order"],
+    },
     "paid-no-coupon": {
         "mode": "trace",
         "scenarios": ["returning_paid_no_coupon"],
@@ -99,6 +103,7 @@ FLOW_ALIASES = {
     "coupon": "paid-coupon",
     "free": "free-coupon",
     "new_user": "new-user",
+    "place_order": "place-order",
     "store_setup": "store-setup",
     "store_accept": "store-accept",
     "store_reject": "store-reject",
@@ -124,6 +129,7 @@ FLOW_OPTIONAL_FLAGS: dict[str, list[str]] = {
         "skip_store_dashboard_probes",
         "no_auto_provision",
         "enforce_websocket_gates",
+        "timeout_fails",
         "post_order_actions",
         "no_random_phone",
         "no_random_store",
@@ -145,6 +151,7 @@ FLOW_OPTIONAL_FLAGS: dict[str, list[str]] = {
         "skip_store_dashboard_probes",
         "no_auto_provision",
         "enforce_websocket_gates",
+        "timeout_fails",
         "post_order_actions",
         "no_random_phone",
         "no_random_store",
@@ -175,12 +182,15 @@ def flow_capabilities() -> dict[str, dict[str, Any]]:
         resolved_mode = str(preset.get("mode", "trace"))
         default_suite = str(preset.get("suite") or "") or None
         default_scenarios = [str(item) for item in preset.get("scenarios", [])]
+        allowed_optional_flags = list(FLOW_OPTIONAL_FLAGS.get(resolved_mode, []))
+        if flow_name == "place-order" and "orders" not in allowed_optional_flags:
+            allowed_optional_flags.append("orders")
         capabilities[flow_name] = {
             "flow": flow_name,
             "resolved_mode": resolved_mode,
             "default_suite": default_suite,
             "default_scenarios": default_scenarios,
-            "allowed_optional_flags": list(FLOW_OPTIONAL_FLAGS.get(resolved_mode, [])),
+            "allowed_optional_flags": allowed_optional_flags,
             "available_suites": sorted(TRACE_SUITES.keys()) if resolved_mode == "trace" else [],
             "available_scenarios": list(TRACE_SCENARIOS) if resolved_mode == "trace" else [],
         }

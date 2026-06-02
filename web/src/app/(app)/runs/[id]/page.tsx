@@ -7,6 +7,7 @@ import {
   deleteRun,
   fetchExecutionSnapshot,
   fetchRunOverview,
+  type RunFindingsMeta,
   fetchRun,
   fetchRunArtifactEvents,
   fetchRunArtifactText,
@@ -64,6 +65,7 @@ export default function RunDetailPage() {
   const [run, setRun] = useState<RunRow | null>(null);
   const [metrics, setMetrics] = useState<RunMetrics | null>(null);
   const [findings, setFindings] = useState<RunFindings>(EMPTY_FINDINGS);
+  const [findingsMeta, setFindingsMeta] = useState<RunFindingsMeta | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +102,7 @@ export default function RunDetailPage() {
 
   useEffect(() => {
     setFindings(EMPTY_FINDINGS);
+    setFindingsMeta(null);
     setReport(null);
     setStory(null);
     setEvents([]);
@@ -131,9 +134,11 @@ export default function RunDetailPage() {
             operational: [],
           }
         );
+        setFindingsMeta(payload.findings_meta ?? null);
       })
       .catch(() => {
         setFindings(EMPTY_FINDINGS);
+        setFindingsMeta(null);
       });
   }, [runId]);
 
@@ -276,7 +281,13 @@ export default function RunDetailPage() {
 
         <div>
           {activeTab === "overview" && (
-            <RunDetailOverview metrics={metrics} runStatus={run.status} runError={run.error} findings={findings} />
+            <RunDetailOverview
+              metrics={metrics}
+              runStatus={run.status}
+              runError={run.error}
+              findings={findings}
+              findingsMeta={findingsMeta}
+            />
           )}
 
           {activeTab === "execution" && <RunExecutionSnapshotPanel run={run} onReplay={handleReplay} replaying={isReplaying} />}

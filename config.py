@@ -65,6 +65,8 @@ SIM_FLOW: str = _str("SIM_FLOW", "").lower()
 SIM_TRACE_SUITE: str = _str("SIM_TRACE_SUITE", "core").lower()
 SIM_TRACE_SCENARIOS: list[str] = _csv("SIM_TRACE_SCENARIOS")
 SIM_TIMING_PROFILE: str = _str("SIM_TIMING_PROFILE", "fast").lower()
+# Plan-only override for store pending auto-cancel window (seconds); not read from env.
+SIM_PLAN_STORE_AUTO_CANCEL_SECONDS: float | None = None
 
 SIM_PAYMENT_MODE: str = _str("SIM_PAYMENT_MODE", "stripe").lower()
 SIM_PAYMENT_CASE: str = _str("SIM_PAYMENT_CASE", "paid_no_coupon").lower()
@@ -77,6 +79,9 @@ SIM_RUN_APP_PROBES: bool = _bool("SIM_RUN_APP_PROBES", True)
 SIM_RUN_STORE_DASHBOARD_PROBES: bool = _bool("SIM_RUN_STORE_DASHBOARD_PROBES", True)
 SIM_RUN_POST_ORDER_ACTIONS: bool = _bool("SIM_RUN_POST_ORDER_ACTIONS", False)
 SIM_ENFORCE_WEBSOCKET_GATES: bool = _bool("SIM_ENFORCE_WEBSOCKET_GATES", False)
+SIM_TIMEOUT_FAILS: bool = _bool("SIM_TIMEOUT_FAILS", False)
+SIM_WAIT_FOR_STORE_ACTION: bool = _bool("SIM_WAIT_FOR_STORE_ACTION", False)
+SIM_STORE_ACTION_TIMEOUT_SECONDS: float = _float("SIM_STORE_ACTION_TIMEOUT_SECONDS", 600.0)
 SIM_STRICT_PLAN: bool = _bool("SIM_STRICT_PLAN", False)
 SIM_FAILURE_POLICY: str = normalise_failure_policy(_str("SIM_FAILURE_POLICY", "api_only"))
 SIM_PREFLIGHT_STRATEGY: str = normalise_preflight_strategy(
@@ -158,6 +163,7 @@ SIM_WEBSOCKET_DRAIN_SECONDS: float = _float("SIM_WEBSOCKET_DRAIN_SECONDS", 3.0)
 SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS: float = _float(
     "SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS", 20.0
 )
+SIM_HTTP_TIMEOUT_SECONDS: float = _float("SIM_HTTP_TIMEOUT_SECONDS", 30.0)
 
 ALL_USERS: bool = False
 SIM_PHONE_EXPLICIT: bool = False
@@ -167,6 +173,13 @@ SIM_DISABLE_RANDOM_STORE: bool = False
 SIM_PHONE_AUTO_SELECTED: bool = False
 SIM_STORE_AUTO_SELECTED: bool = False
 SIM_ACTORS: dict[str, Any] = {"defaults": {}, "users": [], "stores": []}
+
+
+def request_timeout_seconds() -> float | None:
+    """Return request timeout policy for runtime HTTP calls."""
+    if not SIM_TIMEOUT_FAILS:
+        return None
+    return max(0.1, float(SIM_HTTP_TIMEOUT_SECONDS))
 
 
 def configure_bounded_load_policy(
@@ -586,6 +599,14 @@ def apply_plan_defaults(plan: Any, *, preserve: set[str] | None = None) -> None:
     review = getattr(plan, "review_defaults", {}) or {}
     new_user = getattr(plan, "new_user_defaults", {}) or {}
 
+    global SIM_PLAN_STORE_AUTO_CANCEL_SECONDS
+    if "SIM_PLAN_STORE_AUTO_CANCEL_SECONDS" in preserved:
+        pass
+    elif _has_plan_value(runtime.get("store_auto_cancel_seconds")):
+        SIM_PLAN_STORE_AUTO_CANCEL_SECONDS = float(runtime["store_auto_cancel_seconds"])
+    else:
+        SIM_PLAN_STORE_AUTO_CANCEL_SECONDS = None
+
     _apply_plan_section(
         runtime,
         {
@@ -613,6 +634,7 @@ def apply_plan_defaults(plan: Any, *, preserve: set[str] | None = None) -> None:
             "run_store_dashboard_probes": ("SIM_RUN_STORE_DASHBOARD_PROBES", _plan_bool),
             "run_post_order_actions": ("SIM_RUN_POST_ORDER_ACTIONS", _plan_bool),
             "run_enforce_websocket_gates": ("SIM_ENFORCE_WEBSOCKET_GATES", _plan_bool),
+            "run_timeout_fails": ("SIM_TIMEOUT_FAILS", _plan_bool),
             "app_autopilot": ("SIM_APP_AUTOPILOT", _plan_bool),
             "auto_select_store": ("SIM_AUTO_SELECT_STORE", _plan_bool),
             "auto_select_coupon": ("SIM_AUTO_SELECT_COUPON", _plan_bool),
@@ -628,6 +650,12 @@ def apply_plan_defaults(plan: Any, *, preserve: set[str] | None = None) -> None:
     _apply_plan_value(
         "SIM_ENFORCE_WEBSOCKET_GATES",
         rules.get("enforce_websocket_gates"),
+        preserve=preserved,
+        transform=_plan_bool,
+    )
+    _apply_plan_value(
+        "SIM_TIMEOUT_FAILS",
+        rules.get("timeout_fails"),
         preserve=preserved,
         transform=_plan_bool,
     )

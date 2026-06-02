@@ -20,6 +20,9 @@ class RunCreateRequest(BaseModel):
     skip_store_dashboard_probes: bool = False
     no_auto_provision: bool = False
     enforce_websocket_gates: bool = False
+    timeout_fails: bool = False
+    wait_for_store_action: bool = False
+    store_auto_cancel: bool = False
     post_order_actions: Optional[bool] = None
     users: Optional[int] = None
     orders: Optional[int] = None
@@ -56,6 +59,7 @@ class RunProfileUpsertRequest(BaseModel):
     skip_store_dashboard_probes: bool = False
     no_auto_provision: bool = False
     enforce_websocket_gates: bool = False
+    timeout_fails: bool = False
     post_order_actions: Optional[bool] = None
     users: Optional[int] = None
     orders: Optional[int] = None

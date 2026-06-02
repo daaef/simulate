@@ -4,13 +4,16 @@ import logging
 import json
 import os
 import re
+import shlex
 import shutil
 import sqlite3
+import socket
 import subprocess
 import threading
 import time
 import hashlib
 import hmac
+import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -127,6 +130,14 @@ RUN_LOG_ACTIVITY_WINDOW_SECONDS = 30.0
 RUN_STARTUP_LOG_GRACE_SECONDS = 15.0
 # After the CLI exits, the worker thread may still parse stdout before updating the DB.
 RUN_POST_EXIT_FINALIZE_GRACE_SECONDS = 45.0
+RUN_HEARTBEAT_INTERVAL_SECONDS = max(
+    1.0,
+    float(os.getenv("RUN_HEARTBEAT_INTERVAL_SECONDS", "5.0")),
+)
+LAUNCHER_INSTANCE_ID = os.getenv(
+    "SIMULATOR_LAUNCHER_INSTANCE_ID",
+    f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:10]}",
+)
 _CONSOLE_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _CONSOLE_RICH_TAG_RE = re.compile(r"\[[^\]]*\]")
 ACTIVE_RUN_STATUSES = frozenset({"queued", "pending", "running", "cancelling"})
@@ -166,6 +177,8 @@ GITHUB_STATUS_API_BASE = os.getenv("GITHUB_STATUS_API_BASE", "https://api.github
 GITHUB_STATUS_CONTEXT = os.getenv("GITHUB_STATUS_CONTEXT", "simulator/verification")
 SIMULATOR_EXTERNAL_BASE_URL = os.getenv("SIMULATOR_EXTERNAL_BASE_URL", "").rstrip("/")
 TERMINAL_RUN_STATUSES = {"succeeded", "failed", "cancelled"}
+PLACE_ORDER_FLOW = "place-order"
+PLACE_ORDER_MAX_ORDERS = 10
 EMAIL_SETTINGS_KEY = "email_notifications"
 EMAIL_EVENT_TRIGGERS = {"run_failed", "schedule_launch_failed", "critical_alert"}
 EMAIL_TEST_COOLDOWN_SECONDS = max(10, int(os.getenv("SIM_EMAIL_TEST_COOLDOWN_SECONDS", "30")))
@@ -220,6 +233,7 @@ def _init_db() -> None:
                 all_users INTEGER NOT NULL DEFAULT 0,
                 no_auto_provision INTEGER NOT NULL DEFAULT 0,
                 enforce_websocket_gates INTEGER NOT NULL DEFAULT 0,
+                timeout_fails INTEGER NOT NULL DEFAULT 0,
                 post_order_actions INTEGER,
                 extra_args TEXT NOT NULL DEFAULT '[]',
                 status TEXT NOT NULL,
@@ -241,7 +255,11 @@ def _init_db() -> None:
                 profile_id INTEGER,
                 schedule_id INTEGER,
                 integration_trigger_id INTEGER,
-                launched_by_user_id INTEGER
+                launched_by_user_id INTEGER,
+                process_pid INTEGER,
+                launcher_instance_id TEXT,
+                last_heartbeat_at TEXT,
+                ownership_state TEXT NOT NULL DEFAULT 'queued'
             )
             """
         )
@@ -266,6 +284,7 @@ def _init_db() -> None:
                 skip_store_dashboard_probes INTEGER NOT NULL DEFAULT 0,
                 no_auto_provision INTEGER NOT NULL DEFAULT 0,
                 enforce_websocket_gates INTEGER NOT NULL DEFAULT 0,
+                timeout_fails INTEGER NOT NULL DEFAULT 0,
                 post_order_actions INTEGER,
                 users INTEGER,
                 orders INTEGER,
@@ -416,8 +435,18 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE schedule_executions ADD COLUMN execution_chain_key TEXT")
     if "launched_by_user_id" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN launched_by_user_id INTEGER")
+    if "process_pid" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN process_pid INTEGER")
+    if "launcher_instance_id" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN launcher_instance_id TEXT")
+    if "last_heartbeat_at" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN last_heartbeat_at TEXT")
+    if "ownership_state" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN ownership_state TEXT NOT NULL DEFAULT 'queued'")
     if "enforce_websocket_gates" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN enforce_websocket_gates INTEGER NOT NULL DEFAULT 0")
+    if "timeout_fails" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN timeout_fails INTEGER NOT NULL DEFAULT 0")
     if "archived_at" not in columns:
         conn.execute("ALTER TABLE runs ADD COLUMN archived_at TEXT")
     profile_columns = [row[1] for row in conn.execute("PRAGMA table_info(run_profiles)").fetchall()]
@@ -435,6 +464,8 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN skip_store_dashboard_probes INTEGER NOT NULL DEFAULT 0")
     if profile_columns and "enforce_websocket_gates" not in profile_columns:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN enforce_websocket_gates INTEGER NOT NULL DEFAULT 0")
+    if profile_columns and "timeout_fails" not in profile_columns:
+        conn.execute("ALTER TABLE run_profiles ADD COLUMN timeout_fails INTEGER NOT NULL DEFAULT 0")
     if profile_columns and "users" not in profile_columns:
         conn.execute("ALTER TABLE run_profiles ADD COLUMN users INTEGER")
     if profile_columns and "orders" not in profile_columns:
@@ -519,7 +550,12 @@ def _migrate_postgres_schema() -> None:
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS schedule_id INTEGER")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS integration_trigger_id INTEGER")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS launched_by_user_id INTEGER")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS process_pid INTEGER")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS launcher_instance_id TEXT")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMP WITH TIME ZONE")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS ownership_state VARCHAR(32) NOT NULL DEFAULT 'queued'")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS enforce_websocket_gates BOOLEAN NOT NULL DEFAULT FALSE")
+            cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS timeout_fails BOOLEAN NOT NULL DEFAULT FALSE")
             cursor.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE")
             cursor.execute(
                 """
@@ -542,6 +578,7 @@ def _migrate_postgres_schema() -> None:
                     skip_store_dashboard_probes BOOLEAN NOT NULL DEFAULT FALSE,
                     no_auto_provision BOOLEAN NOT NULL DEFAULT FALSE,
                     enforce_websocket_gates BOOLEAN NOT NULL DEFAULT FALSE,
+                    timeout_fails BOOLEAN NOT NULL DEFAULT FALSE,
                     post_order_actions BOOLEAN,
                     users INTEGER,
                     orders INTEGER,
@@ -559,6 +596,7 @@ def _migrate_postgres_schema() -> None:
                 """
             )
             cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS enforce_websocket_gates BOOLEAN NOT NULL DEFAULT FALSE")
+            cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS timeout_fails BOOLEAN NOT NULL DEFAULT FALSE")
             cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS suite VARCHAR(80)")
             cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS scenarios JSONB DEFAULT '[]'::jsonb")
             cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS strict_plan BOOLEAN NOT NULL DEFAULT FALSE")
@@ -1254,6 +1292,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     payload["all_users"] = bool(payload["all_users"])
     payload["no_auto_provision"] = bool(payload["no_auto_provision"])
     payload["enforce_websocket_gates"] = bool(payload.get("enforce_websocket_gates"))
+    payload["timeout_fails"] = bool(payload.get("timeout_fails"))
     if payload["post_order_actions"] is not None:
         payload["post_order_actions"] = bool(payload["post_order_actions"])
     payload["extra_args"] = json.loads(payload["extra_args"] or "[]")
@@ -1263,6 +1302,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         payload["trigger_context"] = json.loads(payload["trigger_context"])
     else:
         payload["trigger_context"] = {}
+    payload["ownership_state"] = str(payload.get("ownership_state") or "unknown")
     return payload
 
 
@@ -1273,6 +1313,9 @@ def _row_to_dict_any(row) -> dict[str, Any]:
         if payload.get("trigger_context") is None:
             payload["trigger_context"] = {}
         payload["enforce_websocket_gates"] = bool(payload.get("enforce_websocket_gates"))
+        payload["timeout_fails"] = bool(payload.get("timeout_fails"))
+        payload["ownership_state"] = str(payload.get("ownership_state") or "unknown")
+        payload["last_heartbeat_at"] = _jsonable_datetime(payload.get("last_heartbeat_at"))
         return payload
     else:
         # SQLite returns Row objects
@@ -1280,6 +1323,7 @@ def _row_to_dict_any(row) -> dict[str, Any]:
         payload["all_users"] = bool(payload["all_users"])
         payload["no_auto_provision"] = bool(payload["no_auto_provision"])
         payload["enforce_websocket_gates"] = bool(payload.get("enforce_websocket_gates"))
+        payload["timeout_fails"] = bool(payload.get("timeout_fails"))
         if payload["post_order_actions"] is not None:
             payload["post_order_actions"] = bool(payload["post_order_actions"])
         payload["extra_args"] = json.loads(payload["extra_args"] or "[]")
@@ -1291,6 +1335,7 @@ def _row_to_dict_any(row) -> dict[str, Any]:
             payload["trigger_context"] = json.loads(trigger_context)
         elif trigger_context is None:
             payload["trigger_context"] = {}
+        payload["ownership_state"] = str(payload.get("ownership_state") or "unknown")
         return payload
 
 
@@ -1302,6 +1347,7 @@ def _profile_row_to_dict_any(row) -> dict[str, Any]:
     payload["skip_store_dashboard_probes"] = bool(payload.get("skip_store_dashboard_probes"))
     payload["no_auto_provision"] = bool(payload["no_auto_provision"])
     payload["enforce_websocket_gates"] = bool(payload.get("enforce_websocket_gates"))
+    payload["timeout_fails"] = bool(payload.get("timeout_fails"))
     payload["continuous"] = bool(payload.get("continuous"))
     if payload["post_order_actions"] is not None:
         payload["post_order_actions"] = bool(payload["post_order_actions"])
@@ -1624,6 +1670,149 @@ def _run_has_live_process(run_id: int) -> bool:
     return process is not None and process.poll() is None
 
 
+def _pid_is_live(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _read_pid_cmdline_tokens(pid: int) -> list[str] | None:
+    proc_cmdline = Path(f"/proc/{pid}/cmdline")
+    try:
+        raw = proc_cmdline.read_bytes()
+    except OSError:
+        return None
+    tokens: list[str] = []
+    for part in raw.split(b"\x00"):
+        if not part:
+            continue
+        tokens.append(part.decode("utf-8", errors="replace"))
+    return tokens or None
+
+
+def _command_tokens(command: str | None) -> list[str]:
+    if not command:
+        return []
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
+
+
+def _command_identity_tokens(tokens: list[str]) -> list[str]:
+    if not tokens:
+        return []
+    if "-m" in tokens:
+        module_index = tokens.index("-m")
+        return tokens[module_index:]
+    return tokens
+
+
+def _tokens_subsequence(expected: list[str], actual: list[str]) -> bool:
+    if not expected:
+        return False
+    if len(expected) > len(actual):
+        return False
+    expected_index = 0
+    for token in actual:
+        if token == expected[expected_index]:
+            expected_index += 1
+            if expected_index == len(expected):
+                return True
+    return False
+
+
+def _detached_process_probe(run: dict[str, Any]) -> dict[str, Any]:
+    try:
+        run_id = int(run["id"])
+    except (TypeError, ValueError, KeyError):
+        return {
+            "detached_live": False,
+            "reason": "invalid_run_id",
+            "pid": None,
+            "pid_alive": False,
+            "command_match": False,
+            "log_identity_match": False,
+        }
+
+    pid_raw = run.get("process_pid")
+    try:
+        pid = int(pid_raw) if pid_raw is not None else None
+    except (TypeError, ValueError):
+        pid = None
+
+    if pid is None or pid <= 0:
+        return {
+            "detached_live": False,
+            "reason": "missing_process_pid",
+            "pid": pid,
+            "pid_alive": False,
+            "command_match": False,
+            "log_identity_match": _run_log_path_for_run(run_id, run.get("log_path")) is not None,
+        }
+
+    pid_alive = _pid_is_live(pid)
+    log_identity_match = _run_log_path_for_run(run_id, run.get("log_path")) is not None
+    if not pid_alive:
+        return {
+            "detached_live": False,
+            "reason": "process_pid_not_alive",
+            "pid": pid,
+            "pid_alive": False,
+            "command_match": False,
+            "log_identity_match": log_identity_match,
+        }
+    if not log_identity_match:
+        return {
+            "detached_live": False,
+            "reason": "log_identity_mismatch",
+            "pid": pid,
+            "pid_alive": True,
+            "command_match": False,
+            "log_identity_match": False,
+        }
+
+    actual_tokens = _read_pid_cmdline_tokens(pid)
+    if not actual_tokens:
+        return {
+            "detached_live": False,
+            "reason": "process_cmdline_unavailable",
+            "pid": pid,
+            "pid_alive": True,
+            "command_match": False,
+            "log_identity_match": True,
+        }
+
+    expected_tokens = _command_identity_tokens(_command_tokens(str(run.get("command") or "")))
+    observed_tokens = _command_identity_tokens(actual_tokens)
+    command_match = _tokens_subsequence(expected_tokens, observed_tokens)
+    if not command_match:
+        return {
+            "detached_live": False,
+            "reason": "process_cmdline_mismatch",
+            "pid": pid,
+            "pid_alive": True,
+            "command_match": False,
+            "log_identity_match": True,
+        }
+    return {
+        "detached_live": True,
+        "reason": "detached_process_recovered",
+        "pid": pid,
+        "pid_alive": True,
+        "command_match": True,
+        "log_identity_match": True,
+    }
+
+
 def _run_log_activity_proof(run: dict[str, Any]) -> tuple[bool, str]:
     run_id = int(run["id"])
     log_path = _safe_path(run.get("log_path"))
@@ -1664,36 +1853,85 @@ def _run_liveness(run: dict[str, Any]) -> dict[str, Any]:
     run_id = int(run["id"])
     status = str(run.get("status") or "").strip().lower()
     has_live_process = _run_has_live_process(run_id)
-    log_active, log_reason = _run_log_activity_proof(run)
-
-    actively_running = (
-        status == "running"
-        and has_live_process
-        and log_active
+    detached_probe = (
+        _detached_process_probe(run)
+        if status in {"running", "cancelling"} and not has_live_process
+        else {
+            "detached_live": False,
+            "reason": "attached_or_not_running",
+            "pid": run.get("process_pid"),
+            "pid_alive": False,
+            "command_match": False,
+            "log_identity_match": _run_log_path_for_run(run_id, run.get("log_path")) is not None,
+        }
     )
+    detached_live = bool(detached_probe.get("detached_live"))
+    log_active, log_reason = _run_log_activity_proof(run)
+    heartbeat_at = _parse_run_timestamp(run.get("last_heartbeat_at"))
+    if heartbeat_at is not None:
+        heartbeat_age_seconds: float | None = max(
+            0.0,
+            (datetime.now(timezone.utc) - heartbeat_at).total_seconds(),
+        )
+    else:
+        heartbeat_age_seconds = None
+
+    process_running = status in {"running", "cancelling"} and (has_live_process or detached_live)
+    actively_running = status == "running" and process_running
     if actively_running:
-        liveness_reason = "live_process_and_log_growth"
+        if has_live_process and log_active:
+            liveness_reason = "live_process_and_log_growth"
+        elif has_live_process:
+            liveness_reason = "live_process_awaiting_log_proof"
+        else:
+            liveness_reason = "detached_process_recovered"
     elif status == "running" and has_live_process:
         liveness_reason = "live_process_awaiting_log_proof"
+    elif status == "running" and detached_live:
+        liveness_reason = "detached_process_recovered"
     elif status == "running":
-        liveness_reason = "running_without_live_process"
+        liveness_reason = str(detached_probe.get("reason") or "running_without_live_process")
     elif status == "queued":
         liveness_reason = "queued"
     elif status == "cancelling":
-        liveness_reason = "cancelling"
+        liveness_reason = "cancelling_detached" if detached_live else "cancelling"
     else:
         liveness_reason = status or "unknown"
 
-    can_stop = actively_running
-    can_delete = not actively_running
+    if status in TERMINAL_RUN_STATUSES:
+        ownership_state = "terminal"
+    elif status == "queued":
+        ownership_state = "queued"
+    elif status in {"running", "cancelling"}:
+        if has_live_process:
+            ownership_state = "attached_live"
+        elif detached_live:
+            ownership_state = "detached_live"
+        else:
+            ownership_state = "detached_dead"
+    else:
+        ownership_state = str(run.get("ownership_state") or "unknown")
+
+    can_stop = status == "running" and has_live_process
+    can_delete = not process_running
 
     return {
         "actively_running": actively_running,
         "can_stop": can_stop,
         "can_delete": can_delete,
         "has_live_process": has_live_process,
+        "detached_live": detached_live,
         "log_activity": log_active,
+        "log_activity_reason": log_reason,
         "liveness_reason": liveness_reason,
+        "ownership_state": ownership_state,
+        "ownership_reason": str(detached_probe.get("reason") or liveness_reason),
+        "process_pid": run.get("process_pid"),
+        "launcher_instance_id": run.get("launcher_instance_id"),
+        "last_heartbeat_at": _jsonable_datetime(heartbeat_at),
+        "heartbeat_age_seconds": heartbeat_age_seconds,
+        "command_identity_match": bool(detached_probe.get("command_match")),
+        "log_identity_match": bool(detached_probe.get("log_identity_match")),
     }
 
 
@@ -1705,6 +1943,8 @@ def _should_reconcile_stale_run(run: dict[str, Any], liveness: dict[str, Any]) -
         return False
     if liveness["has_live_process"]:
         return False
+    if liveness.get("detached_live"):
+        return False
 
     now = datetime.now(timezone.utc)
     if status == "queued":
@@ -1714,8 +1954,13 @@ def _should_reconcile_stale_run(run: dict[str, Any], liveness: dict[str, Any]) -
         return (now - created).total_seconds() > RUN_QUEUED_START_GRACE_SECONDS
 
     if status in {"running", "cancelling"}:
-        if liveness["has_live_process"]:
+        if liveness["has_live_process"] or liveness.get("detached_live"):
             return False
+        heartbeat = _parse_run_timestamp(run.get("last_heartbeat_at"))
+        if heartbeat is not None:
+            heartbeat_age = (now - heartbeat).total_seconds()
+            if heartbeat_age < RUN_POST_EXIT_FINALIZE_GRACE_SECONDS:
+                return False
         log_path = _safe_path(run.get("log_path"))
         if log_path is not None and log_path.exists():
             try:
@@ -1828,6 +2073,8 @@ def _try_finalize_run_from_log(run_id: int, run: dict[str, Any]) -> bool:
         finished_at=_utc_now(),
         exit_code=exit_code,
         error=error,
+        ownership_state="terminal",
+        last_heartbeat_at=_utc_now(),
         **artifact_updates,
         **identity_updates,
     )
@@ -1838,6 +2085,14 @@ def _reconcile_stale_run(run_id: int, run: dict[str, Any] | None = None) -> dict
     if run is None:
         run = _fetch_run_row(run_id)
     liveness = _run_liveness(run)
+    if liveness.get("detached_live"):
+        _update_run(
+            run_id,
+            ownership_state="detached_live",
+            last_heartbeat_at=_utc_now(),
+        )
+        LOGGER.info("detached_process_recovered run_id=%s pid=%s", run_id, liveness.get("process_pid"))
+        return _fetch_run_row(run_id)
     if not _should_reconcile_stale_run(run, liveness):
         return None
 
@@ -1868,6 +2123,8 @@ def _reconcile_stale_run(run_id: int, run: dict[str, Any] | None = None) -> dict
                 finished_at=_utc_now(),
                 exit_code=return_code,
                 error=terminal_error,
+                ownership_state="terminal",
+                last_heartbeat_at=_utc_now(),
             )
             with RUN_LOG_STAT_LOCK:
                 RUN_LOG_STAT.pop(run_id, None)
@@ -1884,14 +2141,29 @@ def _reconcile_stale_run(run_id: int, run: dict[str, Any] | None = None) -> dict
             status="cancelled",
             finished_at=_utc_now(),
             error=None,
+            ownership_state="terminal",
+            last_heartbeat_at=_utc_now(),
         )
     else:
+        detached_pid = run.get("process_pid")
+        failure_error = (
+            f"detached_process_dead_no_terminal_evidence"
+            f" (pid={detached_pid}, reason={liveness.get('ownership_reason')})"
+        )
+        LOGGER.warning(
+            "detached_process_dead_no_terminal_evidence run_id=%s pid=%s reason=%s",
+            run_id,
+            detached_pid,
+            liveness.get("ownership_reason"),
+        )
         _update_run(
             run_id,
             status="failed",
             finished_at=_utc_now(),
             exit_code=-1,
-            error="orphaned_run_no_live_process",
+            error=failure_error,
+            ownership_state="detached_dead",
+            last_heartbeat_at=_utc_now(),
         )
     with RUN_LOG_STAT_LOCK:
         RUN_LOG_STAT.pop(run_id, None)
@@ -1953,6 +2225,8 @@ def _cleanup_stale_processes() -> None:
                     status=new_status,
                     finished_at=_utc_now(),
                     exit_code=return_code,
+                    ownership_state="terminal",
+                    last_heartbeat_at=_utc_now(),
                 )
                 LOGGER.info(f"Updated stale run {run_id} status to {new_status}")
         except Exception as e:
@@ -2006,6 +2280,9 @@ def _update_run(run_id: int, **fields: Any) -> None:
                     f"Status: {run.get('status')}",
                     f"Finished At: {run.get('finished_at') or _utc_now()}",
                     f"Error: {run.get('error') or 'Simulation failed.'}",
+                    f"Ownership state: {run.get('ownership_state') or 'unknown'}",
+                    f"Process PID: {run.get('process_pid') or 'n/a'}",
+                    f"Last heartbeat: {run.get('last_heartbeat_at') or 'n/a'}",
                     f"Run URL: /runs/{run_id}",
                     *_email_observability_footer_lines(),
                 ],
@@ -2054,12 +2331,28 @@ def _build_command(request: RunCreateRequest) -> list[str]:
         raise HTTPException(status_code=400, detail="orders must be >= 1.")
     if resolved_mode == "trace" and request.continuous:
         raise HTTPException(status_code=400, detail="continuous is only supported in load mode.")
+    if resolved_mode == "trace" and request.flow == PLACE_ORDER_FLOW:
+        if request.suite or request.scenarios:
+            raise HTTPException(
+                status_code=400,
+                detail="place-order cannot be combined with suite/scenarios.",
+            )
+        if request.orders is not None and request.orders > PLACE_ORDER_MAX_ORDERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"orders must be <= {PLACE_ORDER_MAX_ORDERS} for place-order.",
+            )
     if resolved_mode == "trace" and any(
-        value is not None for value in (request.users, request.orders, request.interval, request.reject)
+        value is not None for value in (request.users, request.interval, request.reject)
     ):
         raise HTTPException(
             status_code=400,
-            detail="users/orders/interval/reject are only supported in load mode.",
+            detail="users/interval/reject are only supported in load mode.",
+        )
+    if resolved_mode == "trace" and request.orders is not None and request.flow != PLACE_ORDER_FLOW:
+        raise HTTPException(
+            status_code=400,
+            detail="orders is only supported in trace mode for place-order.",
         )
     if resolved_mode == "load" and (request.suite or request.scenarios):
         raise HTTPException(
@@ -2100,6 +2393,12 @@ def _build_command(request: RunCreateRequest) -> list[str]:
         command.append("--no-auto-provision")
     if request.enforce_websocket_gates:
         command.append("--enforce-websocket-gates")
+    if request.timeout_fails:
+        command.append("--timeout-fails")
+    if request.wait_for_store_action:
+        command.append("--wait-for-store-action")
+    if request.store_auto_cancel:
+        command.extend(["--scenario", "auto_cancel"])
     if request.post_order_actions:
         command.append("--post-order-actions")
     if request.users is not None:
@@ -2134,6 +2433,7 @@ def _build_execution_snapshot(request: RunCreateRequest, command: list[str], cre
         "skip_store_dashboard_probes": request.skip_store_dashboard_probes,
         "no_auto_provision": request.no_auto_provision,
         "enforce_websocket_gates": request.enforce_websocket_gates,
+        "timeout_fails": request.timeout_fails,
         "post_order_actions": request.post_order_actions,
         "users": request.users,
         "orders": request.orders,
@@ -2184,6 +2484,7 @@ def _profile_request_to_run_request(profile: dict[str, Any]) -> RunCreateRequest
         skip_store_dashboard_probes=bool(profile.get("skip_store_dashboard_probes")),
         no_auto_provision=bool(profile.get("no_auto_provision")),
         enforce_websocket_gates=bool(profile.get("enforce_websocket_gates")),
+        timeout_fails=bool(profile.get("timeout_fails")),
         post_order_actions=profile.get("post_order_actions"),
         users=profile.get("users"),
         orders=profile.get("orders"),
@@ -2414,7 +2715,15 @@ def _run_simulation(
     launch_env_overrides: dict[str, str] | None = None,
 ) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    _update_run(run_id, status="running", started_at=_utc_now(), log_path=str(log_path))
+    _update_run(
+        run_id,
+        status="running",
+        started_at=_utc_now(),
+        log_path=str(log_path),
+        ownership_state="starting",
+        launcher_instance_id=LAUNCHER_INSTANCE_ID,
+        last_heartbeat_at=_utc_now(),
+    )
     # Truncate any previous content for this run-id log file.
     log_path.write_text("", encoding="utf-8")
     process_env = {
@@ -2426,19 +2735,40 @@ def _run_simulation(
     if launch_env_overrides:
         process_env.update(launch_env_overrides)
 
-    process = subprocess.Popen(
-        command,
-        cwd=SIMULATOR_WORKDIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=process_env,
-    )
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=SIMULATOR_WORKDIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=process_env,
+        )
+    except Exception as exc:
+        _update_run(
+            run_id,
+            status="failed",
+            finished_at=_utc_now(),
+            exit_code=-1,
+            error=f"launch_process_failed: {exc}",
+            ownership_state="detached_dead",
+            last_heartbeat_at=_utc_now(),
+        )
+        return
+
     with RUN_LOCK:
         RUN_PROCESSES[run_id] = process
+    _update_run(
+        run_id,
+        process_pid=process.pid,
+        ownership_state="attached_live",
+        launcher_instance_id=LAUNCHER_INSTANCE_ID,
+        last_heartbeat_at=_utc_now(),
+    )
     captured_lines: list[str] = []  # Collect lines for post-run parsing
+    last_heartbeat_ts = time.monotonic()
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(f"$ {' '.join(command)}\n")
         assert process.stdout is not None
@@ -2446,6 +2776,14 @@ def _run_simulation(
             handle.write(line)
             handle.flush()
             captured_lines.append(line)
+            now_ts = time.monotonic()
+            if (now_ts - last_heartbeat_ts) >= RUN_HEARTBEAT_INTERVAL_SECONDS:
+                last_heartbeat_ts = now_ts
+                _update_run(
+                    run_id,
+                    last_heartbeat_at=_utc_now(),
+                    ownership_state="attached_live",
+                )
     return_code = process.wait()
     with RUN_LOCK:
         RUN_PROCESSES.pop(run_id, None)
@@ -2461,6 +2799,8 @@ def _run_simulation(
             finished_at=finished_at,
             exit_code=return_code,
             error=None,
+            ownership_state="terminal",
+            last_heartbeat_at=finished_at,
         )
     else:
         terminal_status = "succeeded" if return_code == 0 else "failed"
@@ -2473,6 +2813,8 @@ def _run_simulation(
             finished_at=finished_at,
             exit_code=return_code,
             error=terminal_error,
+            ownership_state="terminal",
+            last_heartbeat_at=finished_at,
         )
 
     artifacts = _capture_artifacts_from_lines(captured_lines)
@@ -2543,10 +2885,10 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                     INSERT INTO runs (
                         user_id, flow, plan, timing, mode, store_id, phone, store_phone,
                         user_name, store_name, all_users, no_auto_provision,
-                        enforce_websocket_gates, post_order_actions, extra_args, status, command, created_at, execution_snapshot,
+                        enforce_websocket_gates, timeout_fails, post_order_actions, extra_args, status, command, created_at, execution_snapshot,
                         trigger_source, trigger_label, trigger_context, profile_id, schedule_id,
-                        integration_trigger_id, launched_by_user_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        integration_trigger_id, launched_by_user_id, process_pid, launcher_instance_id, last_heartbeat_at, ownership_state
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -2563,6 +2905,7 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                         request.all_users,
                         request.no_auto_provision,
                         request.enforce_websocket_gates,
+                        request.timeout_fails,
                         request.post_order_actions,
                         json.dumps(request.extra_args),
                         "queued",
@@ -2576,6 +2919,10 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                         request.schedule_id,
                         request.integration_trigger_id,
                         request.launched_by_user_id if request.launched_by_user_id is not None else persisted_user_id,
+                        None,
+                        LAUNCHER_INSTANCE_ID,
+                        created_at,
+                        "queued",
                     ),
                 )
                 run_id = cursor.fetchone()[0]
@@ -2588,9 +2935,10 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                 """
                 INSERT INTO runs (
                     flow, plan, timing, mode, store_id, phone, store_phone, user_name, store_name,
-                    all_users, no_auto_provision, enforce_websocket_gates, post_order_actions, extra_args, status, command, created_at, execution_snapshot,
-                    trigger_source, trigger_label, trigger_context, profile_id, schedule_id, integration_trigger_id, launched_by_user_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    all_users, no_auto_provision, enforce_websocket_gates, timeout_fails, post_order_actions, extra_args, status, command, created_at, execution_snapshot,
+                    trigger_source, trigger_label, trigger_context, profile_id, schedule_id, integration_trigger_id, launched_by_user_id,
+                    process_pid, launcher_instance_id, last_heartbeat_at, ownership_state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request.flow,
@@ -2605,6 +2953,7 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                     int(request.all_users),
                     int(request.no_auto_provision),
                     int(request.enforce_websocket_gates),
+                    int(request.timeout_fails),
                     int(request.post_order_actions) if request.post_order_actions is not None else None,
                     json.dumps(request.extra_args),
                     "queued",
@@ -2618,6 +2967,10 @@ def _create_run(request: RunCreateRequest, user_id: Optional[int] = None) -> dic
                     request.schedule_id,
                     request.integration_trigger_id,
                     request.launched_by_user_id if request.launched_by_user_id is not None else persisted_user_id,
+                    None,
+                    LAUNCHER_INSTANCE_ID,
+                    created_at,
+                    "queued",
                 ),
             )
             run_id = int(cursor.lastrowid)
@@ -2649,9 +3002,9 @@ def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any
                     INSERT INTO run_profiles (
                         user_id, name, description, flow, plan, timing, mode, suite, scenarios, store_id, phone,
                         all_users, strict_plan, skip_app_probes, skip_store_dashboard_probes, no_auto_provision,
-                        enforce_websocket_gates, post_order_actions, users, orders, interval, reject, continuous,
+                        enforce_websocket_gates, timeout_fails, post_order_actions, users, orders, interval, reject, continuous,
                         extra_args, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING *
                     """,
                     (
@@ -2672,6 +3025,7 @@ def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any
                         request.skip_store_dashboard_probes,
                         request.no_auto_provision,
                         request.enforce_websocket_gates,
+                        request.timeout_fails,
                         request.post_order_actions,
                         request.users,
                         request.orders,
@@ -2694,9 +3048,9 @@ def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any
                 INSERT INTO run_profiles (
                     user_id, name, description, flow, plan, timing, mode, suite, scenarios, store_id, phone,
                     all_users, strict_plan, skip_app_probes, skip_store_dashboard_probes, no_auto_provision,
-                    enforce_websocket_gates, post_order_actions, users, orders, interval, reject, continuous,
+                    enforce_websocket_gates, timeout_fails, post_order_actions, users, orders, interval, reject, continuous,
                     extra_args, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     persisted_user_id,
@@ -2716,6 +3070,7 @@ def _create_run_profile(request, user_id: Optional[int] = None) -> dict[str, Any
                     int(request.skip_store_dashboard_probes),
                     int(request.no_auto_provision),
                     int(request.enforce_websocket_gates),
+                    int(request.timeout_fails),
                     int(request.post_order_actions) if request.post_order_actions is not None else None,
                     request.users,
                     request.orders,
@@ -2753,6 +3108,7 @@ def _update_run_profile(profile_id: int, request, user_id: Optional[int] = None)
         "skip_store_dashboard_probes": request.skip_store_dashboard_probes,
         "no_auto_provision": request.no_auto_provision,
         "enforce_websocket_gates": request.enforce_websocket_gates,
+        "timeout_fails": request.timeout_fails,
         "post_order_actions": request.post_order_actions,
         "users": request.users,
         "orders": request.orders,
@@ -4594,6 +4950,58 @@ def _run_status_map(run_ids: list[int]) -> dict[int, dict[str, Any]]:
     return payload
 
 
+def _find_active_schedule_overlap_run_id(
+    schedule_id: int,
+    profile_id: int,
+    command: str,
+) -> int | None:
+    statuses = tuple(sorted(ACTIVE_RUN_STATUSES))
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM runs
+                    WHERE schedule_id = %s
+                      AND profile_id = %s
+                      AND command = %s
+                      AND archived_at IS NULL
+                      AND lower(status) = ANY(%s)
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (schedule_id, profile_id, command, list(statuses)),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                return int(row["id"])
+        finally:
+            conn.close()
+
+    placeholders = ", ".join(["?"] * len(statuses))
+    with DB_LOCK, _db() as conn:
+        row = conn.execute(
+            f"""
+            SELECT id
+            FROM runs
+            WHERE schedule_id = ?
+              AND profile_id = ?
+              AND command = ?
+              AND archived_at IS NULL
+              AND lower(status) IN ({placeholders})
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (schedule_id, profile_id, command, *statuses),
+        ).fetchone()
+    if row is None:
+        return None
+    return int(row["id"])
+
+
 def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> dict[str, Any]:
     schedule = _get_schedule(schedule_id)
     if schedule["status"] in {"disabled", "deleted"}:
@@ -4601,6 +5009,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
     started_at = _utc_now()
     execution_chain_key = f"schedule-{schedule_id}-{time.time_ns()}"
     runs: list[dict[str, Any]] = []
+    overlap_skips: list[dict[str, Any]] = []
     _record_schedule_execution(
         schedule_id,
         None,
@@ -4641,6 +5050,25 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
                     request.profile_id = profile_id
                     request.schedule_id = schedule_id
                     request.launched_by_user_id = user_id
+                    launch_command = " ".join(_build_command(request))
+                    overlapping_run_id = _find_active_schedule_overlap_run_id(
+                        schedule_id,
+                        profile_id,
+                        launch_command,
+                    )
+                    if overlapping_run_id is not None:
+                        overlap_skips.append(
+                            {
+                                "profile_id": profile_id,
+                                "profile_name": profile.get("name"),
+                                "campaign_step_index": step_index,
+                                "campaign_repeat_index": repeat_index,
+                                "command": launch_command,
+                                "existing_run_id": overlapping_run_id,
+                                "reason": "active_overlap_same_schedule_profile_command",
+                            }
+                        )
+                        continue
                     launched = _create_run(request, user_id)
                     launched["campaign_step_index"] = step_index
                     launched["campaign_repeat_index"] = repeat_index
@@ -4661,8 +5089,25 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
             request.profile_id = profile_id
             request.schedule_id = schedule_id
             request.launched_by_user_id = user_id
-            launched = _create_run(request, user_id)
-            runs.append(launched)
+            launch_command = " ".join(_build_command(request))
+            overlapping_run_id = _find_active_schedule_overlap_run_id(
+                schedule_id,
+                profile_id,
+                launch_command,
+            )
+            if overlapping_run_id is not None:
+                overlap_skips.append(
+                    {
+                        "profile_id": profile_id,
+                        "profile_name": profile.get("name"),
+                        "command": launch_command,
+                        "existing_run_id": overlapping_run_id,
+                        "reason": "active_overlap_same_schedule_profile_command",
+                    }
+                )
+            else:
+                launched = _create_run(request, user_id)
+                runs.append(launched)
     except Exception as exc:
         failed_profile_name: str | None = None
         failed_profile_id: int | None = None
@@ -4704,22 +5149,35 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
             runs[0]["id"] if runs else None,
             execution_chain_key,
             "failed",
-            {"error": str(exc), "run_ids": [run["id"] for run in runs]},
+            {
+                "error": str(exc),
+                "run_ids": [run["id"] for run in runs],
+                "overlap_skipped": overlap_skips,
+            },
             started_at,
             _utc_now(),
         )
         raise HTTPException(status_code=500, detail={"execution": execution, "error": str(exc)}) from exc
 
     finished_at = _utc_now()
+    execution_status = "launched"
+    execution_message = "Run launch submitted successfully."
+    if overlap_skips and not runs:
+        execution_status = "overlap_skipped"
+        execution_message = "Run launch skipped due to active overlap."
+    elif overlap_skips:
+        execution_message = "Run launch submitted with overlap skips."
     execution = _record_schedule_execution(
         schedule_id,
         runs[0]["id"] if runs else None,
         execution_chain_key,
-        "launched",
+        execution_status,
         {
             "schedule_type": schedule["schedule_type"],
             "run_ids": [run["id"] for run in runs],
-            "message": "Run launch submitted successfully.",
+            "overlap_skipped": overlap_skips,
+            "overlap_skipped_count": len(overlap_skips),
+            "message": execution_message,
         },
         started_at,
         finished_at,
@@ -4745,6 +5203,7 @@ def _trigger_schedule_logic(schedule_id: int, user_id: Optional[int] = None) -> 
         "schedule": _get_schedule(schedule_id),
         "execution": execution,
         "runs": runs,
+        "overlap_skipped": overlap_skips,
     }
     if runs:
         payload["run"] = runs[0]
@@ -4768,7 +5227,7 @@ def _schedule_summary_payload() -> dict[str, Any]:
         and schedule.get("status") != "deleted"
         and not schedule.get("campaign_steps")
     )
-    schedule_phase_rank = {"queued": 1, "started": 2, "launched": 3, "failed": 4}
+    schedule_phase_rank = {"queued": 1, "started": 2, "launched": 3, "overlap_skipped": 3, "failed": 4}
     execution_rows = _list_schedule_executions(limit=500)
     latest_by_schedule: dict[int, dict[str, Any]] = {}
     for execution in execution_rows:
@@ -4935,6 +5394,7 @@ def _replay_run_logic(run_id: int, user_id: Optional[int] = None) -> dict[str, A
         skip_store_dashboard_probes=bool(snapshot.get("skip_store_dashboard_probes")),
         no_auto_provision=bool(snapshot.get("no_auto_provision")),
         enforce_websocket_gates=bool(snapshot.get("enforce_websocket_gates")),
+        timeout_fails=bool(snapshot.get("timeout_fails")),
         post_order_actions=snapshot.get("post_order_actions"),
         users=snapshot.get("users"),
         orders=snapshot.get("orders"),

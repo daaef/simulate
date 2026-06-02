@@ -120,6 +120,7 @@ Preset flow names and their intent:
 - `payments`: payment branch coverage
 - `menus`: menu-state coverage
 - `new-user`: onboarding path
+- `place-order`: pending live-order seeding for manual inspection; exclude from destructive regression sweeps unless operators are ready to clear the seeded orders
 - `paid-no-coupon`, `paid-coupon`, `free-coupon`: focused payment variants
 - `store-setup`, `store-dashboard`, `store-accept`, `store-reject`: store-focused paths
 - `robot-complete`: robot lifecycle completion path
@@ -144,7 +145,9 @@ Aliases are supported (e.g. `daily` -> `doctor`, `paid` -> `paid-no-coupon`, `ro
 - `completed`: full happy path through robot completion.
 - `rejected`: store rejects before payment completion.
 - `cancelled`: user cancels pending order.
-- `auto_cancel`: backend timeout cancellation diagnostic.
+- `place_order`: creates 1-10 pending live orders, requires pending websocket proof, and intentionally leaves them open for manual store-app inspection.
+- `backend_auto_cancel`: store idle on pending, countdown while observing backend/customer `cancelled`.
+- `auto_cancel`: after store accept, withhold payment, awaiting-payment countdown while observing backend/customer `cancelled` (store does not PATCH `cancelled`; timeout is diagnostic/`unsupported`).
 
 Use when:
 - You are validating state machine progression and terminal statuses.

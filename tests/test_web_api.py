@@ -480,6 +480,7 @@ class RunExecutionSnapshotTests(unittest.TestCase):
             skip_store_dashboard_probes=True,
             no_auto_provision=False,
             enforce_websocket_gates=True,
+            timeout_fails=True,
             post_order_actions=True,
             extra_args=["--strict-plan"],
         )
@@ -499,11 +500,13 @@ class RunExecutionSnapshotTests(unittest.TestCase):
         self.assertTrue(snapshot["skip_app_probes"])
         self.assertTrue(snapshot["skip_store_dashboard_probes"])
         self.assertTrue(snapshot["enforce_websocket_gates"])
+        self.assertTrue(snapshot["timeout_fails"])
         self.assertEqual(snapshot["extra_args"], ["--strict-plan"])
         self.assertIn("python3 -u -m simulate doctor", snapshot["command"])
         self.assertIn("--suite doctor", snapshot["command"])
         self.assertIn("--scenario app_bootstrap", snapshot["command"])
         self.assertIn("--enforce-websocket-gates", snapshot["command"])
+        self.assertIn("--timeout-fails", snapshot["command"])
 
     def test_create_run_passes_launch_env_overrides_to_runner_thread(self) -> None:
         class _FakeThread:
@@ -571,6 +574,43 @@ class RunExecutionSnapshotTests(unittest.TestCase):
             )
         self.assertIn("between 0.0 and 1.0", str(bad_reject.exception.detail))
 
+        with self.assertRaises(web_api.HTTPException) as trace_orders:
+            web_api._build_command(
+                web_api.RunCreateRequest(
+                    flow="doctor",
+                    plan="sim_actors.json",
+                    timing="fast",
+                    mode="trace",
+                    orders=2,
+                )
+            )
+        self.assertIn("orders is only supported in trace mode for place-order", str(trace_orders.exception.detail))
+
+    def test_build_command_allows_place_order_trace_orders_with_cap(self) -> None:
+        request = web_api.RunCreateRequest(
+            flow="place-order",
+            plan="sim_actors.json",
+            timing="fast",
+            orders=3,
+        )
+
+        command = web_api._build_command(request)
+
+        self.assertEqual(command[:7], ["python3", "-u", "-m", "simulate", "place-order", "--plan", "sim_actors.json"])
+        self.assertIn("--orders", command)
+        self.assertEqual(command[command.index("--orders") + 1], "3")
+
+        with self.assertRaises(web_api.HTTPException) as too_many:
+            web_api._build_command(
+                web_api.RunCreateRequest(
+                    flow="place-order",
+                    plan="sim_actors.json",
+                    timing="fast",
+                    orders=11,
+                )
+            )
+        self.assertIn("orders must be <= 10 for place-order", str(too_many.exception.detail))
+
     def test_launch_env_overrides_default_to_random_actor_selection(self) -> None:
         request = web_api.RunCreateRequest(
             flow="doctor",
@@ -609,6 +649,10 @@ class FlowCapabilitiesTests(unittest.TestCase):
         doctor = payload["capabilities"]["doctor"]
         self.assertEqual(doctor["resolved_mode"], "trace")
         self.assertIn("suite", doctor["allowed_optional_flags"])
+        place_order = payload["capabilities"]["place-order"]
+        self.assertEqual(place_order["resolved_mode"], "trace")
+        self.assertEqual(place_order["default_scenarios"], ["place_order"])
+        self.assertIn("orders", place_order["allowed_optional_flags"])
         self.assertIn("load", payload["capabilities"])
 
 
@@ -863,6 +907,62 @@ class OverviewLatestRunTests(unittest.TestCase):
         self.assertIsNotNone(payload.get("run"))
         self.assertEqual(payload["run"]["id"], 321)
 
+    def test_run_overview_findings_cover_all_metric_failed_events(self) -> None:
+        from api.app.event_failure import is_metric_failed_event
+
+        run = {"id": 2001, "status": "failed"}
+        events = [
+            {
+                "id": 1,
+                "actor": "user",
+                "action": "place_order",
+                "scenario": "completed",
+                "step": "place_order",
+                "method": "POST",
+                "endpoint": "/v1/core/orders/",
+                "http_status": 503,
+                "message": "service unavailable",
+                "ok": False,
+            },
+            {
+                "id": 2,
+                "actor": "store",
+                "action": "rejected_order",
+                "scenario": "rejected",
+                "status": "rejected",
+                "ok": False,
+            },
+            {
+                "id": 3,
+                "actor": "user",
+                "category": "decision",
+                "action": "probe_coupons",
+                "status": "failed",
+                "reason_code": "coupon_probe_failed",
+                "message": "coupon list unavailable",
+                "ok": False,
+            },
+        ]
+        failed_ids = {event["id"] for event in events if is_metric_failed_event(event)}
+
+        with mock.patch.object(overview_service.runs_service, "get_run", return_value=run):
+            with mock.patch.object(overview_service, "_load_events", return_value=(events, [], {})):
+                with mock.patch.object(overview_service, "_load_metrics", return_value=None):
+                    payload = overview_service.run_overview(2001)
+
+        findings = payload["findings"]
+        represented_ids = set()
+        for row in findings["critical"] + findings["operational"]:
+            related = row.get("related_event_id")
+            if related is not None:
+                represented_ids.add(int(related))
+
+        self.assertEqual(failed_ids, represented_ids)
+        meta = payload.get("findings_meta") or {}
+        self.assertEqual(meta.get("failed_events_total"), len(failed_ids))
+        self.assertEqual(meta.get("represented_failed_events"), len(failed_ids))
+        self.assertFalse(meta.get("truncated"))
+
     def test_run_log_payload_rejects_mismatched_log_path(self) -> None:
         run = {"id": 55, "log_path": str(web_api.LOG_DIR / "run-999.log")}
         with mock.patch.object(web_api, "_get_run", return_value=run):
@@ -1081,6 +1181,8 @@ class RunDeletionSafetyTests(unittest.TestCase):
 
 
 class RunControlTests(unittest.TestCase):
+    _REAL_THREAD = threading.Thread
+
     class _FakeProcess:
         def __init__(self, returncode: int | None = None) -> None:
             self._returncode = returncode
@@ -1091,17 +1193,18 @@ class RunControlTests(unittest.TestCase):
         def terminate(self) -> None:
             self._returncode = -15
 
-    class _FakeThread:
+    class _FakeThread(_REAL_THREAD):
         instances: list["RunControlTests._FakeThread"] = []
 
-        def __init__(self, target=None, args=(), daemon=None):
-            self.target = target
-            self.args = args
-            self.daemon = daemon
+        def __init__(self, target=None, args=(), daemon=None, **kwargs):
+            super().__init__(target=target, args=args, daemon=daemon, **kwargs)
+            self._suppress_start = getattr(target, "__name__", "") == "_run_simulation"
             self.instances.append(self)
 
         def start(self) -> None:
-            return None
+            if self._suppress_start:
+                return None
+            super().start()
 
     def setUp(self) -> None:
         self.fake_auth = _FakeCookieAuthManager()
@@ -1241,6 +1344,7 @@ class RunControlTests(unittest.TestCase):
                 status="running",
                 log_path=str(log_path),
                 started_at=web_api._utc_now(),
+                last_heartbeat_at=(datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat(),
                 store_id="",
                 phone="",
             )
@@ -1278,26 +1382,130 @@ class RunControlTests(unittest.TestCase):
             self.assertIsNone(reconciled)
             self.assertEqual(web_api._fetch_run_row(run_id)["status"], "running")
 
+    def test_reconcile_keeps_running_when_detached_pid_is_live_and_identity_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = pathlib.Path(tmpdir) / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row(flow="free-coupon")
+            run_id = int(run["id"])
+            log_path = log_dir / f"run-{run_id}.log"
+            log_path.write_text("trace: still running\n", encoding="utf-8")
+            stale_started = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+            stale_heartbeat = (datetime.now(timezone.utc) - timedelta(seconds=90)).isoformat()
+            web_api._update_run(
+                run_id,
+                status="running",
+                log_path=str(log_path),
+                started_at=stale_started,
+                process_pid=99999,
+                launcher_instance_id="legacy-launcher",
+                last_heartbeat_at=stale_heartbeat,
+                ownership_state="attached_live",
+            )
+            row = web_api._fetch_run_row(run_id)
+            command_tokens = row["command"].split()
+            with mock.patch.object(web_api, "LOG_DIR", log_dir):
+                with mock.patch.object(web_api, "_pid_is_live", return_value=True):
+                    with mock.patch.object(web_api, "_read_pid_cmdline_tokens", return_value=command_tokens):
+                        payload = web_api._get_run(run_id)
+            self.assertEqual(payload.get("status"), "running")
+            control = payload.get("control") or {}
+            self.assertEqual(control.get("ownership_state"), "detached_live")
+            self.assertTrue(control.get("detached_live"))
+
+    def test_reconcile_marks_failed_when_detached_pid_dead_without_terminal_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = pathlib.Path(tmpdir) / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row(flow="free-coupon")
+            run_id = int(run["id"])
+            log_path = log_dir / f"run-{run_id}.log"
+            log_path.write_text("trace: interrupted\n", encoding="utf-8")
+            stale_mtime = time.time() - (web_api.RUN_ORPHAN_LOG_IDLE_SECONDS + 5)
+            os.utime(log_path, (stale_mtime, stale_mtime))
+            stale_started = (datetime.now(timezone.utc) - timedelta(seconds=180)).isoformat()
+            stale_heartbeat = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+            web_api._update_run(
+                run_id,
+                status="running",
+                log_path=str(log_path),
+                started_at=stale_started,
+                process_pid=77777,
+                launcher_instance_id="legacy-launcher",
+                last_heartbeat_at=stale_heartbeat,
+                ownership_state="attached_live",
+            )
+            with mock.patch.object(web_api, "LOG_DIR", log_dir):
+                with mock.patch.object(web_api, "_pid_is_live", return_value=False):
+                    with mock.patch.object(web_api, "_send_email_notification", return_value={"sent": False}):
+                        payload = web_api._get_run(run_id)
+            self.assertEqual(payload.get("status"), "failed")
+            self.assertIn("detached_process_dead_no_terminal_evidence", str(payload.get("error") or ""))
+            self.assertEqual(payload.get("ownership_state"), "detached_dead")
+
+    def test_reconcile_finalizes_failed_from_log_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_dir = pathlib.Path(tmpdir) / "web-gui"
+            log_dir.mkdir()
+            run = self._create_run_row(flow="free-coupon")
+            run_id = int(run["id"])
+            log_path = log_dir / f"run-{run_id}.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "trace: Running scenario",
+                        "Simulation failed: request timeout",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            stale_mtime = time.time() - (web_api.RUN_ORPHAN_LOG_IDLE_SECONDS + 5)
+            os.utime(log_path, (stale_mtime, stale_mtime))
+            stale_started = (datetime.now(timezone.utc) - timedelta(seconds=180)).isoformat()
+            web_api._update_run(
+                run_id,
+                status="running",
+                log_path=str(log_path),
+                started_at=stale_started,
+                process_pid=88888,
+                last_heartbeat_at=(datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat(),
+            )
+            with mock.patch.object(web_api, "LOG_DIR", log_dir):
+                with mock.patch.object(web_api, "_pid_is_live", return_value=False):
+                    with mock.patch.object(web_api, "_send_email_notification", return_value={"sent": False}):
+                        payload = web_api._get_run(run_id)
+            self.assertEqual(payload.get("status"), "failed")
+            self.assertEqual(payload.get("exit_code"), 1)
+            self.assertIn("from log", str(payload.get("error") or ""))
+
     def test_run_payload_includes_control_flags(self) -> None:
         run = self._create_run_row()
         run_id = int(run["id"])
         payload = self.client.get(f"/api/v1/runs/{run_id}").json()
         run_row = payload["run"] if isinstance(payload.get("run"), dict) else payload
+        self.assertIn("process_pid", run_row)
+        self.assertIn("launcher_instance_id", run_row)
+        self.assertIn("last_heartbeat_at", run_row)
+        self.assertIn("ownership_state", run_row)
         control = run_row.get("control") or {}
         self.assertIn("can_stop", control)
         self.assertIn("can_delete", control)
+        self.assertIn("ownership_state", control)
         self.assertFalse(control.get("actively_running"))
 
 
 class RunProfilesApiTests(unittest.TestCase):
-    class _FakeThread:
-        def __init__(self, target=None, args=(), daemon=None):
-            self.target = target
-            self.args = args
-            self.daemon = daemon
+    _REAL_THREAD = threading.Thread
+
+    class _FakeThread(_REAL_THREAD):
+        def __init__(self, target=None, args=(), daemon=None, **kwargs):
+            super().__init__(target=target, args=args, daemon=daemon, **kwargs)
+            self._suppress_start = getattr(target, "__name__", "") == "_run_simulation"
 
         def start(self) -> None:
-            return None
+            if self._suppress_start:
+                return None
+            super().start()
 
     def setUp(self) -> None:
         self.fake_auth = _FakeCookieAuthManager()
@@ -1338,6 +1546,7 @@ class RunProfilesApiTests(unittest.TestCase):
                 "skip_store_dashboard_probes": True,
                 "no_auto_provision": False,
                 "enforce_websocket_gates": True,
+                "timeout_fails": True,
                 "post_order_actions": True,
                 "continuous": False,
                 "extra_args": ["--strict-plan"],
@@ -1364,6 +1573,7 @@ class RunProfilesApiTests(unittest.TestCase):
         self.assertEqual(snapshot_response.json()["snapshot"]["scenarios"], ["app_bootstrap", "store_dashboard"])
         self.assertTrue(snapshot_response.json()["snapshot"]["strict_plan"])
         self.assertTrue(snapshot_response.json()["snapshot"]["enforce_websocket_gates"])
+        self.assertTrue(snapshot_response.json()["snapshot"]["timeout_fails"])
 
         replay_response = self.client.post(f"/api/v1/runs/{launched_run_id}/replay")
         self.assertEqual(replay_response.status_code, 200)
@@ -1547,8 +1757,37 @@ class SchedulesApiTests(unittest.TestCase):
         trigger_response = self.client.post(f"/api/v1/schedules/{campaign['id']}/trigger")
         self.assertEqual(trigger_response.status_code, 200)
         self.assertEqual(trigger_response.json()["execution"]["status"], "launched")
-        self.assertEqual(len(trigger_response.json()["runs"]), 2)
+        self.assertEqual(len(trigger_response.json()["runs"]), 1)
+        self.assertEqual(trigger_response.json()["execution"]["detail"]["overlap_skipped_count"], 1)
         self.assertTrue(trigger_response.json()["execution"].get("execution_chain_key"))
+
+    def test_schedule_trigger_serializes_identical_overlap_runs(self) -> None:
+        profile_id = self._create_profile()
+        create_response = self.client.post(
+            "/api/v1/schedules",
+            json={
+                "name": f"overlap-guard-{time.time_ns()}",
+                "schedule_type": "simple",
+                "profile_id": profile_id,
+                "cadence": "daily",
+                "timezone": "UTC",
+            },
+        )
+        self.assertEqual(create_response.status_code, 200)
+        schedule_id = int(create_response.json()["schedule"]["id"])
+
+        first_trigger = self.client.post(f"/api/v1/schedules/{schedule_id}/trigger")
+        self.assertEqual(first_trigger.status_code, 200)
+        self.assertEqual(first_trigger.json()["execution"]["status"], "launched")
+        first_run_id = int(first_trigger.json()["run"]["id"])
+
+        second_trigger = self.client.post(f"/api/v1/schedules/{schedule_id}/trigger")
+        self.assertEqual(second_trigger.status_code, 200)
+        self.assertEqual(second_trigger.json()["execution"]["status"], "overlap_skipped")
+        self.assertEqual(second_trigger.json().get("runs"), [])
+        overlap = second_trigger.json().get("overlap_skipped") or []
+        self.assertGreaterEqual(len(overlap), 1)
+        self.assertEqual(int(overlap[0]["existing_run_id"]), first_run_id)
 
     def test_schedule_restore_fails_when_profile_is_archived(self) -> None:
         profile_id = self._create_profile()
@@ -2994,7 +3233,7 @@ class CatalogSeedTests(unittest.TestCase):
                 self.assertTrue(row["post_order_actions"])
                 self.assertEqual(
                     row["scenarios"],
-                    ["completed", "rejected", "cancelled", "auto_cancel"],
+                    ["completed", "rejected", "cancelled", "backend_auto_cancel", "auto_cancel"],
                 )
 
     def test_catalog_profiles_are_pinned_with_api_sweep_max_first(self) -> None:
@@ -3059,6 +3298,7 @@ class CatalogSeedTests(unittest.TestCase):
         self.assertIn("completed", scenario_values)
         self.assertIn("rejected", scenario_values)
         self.assertIn("cancelled", scenario_values)
+        self.assertIn("backend_auto_cancel", scenario_values)
         self.assertIn("auto_cancel", scenario_values)
         self.assertIn("--enforce-websocket-gates", cmd)
         self.assertIn("--post-order-actions", cmd)

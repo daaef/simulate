@@ -14,10 +14,14 @@ from session_probe_reference import (
     probe_contract,
     session_reference_details,
 )
-from transport import HttpResult, RequestError, api_data, request_json, sanitize_payload
+from transport import HttpResult, RequestError, api_data, is_timeout_error, request_json, sanitize_payload
 
 
 RequestFunc = Callable[..., Awaitable[HttpResult]]
+
+
+class ProbeTimeoutFatalError(RuntimeError):
+    """Raised when timeout-fails is enabled and a probe times out."""
 
 
 @dataclass(frozen=True)
@@ -230,19 +234,26 @@ def _record_probe_decision(
     scenario: str | None,
     step: str | None,
     details: dict[str, Any] | None = None,
+    next_action: str | None = None,
+    run_continued: bool | None = None,
 ) -> None:
-    next_action = "continue_run"
-    run_continued = True
+    resolved_next_action = "continue_run"
+    resolved_run_continued = True
     if status == "skipped":
-        next_action = (
+        resolved_next_action = (
             "request_sample_from_user"
             if reason == "missing_reference_sample"
             else "skip_api_call"
         )
     elif status == "failed":
-        next_action = "record_warning_and_continue"
+        resolved_next_action = "record_warning_and_continue"
     elif status == "inconclusive":
-        next_action = "continue_run"
+        resolved_next_action = "continue_run"
+
+    if next_action is not None:
+        resolved_next_action = next_action
+    if run_continued is not None:
+        resolved_run_continued = bool(run_continued)
 
     merged_details = {**session_reference_details(spec.name), **(details or {})}
 
@@ -257,8 +268,8 @@ def _record_probe_decision(
             step=step or spec.name,
             reason_code=reason,
             reason_message=message,
-            next_action=next_action,
-            run_continued=run_continued,
+            next_action=resolved_next_action,
+            run_continued=resolved_run_continued,
             details=merged_details,
         )
         return
@@ -598,6 +609,9 @@ async def run_probe(
         if exc.result is not None:
             status_code = exc.result.response.status_code
 
+        timed_out = is_timeout_error(exc)
+        timeout_is_fatal = timed_out and bool(config.SIM_TIMEOUT_FAILS)
+
         if status_code is not None and status_code < 500 and exc.result is not None:
             _record_probe_outcome(
                 recorder,
@@ -611,6 +625,8 @@ async def run_probe(
         reason = "probe_http_error"
         if status_code is not None and status_code >= 500:
             reason = "probe_http_server_error"
+        if timed_out:
+            reason = "probe_http_timeout"
         _record_probe_decision(
             recorder,
             spec=spec,
@@ -624,17 +640,25 @@ async def run_probe(
                 "raw_payload": sanitize_payload(
                     exc.result.payload if exc.result else exc.event
                 ),
+                "reason_code": getattr(exc, "reason_code", None),
+                "timeout_fails": bool(config.SIM_TIMEOUT_FAILS),
             },
+            next_action="fail_run" if timeout_is_fatal else None,
+            run_continued=False if timeout_is_fatal else None,
         )
         recorder.record_issue(
-            severity="warning",
-            code="probe_failed",
+            severity="error" if timeout_is_fatal else "warning",
+            code="probe_timeout_failed" if timeout_is_fatal else "probe_failed",
             actor=spec.actor,
             scenario=scenario,
             step=step or spec.name,
             related_event_id=exc.event["id"] if exc.event else None,
             message=f"Probe {spec.name} failed after preflight passed: {exc}",
         )
+        if timeout_is_fatal:
+            raise ProbeTimeoutFatalError(
+                f"Probe {spec.name} timed out and timeout-fails is enabled."
+            ) from exc
         return None
     except Exception as exc:
         _record_probe_decision(

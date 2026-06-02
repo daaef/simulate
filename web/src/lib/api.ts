@@ -3,8 +3,18 @@ export type RunControl = {
   can_stop: boolean;
   can_delete: boolean;
   has_live_process?: boolean;
+  detached_live?: boolean;
   log_activity?: boolean;
+  log_activity_reason?: string;
   liveness_reason?: string;
+  ownership_state?: string;
+  ownership_reason?: string;
+  process_pid?: number | null;
+  launcher_instance_id?: string | null;
+  last_heartbeat_at?: string | null;
+  heartbeat_age_seconds?: number | null;
+  command_identity_match?: boolean;
+  log_identity_match?: boolean;
 };
 
 export type RunRow = {
@@ -21,6 +31,7 @@ export type RunRow = {
   all_users: boolean;
   no_auto_provision: boolean;
   enforce_websocket_gates: boolean;
+  timeout_fails: boolean;
   post_order_actions: boolean | null;
   extra_args: string[];
   status: string;
@@ -43,6 +54,10 @@ export type RunRow = {
   schedule_id?: number | null;
   integration_trigger_id?: number | null;
   launched_by_user_id?: number | null;
+  process_pid?: number | null;
+  launcher_instance_id?: string | null;
+  last_heartbeat_at?: string | null;
+  ownership_state?: string | null;
   control?: RunControl;
 };
 
@@ -61,6 +76,9 @@ export type RunCreateRequest = {
   skip_store_dashboard_probes?: boolean;
   no_auto_provision?: boolean;
   enforce_websocket_gates?: boolean;
+  timeout_fails?: boolean;
+  wait_for_store_action?: boolean;
+  store_auto_cancel?: boolean;
   post_order_actions?: boolean;
   users?: number;
   orders?: number;
@@ -89,6 +107,7 @@ export type RunProfile = {
   skip_store_dashboard_probes: boolean;
   no_auto_provision: boolean;
   enforce_websocket_gates: boolean;
+  timeout_fails: boolean;
   post_order_actions: boolean | null;
   users: number | null;
   orders: number | null;
@@ -121,6 +140,7 @@ export type RunProfileUpsertRequest = {
   skip_store_dashboard_probes?: boolean;
   no_auto_provision?: boolean;
   enforce_websocket_gates?: boolean;
+  timeout_fails?: boolean;
   post_order_actions?: boolean;
   users?: number;
   orders?: number;
@@ -457,12 +477,20 @@ export type LatestRunIssue = {
   method?: string | null;
   http_status?: number | null;
   order_ref?: string | null;
+  related_event_id?: number | null;
   preceding_steps?: FindingPrecedingStep[];
 };
 
 export type RunFindings = {
   critical: LatestRunIssue[];
   operational: LatestRunIssue[];
+};
+
+export type RunFindingsMeta = {
+  failed_events_total?: number;
+  represented_failed_events?: number;
+  findings_rows_shown?: number;
+  truncated?: boolean;
 };
 
 export type LatestRunOverview = {
@@ -475,6 +503,7 @@ export type LatestRunOverview = {
   };
   lifecycle: LifecycleStep[];
   findings?: RunFindings;
+  findings_meta?: RunFindingsMeta;
   issues: LatestRunIssue[];
   run_meta?: Record<string, unknown>;
 };

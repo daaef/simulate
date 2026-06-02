@@ -6,27 +6,31 @@ The shipped product’s **primary mission** is operator observability: owners an
 
 ## Goal
 
-Plan and sequence the redesign of the simulator web GUI into a production-grade operations platform with strong auth/session ownership, route-first app structure, monitoring-first UX, structured scheduling, campaign orchestration, and archive/retention lifecycle controls.
+Keep simulator behavior operationally truthful while adding a deliberate `place-order` trace flow for manual store-app testing. Standard simulator flows must still close every created order to `completed`, `rejected`, or `cancelled`; only `place_order` may intentionally seed pending orders, and that exception must be explicit in artifacts and validation.
 
 ## Current Status
 
-Completed (Phase 34 Config/Load UX alignment — full automated + GUI smoke verified 2026-05-19)
+Implemented (Phase 36 Pending Order Trace Flow). Verification caveat: full Python suite currently has one unrelated midnight-edge schedule test failure, `SchedulesApiTests.test_new_contract_schedule_shifts_into_run_window`.
 
 ## Scope
 
-- Produce an approved architecture/design spec for a web-based simulator control plane and UX.
-- Produce an implementation plan with phased backend/frontend/infra/testing work.
-- Define deployment topology for Docker + Nginx on Contabo VPS.
-- Define feature set for operator UX, observability UX, and reporting UX.
-- Define security, reliability, scaling, and data-retention decisions needed before implementation.
-- Keep the existing CLI simulator as the execution engine for the first web platform version.
+- Add `place-order` as a CLI/API/web trace preset for seeding pending orders.
+- Reuse `orders` / `--orders` only for this flow, capped at 10 orders.
+- Require websocket proof that each seeded order reached `pending`.
+- Add an explicit non-terminal exception for `place_order` while preserving terminal-order enforcement for all other flows.
+- Enforce one global contract across all standard simulator flows/modes: created orders must end terminal.
+- Remove payment/store context leakage so payment requests always target the correct store context.
+- Add end-of-run lifecycle finalization (natural-settle wait, cleanup attempts, terminal re-check).
+- Convert unresolved non-terminal orders into hard run failures (independent of `failure_policy`).
+- Make websocket lifecycle proof strict for order-producing runs.
+- Keep run artifacts (`events.json`, `report.md`, `story.md`) aligned with the true final run outcome.
 
 ## Out of Scope
 
-- Implementing the full web app in this planning phase.
-- Replacing simulator business logic with a new engine.
-- Modifying real user/store mobile app codebases.
-- Destructive data operations in production environments.
+- Replacing simulator architecture, flow presets, or CLI launcher shape.
+- Changing mobile app codebases.
+- Adding broad or hidden bypasses that allow open orders to pass outside `place_order`.
+- Any non-related UX redesign work.
 
 ## Relevant Files
 
@@ -39,11 +43,19 @@ Completed (Phase 34 Config/Load UX alignment — full automated + GUI smoke veri
 - `reporting.py`
 - `transport.py`
 - `websocket_observer.py`
+- `stripe_sim.py`
 - `interaction_catalog.py`
 - `flow_presets.py`
 - `scenarios.py`
 - `sim_actors.json`
 - `tests/test_simulate.py`
+- `tests/test_web_api.py`
+- `web/src/app/(app)/runs/page.tsx`
+- `web/src/components/runs/RunLaunchPanel.tsx`
+- `web/src/lib/api.ts`
+- `web/src/lib/run-command-preview.ts`
+- `web/src/lib/run-launcher-config.ts`
+- `web/src/lib/run-impact-explainer.ts`
 - `ARCHITECTURE.md`
 - `app-20260428.full-session-user.md`
 - `app-20260430.full-session-user.md`
@@ -60,7 +72,6 @@ Completed (Phase 34 Config/Load UX alignment — full automated + GUI smoke veri
 - `docs/superpowers/specs/2026-05-19-config-load-ux-and-runtime-alignment-design.md`
 - `docs/superpowers/plans/2026-05-19-config-load-ux-and-runtime-alignment.md`
 - `api/app/main.py`
-- `tests/test_web_api.py`
 - `.env`
 
 ## How to Continue
@@ -72,15 +83,18 @@ Completed (Phase 34 Config/Load UX alignment — full automated + GUI smoke veri
 
 ## Validation
 
-- Planning validation:
-  - Design spec exists and is internally consistent.
-  - Implementation plan exists and maps every major requirement to concrete phases.
-  - Tracker task board reflects pending implementation work.
-  - Deployment architecture and security assumptions are explicit.
+- Runtime validation:
+  - Any created order ends as `completed`, `rejected`, or `cancelled`.
+  - Non-terminal states (`pending`, `payment_processing`, `order_processing`, `ready`, robot transit states) force failure after cleanup attempts.
+  - Websocket lifecycle proof failures are run-failing for order-producing runs.
+- Regression validation:
+  - Payment requests use the correct per-order store context after coupon-recovery paths.
+  - Trace and load paths both enforce the same terminal-order contract.
 
 ## Known Blockers / Assumptions
 
 - Existing simulator CLI behavior is treated as the execution source of truth for v1 of web orchestration.
+- Global contract supersedes permissive scenario success when orders are left open, except the explicitly documented `place_order` scenario whose purpose is pending-order seeding.
 - Existing git worktree is already dirty; unrelated files must not be reverted.
 - Initial deployment target is a single Contabo VPS with Docker Compose and Nginx reverse proxy.
 - V1 architecture is local-first and simple: no mandatory Celery/Redis dependency.
@@ -93,4 +107,4 @@ Completed (Phase 34 Config/Load UX alignment — full automated + GUI smoke veri
 
 ## Last Updated
 
-2026-05-19 04:05
+2026-06-02 00:04

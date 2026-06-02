@@ -30,6 +30,7 @@ const baseForm: RunCreateRequest = {
   phone: "",
   all_users: false,
   no_auto_provision: false,
+  timeout_fails: false,
 };
 
 const doctorCapability: FlowCapability = {
@@ -104,6 +105,27 @@ describe("getLauncherFieldHelp", () => {
     expect(completed?.description).toBe(SCENARIO_HELP.completed);
   });
 
+  it("treats orders as valid for place-order trace flow", () => {
+    const help = getLauncherFieldHelp(
+      "orders",
+      context({
+        form: { ...baseForm, flow: "place-order", orders: 3 },
+        resolvedMode: "trace",
+        capability: {
+          ...doctorCapability,
+          flow: "place-order",
+          default_suite: null,
+          default_scenarios: ["place_order"],
+          allowed_optional_flags: ["orders"],
+          available_scenarios: ["place_order"],
+        },
+      }),
+    );
+
+    expect(help?.constraints.join(" ")).not.toContain("load mode");
+    expect(help?.whenToChange).toContain("place-order");
+  });
+
   it("lists plan stores and users for actor fields", () => {
     const storeHelp = getLauncherFieldHelp("store", context({ planContent: fixturePlan }));
     const storeValues = storeHelp?.options?.map((o) => o.value) ?? [];
@@ -132,6 +154,15 @@ describe("getSelectedOptionHelp", () => {
     );
     expect(selected?.valueLabel).toBe("Off");
     expect(selected?.description.toLowerCase()).toContain("warning");
+  });
+
+  it("returns off state for unchecked timeout fails", () => {
+    const selected = getSelectedOptionHelp(
+      "timeout_fails",
+      context({ form: { ...baseForm, timeout_fails: false } }),
+    );
+    expect(selected?.valueLabel).toBe("Off");
+    expect(selected?.description.toLowerCase()).toContain("wait indefinitely");
   });
 
   it("returns per-scenario items when scenarios are selected", () => {

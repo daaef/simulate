@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional, Tuple
 
 import httpx
 
+import config
 from reporting import RunRecorder
 
 
@@ -42,10 +43,28 @@ class RequestError(RuntimeError):
         *,
         event: dict[str, Any] | None = None,
         result: HttpResult | None = None,
+        reason_code: str | None = None,
     ) -> None:
         super().__init__(message)
         self.event = event
         self.result = result
+        self.reason_code = reason_code or "http_request_error"
+
+
+def _is_timeout_exception(exc: Exception) -> bool:
+    return isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError))
+
+
+def is_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, RequestError):
+        return exc.reason_code == "http_timeout"
+    return _is_timeout_exception(exc)
+
+
+def resolve_timeout(timeout: float | None) -> float | None:
+    if timeout is not None:
+        return timeout
+    return config.request_timeout_seconds()
 
 
 def api_data(payload: Any) -> Any:
@@ -182,7 +201,7 @@ async def request_json(
     auth_token: str | None = None,
     auth_source: str | None = None,
     auth_scheme: str | None = None,
-    timeout: float = 30.0,
+    timeout: float | None = None,
     details: dict[str, Any] | None = None,
     response_transform: ResponseTransform | None = None,
     response_order_info: ResponseOrderInfo | None = None,
@@ -197,6 +216,7 @@ async def request_json(
     )
     started = time.perf_counter()
     full_url = _full_url(url, params)
+    effective_timeout = resolve_timeout(timeout)
     try:
         response = await client.request(
             method=method.upper(),
@@ -205,9 +225,10 @@ async def request_json(
             json=json_body,
             data=data_body,
             headers=headers,
-            timeout=timeout,
+            timeout=effective_timeout,
         )
     except Exception as exc:
+        reason_code = "http_timeout" if _is_timeout_exception(exc) else "http_request_error"
         latency_ms = int((time.perf_counter() - started) * 1000)
         event = recorder.record_event(
             actor=actor,
@@ -230,13 +251,20 @@ async def request_json(
             auth=auth,
             latency_ms=latency_ms,
             poll_attempt=poll_attempt,
-            details={**(details or {}), "error": str(exc)},
+            details={
+                **(details or {}),
+                "error": str(exc),
+                "reason_code": reason_code,
+                "error_type": type(exc).__name__,
+                "timeout_seconds": effective_timeout,
+            },
             expect_websocket=expect_websocket,
             track_order=track_order,
         )
         raise RequestError(
             f"{method.upper()} {full_url} failed: {exc}",
             event=event,
+            reason_code=reason_code,
         ) from exc
 
     latency_ms = int((time.perf_counter() - started) * 1000)
@@ -299,6 +327,7 @@ async def request_json(
             f"{method.upper()} {full_url} returned HTTP {response.status_code}",
             event=event,
             result=result,
+            reason_code="http_status_error",
         )
     return result
 
