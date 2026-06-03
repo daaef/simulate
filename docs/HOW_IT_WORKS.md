@@ -408,3 +408,272 @@ When a scenario or an individual step completes, it is assigned one of these ver
 | **Lifecycle contract** | The rule that every order created during a run must reach a terminal status |
 | **WebSocket proof** | Confirmation that a status transition appeared on the real-time feed, not just via REST polling |
 | **Auto-provision** | The simulator creating missing fixtures (store profile, menu item) automatically before running scenarios that require them |
+
+---
+
+---
+
+# Developer Reference
+
+> The sections below are intended for engineers working on the simulator itself — extending it, debugging it, or integrating it into CI. They assume Python and async familiarity.
+
+---
+
+## Module Map
+
+Every Python file at the project root has a single, well-bounded responsibility. Nothing is monolithic.
+
+| Module | Responsibility |
+|--------|---------------|
+| `__main__.py` | CLI entrypoint. Parses flags, resolves the run plan, selects trace or load mode, calls `trace_runner` or the load worker pool |
+| `config.py` | Reads all environment variables and `.env` values into typed attributes. Single source of truth for runtime configuration |
+| `scenarios.py` | Defines `TRACE_SCENARIOS`, `TRACE_SUITES`, `TimingProfile`, and the resolver functions that turn a flow/suite name into an ordered tuple of scenario strings |
+| `flow_presets.py` | Maps named flow presets (e.g. `"doctor"`, `"audit"`) to their `(suite, mode, timing, payment)` defaults |
+| `trace_runner.py` | The deterministic orchestrator. Bootstraps auth, runs scenarios in order, enforces the lifecycle contract, and writes the run folder |
+| `transport.py` | Wraps `httpx` with tracing, auth-header masking, timing, and event recording. Every HTTP call in the simulator goes through here |
+| `reporting.py` | `RunRecorder` — collects every event, computes verdicts, writes `events.json`, `report.md`, and `story.md` |
+| `user_sim.py` | All HTTP calls that a customer would make: login, OTP, place order, cancel, review, reorder |
+| `store_sim.py` | All HTTP calls a store owner makes: login, accept, reject, mark-ready, profile PATCH |
+| `robot_sim.py` | All HTTP calls the delivery robot makes: status progression through every delivery phase |
+| `websocket_observer.py` | Passive multi-channel listener. Opens three WebSocket connections and records every message without sending anything |
+| `order_contract.py` | Lifecycle contract enforcer. After all scenarios complete, closes any non-terminal orders via cancel/reject fallbacks |
+| `app_probes.py` | The `app_bootstrap` scenario: calls every endpoint a mobile app hits at launch and validates the responses |
+| `menu_catalog.py` | Creates, patches, and removes test menu items for menu-state scenarios |
+| `interaction_catalog.py` | Lookup tables mapping scenario names to their expected menu-action decisions (`MENU_AVAILABLE`, `MENU_SOLD_OUT`, etc.) |
+| `failure_policy.py` | Classifies HTTP response codes as hard stops, recoverable, or informational; normalizes failure policy labels |
+| `action_decisions.py` | Maps HTTP outcomes to simulator decision strings (`passed`, `failed`, `blocked`, etc.) |
+| `decision_reasons.py` | Predicates for classifying why a decision was made (informational, hard-stop, etc.) |
+| `post_order_actions.py` | Receipt fetch, review submission, and reorder execution — used by `receipt_review_reorder` |
+| `stripe_sim.py` | Creates and confirms Stripe PaymentIntents using test card data |
+| `run_plan.py` | Loads and validates `sim_actors.json`; resolves which actor gets which role for a given run |
+| `health.py` | ASCII bar charts and health summary helpers used in `reporting.py` |
+| `sim_applogger.py` | Structured log emitter for the web console stream |
+
+The API server lives separately under `api/`. It is a FastAPI application — the simulator is its client, not part of it.
+
+---
+
+## How Scenarios Are Resolved
+
+The chain from a user-typed flow name to an ordered list of scenario keys:
+
+```
+CLI flag / web UI  →  flow_presets.py  →  scenarios.py  →  trace_runner.py
+     "doctor"       →  { suite: "doctor", timing: "fast", ... }
+                    →  resolve_trace_scenarios("doctor") → ("app_bootstrap", "store_first_setup", ...)
+                    →  for scenario in tuple: run_scenario(scenario)
+```
+
+`scenarios.py` holds the canonical `TRACE_SUITES` dict and `TRACE_SCENARIOS` tuple (the master ordering). When you ask for the `"doctor"` suite, you get back a subtuple taken from that master order — the order is always preserved.
+
+`flow_presets.py` wraps suites with defaults (timing, payment mode) so the user doesn't have to specify everything manually. Adding a new named flow means adding one entry to the dict in `flow_presets.py` and, if it references a new suite, one entry in `TRACE_SUITES` in `scenarios.py`.
+
+---
+
+## The Transport Layer
+
+`transport.py` is the lowest level the simulator touches. Every HTTP call in every actor module (`user_sim`, `store_sim`, `robot_sim`, `app_probes`) goes through one of its helpers — never raw `httpx` calls.
+
+What `transport.py` does per request:
+
+1. **Injects auth headers** — Bearer token for the user or store, depending on caller context
+2. **Measures wall-clock latency** in milliseconds
+3. **Masks sensitive fields** — `token`, `client_secret`, `otp` are redacted in the recorded payload using regex substitution before the event is stored
+4. **Returns an `HttpResult`** — a frozen dataclass holding the raw `httpx.Response`, the decoded JSON payload, a pre-built event dict, and the latency
+5. **Optionally applies a `ResponseTransform`** — the caller can pass a function to reshape the response before it's recorded (e.g. to extract the `order_id` from a nested field)
+
+The event dict produced for each request is what `RunRecorder` stores in `events.json`. The structure is fixed:
+
+```json
+{
+  "scenario": "store_accept",
+  "step": "place_order",
+  "actor": "user",
+  "method": "POST",
+  "url": "/orders/",
+  "status_code": 201,
+  "latency_ms": 312,
+  "decision": "passed",
+  "payload_summary": { "order_id": 12345, "status": "pending" }
+}
+```
+
+This is why the report can reconstruct a per-event trace without re-running anything — the transport layer records it all in real time.
+
+---
+
+## The RunRecorder
+
+`reporting.py` exports a single class: `RunRecorder`. It is instantiated once per run and passed down to every actor and scenario function as a dependency. No global state.
+
+What it tracks:
+
+- **Events** — appended via `recorder.record_event(event_dict)` as each HTTP call completes
+- **Scenario verdicts** — set via `recorder.set_verdict(scenario, verdict, notes)`
+- **WebSocket observations** — the observer posts status transitions it sees via `recorder.record_ws_event(...)`
+- **Timing** — start time captured at construction; duration computed when `recorder.finalize()` is called
+
+`recorder.finalize()` writes three files to the run folder:
+- `events.json` — the raw event ledger, one JSON object per line (NDJSON)
+- `report.md` — built by walking every event and computing latency percentiles, per-scenario tables, and WebSocket assertions
+- `story.md` — a post-hoc narrative generated by summarizing verdicts and findings into plain language
+
+The run folder name is constructed from the timestamp, suite, store ID, and user phone suffix — making it sortable and identifiable without opening any file.
+
+---
+
+## The WebSocket Observer
+
+`websocket_observer.py` opens three persistent async WebSocket connections at the start of every trace run and holds them open until the run finishes:
+
+| Channel | What it listens to |
+|---------|-------------------|
+| User feed | Real-time order status updates pushed to the customer |
+| Store feed | Incoming orders and status changes pushed to the store dashboard |
+| Store stats | Aggregate stats updates |
+
+The observer never sends anything. It just records every message it receives into `RunRecorder`. After all scenarios complete, `reporting.py` walks the recorded WebSocket messages and checks that each expected status transition appeared on the correct channel.
+
+This is the **WebSocket proof** — it proves status changes are actually broadcast on the wire, not just stored in the database. A scenario can pass its REST assertions (the order reached `completed` via polling) but fail the WebSocket assertion (the transition was never broadcast).
+
+`REQUIRED_WEBSOCKET_SOURCES` in `websocket_observer.py` is the authoritative list of which scenarios require proof on which channels.
+
+---
+
+## The Order Lifecycle Contract
+
+`order_contract.py` runs after all scenarios complete, before `RunRecorder.finalize()` is called.
+
+It:
+1. Fetches every order created during the run from the API
+2. Checks whether each reached a terminal status (`completed`, `rejected`, `cancelled`)
+3. For any non-terminal order:
+   - Waits up to a configurable polling window for natural settlement
+   - If still open, attempts a user cancel
+   - If that fails, attempts a store reject
+   - If both fail, marks the run as failed and records the orphaned order ID
+
+One special exemption: orders placed by the `place_order` scenario are allowed to remain `pending` — they are intentionally seeded for manual inspection and are not expected to auto-complete.
+
+This contract is what prevents the test environment from accumulating ghost orders. Every run is responsible for cleaning up what it creates.
+
+---
+
+## The API Server Structure
+
+The `api/` directory is a FastAPI application. The simulator is its client. It is organized by domain:
+
+```
+api/app/
+├── main.py              ← FastAPI app instance, router registration, startup hooks
+├── runs/                ← Run lifecycle: create, poll status, stream logs, archive
+├── schedules/           ← Schedule CRUD, status transitions, trigger logic
+├── overview/            ← Dashboard summary: health, recent activity, KPIs
+├── alerts/              ← Threshold-based alerting on run outcomes
+├── archives/            ← Completed run storage and retrieval
+├── admin/               ← Admin-only endpoints: actor config, system reset
+├── auth/                ← Token validation middleware
+├── integrations/        ← Webhook configuration and outbound event delivery
+├── simulation_plans/    ← Saved actor plans (user/store/robot configs)
+├── system/              ← Health, version, timezone policy
+└── catalog_seed.py      ← Dev-time fixture seeding for menus and stores
+```
+
+The web frontend (`web/`) talks exclusively to this API — it never touches the simulator Python code directly. The simulator also talks exclusively to this API (plus the Fainzy platform's own API). The two never share in-process state.
+
+---
+
+## How to Add a New Scenario
+
+Adding a scenario is a five-step process:
+
+**1. Name it** — choose a `snake_case` identifier that describes the outcome, not the method. `store_reject_after_payment` is better than `test_store_rejection`.
+
+**2. Register it in `scenarios.py`** — add the name to `TRACE_SCENARIOS` (in the logical position relative to its dependencies) and to any relevant `TRACE_SUITES` entries.
+
+**3. Write the scenario function in `trace_runner.py`** — a scenario is an `async def` that receives `(recorder, config_snapshot, actor_tokens, ws_observer)` and returns a verdict string. Use the existing scenarios as templates — the pattern is: arrange → act → poll → assert → record.
+
+**4. Declare its WebSocket expectations** (if it places an order) — add an entry to `REQUIRED_WEBSOCKET_SOURCES` in `websocket_observer.py` so the contract knows which channels to check.
+
+**5. Register it in the dispatch table** — `trace_runner.py` has a dict that maps scenario name strings to their async functions. Add your new scenario there.
+
+If the scenario needs menu fixtures, use `menu_catalog.py`. If it needs Stripe, use `stripe_sim.py`. If it needs post-order actions (receipt, review), use `post_order_actions.py`. Never write raw `httpx` calls inside a scenario — always go through `transport.py`.
+
+---
+
+## Adding a New Flow Preset
+
+A flow preset is just a named entry in `flow_presets.py` that maps to a `(suite, timing, payment_mode)` tuple. If the suite doesn't exist yet, add it to `TRACE_SUITES` in `scenarios.py` first. The web UI's flow picker reads these presets from the API — no frontend changes are needed when a new preset is added.
+
+---
+
+## Config and Environment Precedence (Full Detail)
+
+`config.py` reads all values at import time. The precedence stack is:
+
+```
+1. Explicit CLI flags          ← always wins; parsed in __main__.py, passed to config at startup
+2. Plan JSON (sim_actors.json) ← actor identities, GPS, roles
+3. .env file                   ← secrets: STRIPE_SECRET_KEY, USER_LASTMILE_TOKEN, STORE_TOKEN, etc.
+4. Built-in defaults           ← fast timing, trace mode, no coupon, UTC timezone
+```
+
+Never put secrets in `sim_actors.json` — that file is committed. Secrets belong in `.env`, which is gitignored. Feature flags (e.g. `SIM_AUTO_PROVISION_FIXTURES=1`) also live in `.env`.
+
+The config module exposes typed accessors (`config.stripe_secret_key`, `config.timing_profile`, etc.) rather than raw `os.getenv` calls scattered through the codebase. If you need a new config value, add it to `config.py` — do not call `os.getenv` anywhere else.
+
+---
+
+## Testing Patterns
+
+Tests live in `tests/`. There are two test files with distinct purposes:
+
+| File | What it tests |
+|------|--------------|
+| `test_simulate.py` | Unit and integration tests for simulator internals: scenario resolution, verdict assignment, transport masking, contract enforcement, config parsing |
+| `test_web_api.py` | API-level tests that call the FastAPI routes directly using the test client; no real network calls |
+
+The simulator does not use mocks for the Fainzy platform API — integration tests that call the real server are tagged separately and run only in CI against a staging environment. The unit tests in `test_simulate.py` use fixtures and a local `httpx` transport override to avoid real network calls.
+
+When writing a new test:
+- For a new scenario function: test the verdict it returns under controlled HTTP fixtures
+- For a new API endpoint: test via `test_web_api.py` with the FastAPI test client
+- For a new config value: add a test in `test_simulate.py` asserting the default and the override both resolve correctly
+
+---
+
+## The `_sim_log` Pattern
+
+`trace_runner.py` uses a `_sim_log(scenario, actor, message, level)` helper to emit Rich-formatted console output during a run. The format it produces is:
+
+```
+[scenario-name] actor: message
+```
+
+This is the same format the `story.md` narrative uses — if you want an action to appear in both the live console stream and the post-run story, emit it via `_sim_log` and also record it on the `RunRecorder`. The two are not automatically linked.
+
+`level` controls the Rich markup color: `info` → default, `success` → green, `warn` → yellow, `error` → red.
+
+---
+
+## Debugging a Failing Run
+
+The fastest path to understanding a failure:
+
+1. **Open `events.json`** in the run folder — find the first event with `"decision": "failed"` and read its `payload_summary`. The exact HTTP response body is there.
+2. **Check the WebSocket assertions in `report.md`** — a scenario that passes REST but fails WebSocket proof will show up as `degraded` or `failed` in the WebSocket section, not in the main verdict table.
+3. **Check `order_contract.py` output** at the bottom of `report.md` — if the run ends with open orders, the contract section lists their IDs and last known status.
+4. **Re-run the single-scenario flow** — if `doctor` fails on `store_accept`, run `--flow store-accept` alone. Less noise, same assertions.
+5. **Set `SIM_TIMING_PROFILE=realistic`** — some race conditions only appear at real-world timings. If fast timing passes and realistic fails, there is a server-side timing sensitivity.
+
+---
+
+## Architecture Decisions Worth Knowing
+
+**Why async throughout?** The simulator must hold three WebSocket connections open while simultaneously driving HTTP calls across three actors. Async Python (`asyncio`) makes this straightforward — the observer runs as a background task, and each actor awaits its HTTP calls without blocking the others.
+
+**Why no mock server?** The simulator's entire value is that it tests the real platform. A mock would test the simulator's assumptions about the platform, not the platform itself. The only acceptable substitute is a staging environment with real data flows.
+
+**Why `RunRecorder` as a passed dependency, not a singleton?** Parallel load-mode runs execute concurrently. If `RunRecorder` were a global, concurrent runs would corrupt each other's event ledgers. Passing it as an argument makes isolation explicit and free.
+
+**Why the transport layer masks secrets?** The event ledger is written to disk and surfaced in the web UI. Auth tokens and Stripe client secrets must never appear in a file that could be shared or indexed. Masking happens at the transport layer — not in each caller — so no scenario can accidentally log a secret by bypassing it.

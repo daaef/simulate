@@ -9,9 +9,102 @@
 
 ## Tasks
 
+### Phase 40: Orders Update Status Tab Polish
+
+- [x] Add focused display helper coverage
+  - Dependency: User-approved Orders update tab design.
+  - Notes: Cover item-name extraction so the second tab can show names only.
+  - Completion evidence: `orders-display.test.ts` fails before helper implementation and passes after.
+
+- [x] Add raw JSON pane to both Orders modes
+  - Dependency: Existing order lookup state.
+  - Notes: Show readable `JSON.stringify(order, null, 2)` output to the right after lookup; stack on narrow widths.
+  - Completion evidence: `/orders` builds and route smoke-checks after web rebuild.
+
+- [x] Simplify second tab into direct status update flow
+  - Dependency: Existing `OrderItemsTab` state and status update helper.
+  - Notes: Rename tab to `Update Status`; remove store panel, `Items Ordered` panel, quantity lines, item prices, and item total row; show item names, total price, select, and `Update Status`.
+  - Completion evidence: Source no longer contains `Items & Store` or `Items Ordered`; tests and TypeScript pass.
+
+- [x] Update docs and tracker
+  - Dependency: UI behavior stabilized.
+  - Notes: Update README, SIMULATOR_GUIDE, spec, plan, and tracker.
+  - Completion evidence: Docs mention raw JSON pane and `Update Status` tab behavior.
+
+### Phase 39: Orders LastMile Token Fix
+
+- [x] Add regression coverage for LastMile token selection and invalid-token mapping
+  - Dependency: User reported lookup returning `please provide a valid token`.
+  - Notes: Store-login response has a 64-character profile token, but LastMile orders require the product-auth `gAAAA...` token used by `store_sim`.
+  - Completion evidence: Focused tests fail before service fix.
+
+- [x] Persist the correct LastMile token from orders store sign-in
+  - Dependency: Failing regression coverage.
+  - Notes: Fetch `/v1/biz/product/authentication/?product=rds` during store sign-in and return that as the browser session token; keep store-login for metadata.
+  - Completion evidence: Live lookup with the returned token succeeds against LastMile.
+
+- [x] Map LastMile invalid-token 400 responses to reauth
+  - Dependency: Error contract regression coverage.
+  - Notes: Existing stale localStorage sessions should clear instead of surfacing a 502-style Fainzy API error.
+  - Completion evidence: Route tests pass.
+
+- [x] Run verification and tracker update
+  - Dependency: Code fix.
+  - Notes: Run focused tests, compile, smoke sign-in + lookup, rebuild API.
+  - Completion evidence: Session log records root cause and command results.
+
+### Phase 38: Orders Store Login 1010 Fix
+
+- [x] Add regression coverage for Fainzy store-login request headers and sign-in error mapping
+  - Dependency: User reported `/orders` sign-in failure.
+  - Notes: Fainzy returns `403 error code: 1010` to the default Python urllib client fingerprint.
+  - Completion evidence: Focused test fails before service header fix.
+
+- [x] Implement store-login header fix
+  - Dependency: Failing regression coverage.
+  - Notes: Send a stable app-compatible `User-Agent` from orders service requests without adding env vars.
+  - Completion evidence: Focused backend tests pass and live store-login succeeds from the API container.
+
+- [x] Run verification and tracker update
+  - Dependency: Code fix.
+  - Notes: Run focused Python tests, compile, web typecheck if frontend untouched optional, and Docker rebuild/smoke.
+  - Completion evidence: Session log records root cause and command results.
+
+### Phase 37: Orders Page Auth and Status Fix
+
+- [x] Update implementation tracker for orders workstream
+  - Dependency: User-approved plan.
+  - Notes: Add focused scope, plan, tasks, and session log entry before implementation.
+  - Completion evidence: Tracker files mention Phase 37 Orders Page Auth and Status Fix.
+
+- [x] Add failing tests for orders API and frontend helpers
+  - Dependency: Tracker update.
+  - Notes: Cover store list, store login proxy, lookup fallback, missing token, status update, localStorage session, and full lifecycle statuses.
+  - Completion evidence: Focused tests fail before implementation for missing/new behavior.
+
+- [x] Implement backend orders auth, lookup, and status contract
+  - Dependency: Failing backend tests.
+  - Notes: Add `stores` and `store-login` routes; remove orders-specific env dependency; add query fallback.
+  - Completion evidence: Focused backend tests pass.
+
+- [x] Implement frontend orders helpers and page UX
+  - Dependency: Backend contract.
+  - Notes: Store selection first, API-backed login, persisted token, unified lookup, full lifecycle status dropdowns.
+  - Completion evidence: TypeScript and focused web tests pass.
+
+- [x] Update user-facing docs
+  - Dependency: Behavior stabilized.
+  - Notes: Update README and SIMULATOR_GUIDE.
+  - Completion evidence: Docs describe `/orders`, store token persistence, and no new env vars.
+
+- [x] Run verification and final tracker update
+  - Dependency: Implementation and docs.
+  - Notes: Run compile, typecheck, focused Python/web tests, and record results.
+  - Completion evidence: Session log contains command outputs and remaining risks.
+
 ## Next Immediate Task
 
-Review or harden unrelated midnight-edge schedule test if required.
+Phase 40 complete. Next immediate task: manually open `/orders`, look up a live order in both tabs, and visually confirm JSON pane plus direct `Update Status` flow.
 
 ### Phase 36: Pending Order Trace Flow
 

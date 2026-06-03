@@ -53,6 +53,9 @@ ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
 
         ("system", "read"),
         ("system", "configure"),
+
+        ("orders", "read"),
+        ("orders", "update"),
     },
     "operator": {
         ("runs", "create"),
@@ -71,6 +74,9 @@ ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
         ("archives", "read"),
         ("retention", "read"),
         ("alerts", "read"),
+
+        ("orders", "read"),
+        ("orders", "update"),
     },
     "runner": {
         ("runs", "create"),
@@ -79,6 +85,8 @@ ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
         ("dashboard", "read"),
         ("schedules", "read"),
         ("alerts", "read"),
+
+        ("orders", "read"),
     },
     "viewer": {
         ("runs", "read"),
@@ -88,6 +96,8 @@ ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
         ("archives", "read"),
         ("retention", "read"),
         ("alerts", "read"),
+
+        ("orders", "read"),
     },
     "auditor": {
         ("runs", "read"),
@@ -97,6 +107,8 @@ ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
         ("archives", "read"),
         ("retention", "read"),
         ("alerts", "read"),
+
+        ("orders", "read"),
     },
 }
 

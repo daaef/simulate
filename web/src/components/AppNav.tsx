@@ -8,6 +8,7 @@ import { fetchDashboardSummary } from "../lib/api";
 const navItems = [
   { href: "/overview", label: "Overview" },
   { href: "/runs", label: "Runs" },
+  { href: "/orders", label: "Orders" },
   { href: "/config", label: "Config" },
   { href: "/schedules", label: "Schedules" },
   { href: "/archives", label: "Archives" },

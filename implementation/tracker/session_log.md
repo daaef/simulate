@@ -1,5 +1,207 @@
 # Session Log
 
+## 2026-06-03 02:47
+
+### Summary
+
+Implemented Phase 40 Orders Update Status Tab Polish from the approved design plus screenshot feedback. The screenshot showed unwanted `Store` and `Items Ordered` result cards in the second tab. The second tab is now renamed `Update Status` and shows only item names, total price, status selector, and `Update Status` button. Both tabs now show a read-only raw order JSON pane after lookup.
+
+### Files Modified
+
+- `web/src/app/(app)/orders/page.tsx`
+- `web/src/lib/orders-display.ts`
+- `web/src/lib/orders-display.test.ts`
+- `docs/superpowers/specs/2026-06-03-orders-items-tab-design.md`
+- `docs/superpowers/plans/2026-06-03-orders-update-tab.md`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Verification
+
+```bash
+cd web && npm test -- orders-display.test.ts
+cd web && npm test -- orders-display.test.ts orders-api.test.ts
+cd web && npx tsc --noEmit
+cd web && npm test
+docker compose up -d --build web
+curl -sS -i http://localhost:8080/orders
+docker compose ps
+git diff --check
+```
+
+### Results
+
+- New `orders-display.test.ts` failed before `orders-display.ts` existed.
+- Focused helper test passed.
+- Focused orders web tests passed: 2 files, 4 tests.
+- TypeScript check passed.
+- Full web Vitest suite passed: 10 files, 60 tests.
+- Web image rebuilt successfully; Next route table includes `/orders`.
+- `/orders` returned HTTP 200 through nginx.
+- Docker stack is up.
+- `git diff --check` passed.
+
+### Remaining Manual Check
+
+- Open `/orders`, sign in if needed, look up a live order in `Order Summary` and `Update Status`, then confirm the raw JSON pane appears and the second tab no longer shows the old store/details cards.
+
+## 2026-06-03 01:16
+
+### Summary
+
+Started Phase 39 after `/orders` lookup returned `Fainzy API 400: {"status":"error","message":"please provide a valid token"}` while sending the 64-character token returned by store login.
+
+### Root Cause Evidence
+
+- `store_sim.bootstrap_auth()` fetches a `last_mile_token` from `/v1/biz/product/authentication/?product=rds`, then fetches store metadata from `/v1/entities/store/login`.
+- `store_sim.fetch_order()` and status PATCH calls use `session.last_mile_token` as the `Fainzy-Token`, not the 64-character `data.token` returned by store login.
+- Live container proof: the 64-character store-login profile token returned `400 please provide a valid token` against `GET /v1/core/orders/?subentity_id=7`; the `gAAAA...` product-auth token returned HTTP 200 and 50 order rows.
+
+### Plan
+
+1. Add failing regression tests for orders store sign-in returning the product-auth token and for invalid-token 400 mapping.
+2. Update orders service login to fetch the product-auth LastMile token and return that as the browser session token.
+3. Keep store-login for metadata/subentity validation.
+4. Rebuild API and smoke-test sign-in plus lookup.
+
+### Completion Update
+
+Implemented the LastMile token fix. Orders store sign-in now fetches the product-auth token from `/v1/biz/product/authentication/?product=rds`, validates the selected store through `/v1/entities/store/login`, and returns the product-auth token as the persisted browser session token. LastMile `400 please provide a valid token` responses now map to 401 reauth so stale localStorage sessions are cleared by the existing UI flow.
+
+### Verification
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m unittest tests.test_orders_api -v
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m py_compile api/app/orders/routes.py api/app/orders/service.py tests/test_orders_api.py
+docker compose up -d --build api
+docker compose exec -T api python -c 'fetch fresh orders session, GET /v1/core/orders/?subentity_id=7, print token shape and first order metadata only'
+python3 -c 'authenticated localhost:8080 login + store-login + /api/v1/orders/lookup?query=1889 smoke test with token redacted'
+docker compose ps
+git diff --check
+```
+
+### Results
+
+- Regression tests failed before the fix on returning the store profile token and mapping LastMile invalid-token 400 to 502.
+- Focused orders API suite passed: 9 tests.
+- Python compile check passed.
+- Fresh store sign-in now returns a `gAAAA...` token with length 140.
+- Direct LastMile store order list succeeded with 50 order rows.
+- Authenticated simulator HTTP lookup succeeded with live order `1889` / `#320621` and status `rejected`.
+- Lookup for the user-provided `#164235` no longer failed with invalid token; it returned `404 Order not found`.
+- API image rebuilt and restarted; Docker stack is up.
+- `git diff --check` passed.
+
+## 2026-06-03 01:05
+
+### Summary
+
+Started Phase 38 after `/orders` sign-in returned `{"detail":"Fainzy token was rejected. Please sign in again."}`. Reproduced the request path in API logs: `POST /api/v1/orders/store-login` reached the simulator API and returned 403.
+
+### Root Cause Evidence
+
+- Direct store-login from inside the API container with the default Python urllib client failed for both configured stores with upstream body `error code: 1010`.
+- The same request body and `Store-Request` header succeeded from the same API container when a normal app/browser-style `User-Agent` header was present.
+- The visible error text was also misleading because the generic Fainzy HTTP error mapper treated store-login 403 like a stale order token.
+
+### Plan
+
+1. Add failing backend regression coverage for the outbound store-login user agent and login-specific 403 message.
+2. Add a stable orders-service `User-Agent` header, without adding env variables.
+3. Re-run focused tests, compile, rebuild API/web if needed, and smoke-test store login.
+
+### Completion Update
+
+Implemented the store-login fix by adding a stable `Fainzy-Simulator/1.0` `User-Agent` to orders service requests and making store-login 401/403 errors use a store-login-specific message instead of the stale-token message.
+
+### Verification
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m unittest tests.test_orders_api -v
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m py_compile api/app/orders/routes.py api/app/orders/service.py tests/test_orders_api.py
+docker compose exec -T api python -c 'from api.app.orders import service; payload=service.login_store("FZY_926025"); print({"store_id": payload["store_id"], "store_name": payload["store_name"], "subentity_id": payload["subentity_id"], "token_len": len(payload["token"])})'
+docker compose up -d --build api
+python3 -c 'authenticated localhost:8080 login + /api/v1/orders/store-login smoke test with token redacted'
+git diff --check
+docker compose ps
+```
+
+### Results
+
+- Regression tests failed before the fix on missing `User-Agent` and misleading store-login 403 text.
+- Focused orders API suite passed: 8 tests.
+- Python compile check passed.
+- Direct in-container `service.login_store("FZY_926025")` succeeded and returned store metadata with a 64-character token.
+- Authenticated HTTP smoke test against `http://localhost:8080/api/v1/orders/store-login` succeeded with default admin session and returned store metadata with a 64-character token.
+- API image rebuilt and restarted; Docker stack is up.
+- `git diff --check` passed.
+
+## 2026-06-03 00:46
+
+### Summary
+
+Started Phase 37 Orders Page Auth and Status Fix from the approved plan. The work is scoped to the simulator repo and targets `/orders` only: API-backed store login, plan-store selection, persisted browser Fainzy token, order lookup fallback, full lifecycle status selection, tests, and docs.
+
+### Files Planned
+
+- `api/app/orders/service.py`
+- `api/app/orders/routes.py`
+- `web/src/lib/api.ts`
+- `web/src/app/(app)/orders/page.tsx`
+- `tests/test_orders_api.py`
+- `web/src/lib/orders-api.test.ts`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+
+### Validation Plan
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m py_compile api/app/orders/routes.py api/app/orders/service.py
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m unittest tests.test_orders_api -v
+cd web && npm test -- orders-api.test.ts
+cd web && npx tsc --noEmit
+```
+
+### Risks / Notes
+
+- Worktree is already dirty and includes a partially added orders implementation; preserve unrelated changes.
+- The API container uses multiple workers, so v1 keeps Fainzy token in browser `localStorage` rather than an in-memory API token store.
+- Full lifecycle status updates are intentionally operator-powerful and may be rejected by the backend depending on current order state.
+
+### Completion Update
+
+Implemented Phase 37. The orders page now lists stores from `sim_actors.json`, signs into Fainzy through the simulator API, stores the returned Fainzy token in browser `localStorage`, performs unified order lookup with DB-id/reference fallback, and exposes the full lifecycle status list in both Orders tabs. User-facing docs were updated in `README.md` and `SIMULATOR_GUIDE.md`.
+
+### Verification
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m py_compile api/app/orders/routes.py api/app/orders/service.py tests/test_orders_api.py
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m unittest tests.test_orders_api -v
+cd web && npm test
+cd web && npx tsc --noEmit
+git diff --check
+docker compose up -d --build api web nginx
+docker compose ps
+curl -sS -i http://localhost:8080/healthz
+curl -sS -i http://localhost:8080/orders
+```
+
+### Results
+
+- Python compile check passed.
+- Focused orders API suite passed: 7 tests.
+- Web Vitest suite passed: 9 files, 59 tests.
+- TypeScript check passed.
+- `git diff --check` passed.
+- Docker API/web/nginx rebuild completed, stack is up, `/healthz` returned HTTP 200, and `/orders` returned HTTP 200.
+
+### Remaining Manual Check
+
+- Manually exercise `/orders` with a valid simulator operator session and real store/order data to confirm live Fainzy token/login and backend status-transition acceptance.
+
 ## 2026-04-30 23:16
 
 ### Summary

@@ -72,6 +72,12 @@ Run ownership/liveness is now persisted (`process_pid`, launcher instance, heart
 
 Scheduled launches now serialize identical active schedule/profile/command combinations. Overlap skips are recorded in schedule execution history with status `overlap_skipped`.
 
+## Orders page (web UI)
+
+The authenticated **Orders** page (`/orders`) is an isolated operator tool for live order lookup and status updates. It reads store choices from `sim_actors.json`, signs into the selected store through the simulator API using the existing Fainzy store-login contract, and keeps the LastMile product-auth `Fainzy-Token` in browser `localStorage` for later lookups. It does not require new environment variables.
+
+Lookup accepts a database order id or an order reference such as `#156382`; numeric input falls back to `#<number>` if no DB-id match is found. Both Orders tabs show a read-only raw order JSON pane after lookup. `Order Summary` keeps the summary workflow, while `Update Status` is a direct status-change flow showing only item names, total price, the lifecycle status selector, and `Update Status`. Updates submit through `PATCH /v1/core/orders/?order_id=<id>` with the LastMile `Fainzy-Token`.
+
 ## Archive-First Delete/Restore
 
 - Deleting a run now archives it (`archived_at` set) instead of removing DB row/artifacts.

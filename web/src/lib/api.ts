@@ -1363,3 +1363,181 @@ export async function deleteIntegrationWebhookProject(
     "integration-webhook-project-delete"
   );
 }
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+export type FainzyOrderUser = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_number: string;
+};
+
+export type FainzyOrderMenuItem = {
+  id: string;
+  menu: {
+    id: number;
+    name: string;
+    price: number;
+    description?: string | null;
+  };
+  price: number;
+  quantity: number;
+  sides?: unknown[];
+};
+
+export type FainzyOrderRestaurant = {
+  id: number;
+  name: string;
+  branch: string;
+};
+
+export type FainzyOrder = {
+  id: number;
+  order_id: string;
+  code: string;
+  status: string;
+  user: FainzyOrderUser;
+  restaurant: FainzyOrderRestaurant;
+  menu: FainzyOrderMenuItem[];
+  total_price: number;
+  delivery_fee: number;
+  service_fee: number;
+  coupon_discount: number;
+  is_free: boolean;
+  created: string;
+  comments?: string | null;
+};
+
+export const FAINZY_ORDER_STATUSES: Array<{ value: string; label: string }> = [
+  { value: "pending", label: "Pending" },
+  { value: "payment_processing", label: "Payment Processing" },
+  { value: "order_processing", label: "Order Processing" },
+  { value: "ready", label: "Ready" },
+  { value: "enroute_pickup", label: "En Route Pickup" },
+  { value: "robot_arrived_for_pickup", label: "Robot Arrived for Pickup" },
+  { value: "enroute_delivery", label: "En Route Delivery" },
+  { value: "robot_arrived_for_delivery", label: "Robot Arrived for Delivery" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "rejected", label: "Rejected" },
+  { value: "missed", label: "Missed" },
+  { value: "refunded", label: "Refunded" },
+];
+
+// ---------------------------------------------------------------------------
+// Orders — store login form, browser-side auth, localStorage persistence
+// ---------------------------------------------------------------------------
+
+const ORDERS_SESSION_KEY = "fainzy_orders_session";
+
+export type OrdersStoreOption = {
+  store_id: string;
+  subentity_id: number | null;
+  name: string | null;
+  branch: string | null;
+  currency: string | null;
+  status: number | null;
+  is_default: boolean;
+};
+
+export type OrdersStoresResponse = {
+  default_store_id: string | null;
+  stores: OrdersStoreOption[];
+};
+
+export type OrdersStoreSession = {
+  storeId: string;
+  storeName: string;
+  token: string;
+  subentityId: number | null;
+};
+
+function ordersStorage(): Storage | null {
+  if (typeof globalThis === "undefined" || !("localStorage" in globalThis)) return null;
+  return globalThis.localStorage;
+}
+
+export function getOrdersSession(): OrdersStoreSession | null {
+  const storage = ordersStorage();
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(ORDERS_SESSION_KEY);
+    return raw ? (JSON.parse(raw) as OrdersStoreSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearOrdersSession(): void {
+  ordersStorage()?.removeItem(ORDERS_SESSION_KEY);
+}
+
+function withOrdersToken(init: RequestInit = {}): RequestInit {
+  const session = getOrdersSession();
+  const base = withSession(init);
+  return {
+    ...base,
+    headers: {
+      ...(base.headers as Record<string, string>),
+      ...(session?.token ? { "x-fainzy-token": session.token } : {}),
+    },
+  };
+}
+
+export async function loginAsStore(storeId: string): Promise<OrdersStoreSession> {
+  const trimmed = storeId.trim().toUpperCase();
+  if (!trimmed) throw new Error("Store ID is required.");
+
+  const payload = await unwrap<{ session: OrdersStoreSession }>(
+    await fetch("/api/v1/orders/store-login", {
+      ...withSession({
+        method: "POST",
+        body: JSON.stringify({ store_id: trimmed }),
+      }),
+    }),
+    "order-store-login"
+  );
+  ordersStorage()?.setItem(ORDERS_SESSION_KEY, JSON.stringify(payload.session));
+  return payload.session;
+}
+
+export async function fetchOrdersStores(): Promise<OrdersStoresResponse> {
+  return unwrap<OrdersStoresResponse>(
+    await fetch("/api/v1/orders/stores", withSession()),
+    "order-stores"
+  );
+}
+
+export async function fetchFainzyOrder(query: string): Promise<FainzyOrder> {
+  const session = getOrdersSession();
+  const params = new URLSearchParams({ query: query.trim() });
+  if (session?.subentityId != null) params.set("subentity_id", String(session.subentityId));
+  const payload = await unwrap<{ order: FainzyOrder }>(
+    await fetch(`/api/v1/orders/lookup?${params}`, withOrdersToken()),
+    "order-lookup"
+  );
+  return payload.order;
+}
+
+export async function fetchFainzyOrderById(orderId: number): Promise<FainzyOrder> {
+  return fetchFainzyOrder(String(orderId));
+}
+
+export async function fetchFainzyOrderByRef(ref: string): Promise<FainzyOrder> {
+  return fetchFainzyOrder(ref);
+}
+
+export async function updateFainzyOrderStatus(orderId: number, status: string): Promise<void> {
+  await unwrap<{ ok: boolean }>(
+    await fetch("/api/v1/orders/status", {
+      method: "PATCH",
+      ...withOrdersToken(),
+      body: JSON.stringify({ order_id: orderId, status }),
+    }),
+    "order-status-update"
+  );
+}

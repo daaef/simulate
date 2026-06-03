@@ -221,6 +221,18 @@ Config uses three tabs: `Plans`, `Email`, and `Integration mappings`.
 In `Plans`, `New` clones the currently loaded editor JSON (fallback to selected plan/template content when editor JSON is invalid), clears selected plan id, and names the draft `<selected plan> (Copy)` or `Daily Doctor Plan` when no plan is selected.
 The `Email` tab contains **Email notifications** (non-secret SMTP settings + triggers); `Integration mappings` remains unchanged.
 
+### Route: `/orders`
+
+Orders is an authenticated operator page for looking up and mutating live Fainzy orders without leaving the simulator UI.
+
+- Store selection comes from `sim_actors.json` (`defaults.store_id` and `stores[]`); no new Orders-specific environment variables are needed.
+- Store sign-in calls the simulator API, which fetches the LastMile product-auth `Fainzy-Token` and validates store metadata through the existing Fainzy store-login endpoint (`POST /v1/entities/store/login` with `Store-Request`). The LastMile token is persisted in browser `localStorage`.
+- Lookup accepts either a DB order id or reference (`#156382`). Numeric input first tries DB id, then falls back to reference `#<number>`.
+- Both tabs show a read-only raw order JSON pane after lookup.
+- `Order Summary` keeps the summary-details workflow. `Update Status` is the direct status-change tab: below lookup it shows only item names, total price, the lifecycle status selector, and `Update Status`; it does not repeat store details or item-level quantity/price rows.
+- Both tabs submit status updates through the LastMile token path: `PATCH /v1/core/orders/?order_id=<id>` with `Fainzy-Token`.
+- The status selector intentionally includes the full known lifecycle (`pending`, `payment_processing`, `order_processing`, `ready`, robot transit statuses, `completed`, `cancelled`, `rejected`, `missed`, `refunded`). The backend may reject invalid transitions for the current order state.
+
 ### Route: `/schedules`
 
 Campaign-first schedules, previews, manual trigger, pause/resume, disable/enable, soft delete/restore. Auto-refresh ~15s and on window focus. **Semantics are protected**—observability work only clarifies labels/errors.

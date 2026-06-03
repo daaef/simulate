@@ -1,5 +1,57 @@
 # Implementation Plan
 
+## Active Workstream: Orders Page Auth and Status Fix (2026-06-03)
+
+### Problem Statement
+
+The partially added orders page has the intended UI shape, but its auth/data boundary is brittle: it logs into Fainzy directly from the browser, depends on service helpers that read environment-backed base URLs/paths, treats numeric lookup input only as a DB id, and exposes an incomplete status list.
+
+### Target Behavior
+
+- `/orders` lets an authenticated simulator operator choose a store from `sim_actors.json`, sign in through the simulator API, and persist the returned Fainzy token in browser `localStorage`.
+- The page can look up one input value as DB id, `#reference`, or numeric reference fallback.
+- Both order tabs can update to any known lifecycle status.
+- No new orders-specific environment variables are introduced.
+
+### Existing Behavior
+
+- `web/src/lib/api.ts` calls `https://fainzy.tech/v1/entities/store/login` directly from the browser.
+- `api/app/orders/service.py` reads base URLs and plan paths through environment helper functions.
+- Numeric lookup input calls `GET /api/v1/orders/lookup?order_id=...` only.
+- The status list omits `payment_processing`, `order_processing`, `ready`, robot transit statuses, and `refunded`.
+
+### Proposed Approach
+
+1. Add API routes for `GET /api/v1/orders/stores` and `POST /api/v1/orders/store-login`.
+2. Keep Fainzy token persistence in browser `localStorage`, but acquire it through the simulator API.
+3. Normalize lookup into one query string on the API and implement numeric DB-id then `#ref` fallback.
+4. Expand lifecycle statuses in shared frontend constants.
+5. Update the orders page UI to choose from plan stores before login and reuse the same lookup/update flow in both tabs.
+6. Add focused backend/frontend tests and update operator docs.
+
+### Files to Modify (Workstream)
+
+| File | Purpose of Change |
+|---|---|
+| `api/app/orders/service.py` | Store list, store login proxy, no new env, lookup fallback, lifecycle constants |
+| `api/app/orders/routes.py` | New stores/login routes and normalized lookup API |
+| `web/src/lib/api.ts` | Orders API types, localStorage token helpers, store login through simulator API, lookup helper |
+| `web/src/app/(app)/orders/page.tsx` | Store selection/login UX, full lifecycle statuses, unified lookup behavior |
+| `tests/test_orders_api.py` | Backend unit coverage for store list/login/lookup/status auth |
+| `web/src/lib/orders-api.test.ts` | Frontend helper coverage for storage and lookup/status constants |
+| `README.md` | Orders page user-facing docs |
+| `SIMULATOR_GUIDE.md` | Orders route operational reference |
+
+### Acceptance Criteria (Workstream)
+
+- [x] Store list comes from `sim_actors.json` without new env variables.
+- [x] Store login sends `Store-Request` and extracts token/subentity metadata.
+- [x] Lookup supports DB id, hash reference, and numeric-reference fallback.
+- [x] Status update uses `PATCH /v1/core/orders/?order_id=...` with `Fainzy-Token`.
+- [x] Missing/stale token returns a clear 401/403 path in UI and API.
+- [x] Full lifecycle status list is available in both orders tabs.
+- [x] README and SIMULATOR_GUIDE describe the new Orders page.
+
 ## Problem Statement
 
 The current simulator web layer has grown from an MVP into a product surface that now needs stronger structure. Auth is still shaped like a frontend-held token shell, the main page carries too many responsibilities, and new requirements such as single-session auth, protected route groups, scheduling, campaign orchestration, archives, retention, and auditability cannot be cleanly layered onto the existing single-page design.

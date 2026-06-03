@@ -10,10 +10,17 @@ Keep simulator behavior operationally truthful while adding a deliberate `place-
 
 ## Current Status
 
-Implemented (Phase 36 Pending Order Trace Flow). Verification caveat: full Python suite currently has one unrelated midnight-edge schedule test failure, `SchedulesApiTests.test_new_contract_schedule_shifts_into_run_window`.
+Completed Phase 40 Orders Update Status Tab Polish. The `/orders` implementation now uses simulator API-backed store login with an app-compatible outbound `User-Agent`, persists the LastMile product-auth token required by order lookup/update, uses `sim_actors.json` store selection, supports unified id/reference lookup, exposes full lifecycle status options, shows raw order JSON after lookup, and has a direct `Update Status` tab without store/detail cards. Previous Phase 36 Pending Order Trace Flow is implemented. Verification caveat from the previous workstream: full Python suite had one unrelated midnight-edge schedule test failure, `SchedulesApiTests.test_new_contract_schedule_shifts_into_run_window`.
 
 ## Scope
 
+- Fix `/orders` in the simulator web app only: store selection/login, order lookup, and status updates.
+- Use existing documented Fainzy endpoints and `sim_actors.json`; do not add orders-specific environment variables.
+- Keep Fainzy store token persisted in browser `localStorage`.
+- Support order lookup by DB id, `#reference`, and numeric reference fallback.
+- Support full lifecycle status values in the orders status selector.
+- Show raw order JSON after lookup in both Orders tabs.
+- Keep the `Update Status` tab direct: item names, total price, status select, update button; no repeated store details or item-level quantity/price rows.
 - Add `place-order` as a CLI/API/web trace preset for seeding pending orders.
 - Reuse `orders` / `--orders` only for this flow, capped at 10 orders.
 - Require websocket proof that each seeded order reached `pending`.
@@ -27,6 +34,9 @@ Implemented (Phase 36 Pending Order Trace Flow). Verification caveat: full Pytho
 
 ## Out of Scope
 
+- Changing any other FAINZY project outside `/Users/mars/FAINZY/simulate`.
+- Adding new env variables for the orders page.
+- Replacing simulator auth/session architecture or adding persisted server-side Fainzy token storage in v1.
 - Replacing simulator architecture, flow presets, or CLI launcher shape.
 - Changing mobile app codebases.
 - Adding broad or hidden bypasses that allow open orders to pass outside `place_order`.
@@ -53,6 +63,14 @@ Implemented (Phase 36 Pending Order Trace Flow). Verification caveat: full Pytho
 - `web/src/app/(app)/runs/page.tsx`
 - `web/src/components/runs/RunLaunchPanel.tsx`
 - `web/src/lib/api.ts`
+- `api/app/orders/routes.py`
+- `api/app/orders/service.py`
+- `web/src/app/(app)/orders/page.tsx`
+- `web/src/lib/orders-display.ts`
+- `web/src/lib/orders-display.test.ts`
+- `web/src/components/AppNav.tsx`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
 - `web/src/lib/run-command-preview.ts`
 - `web/src/lib/run-launcher-config.ts`
 - `web/src/lib/run-impact-explainer.ts`
@@ -83,6 +101,12 @@ Implemented (Phase 36 Pending Order Trace Flow). Verification caveat: full Pytho
 
 ## Validation
 
+- Orders page/API validation:
+  - Store list loads from `sim_actors.json`.
+  - Store login uses the simulator API proxy and returns Fainzy token/subentity metadata.
+  - Lookup supports id, hash reference, and numeric-reference fallback.
+  - Status updates send `PATCH /v1/core/orders/?order_id=...` with `Fainzy-Token`.
+  - Missing store token returns a clear 401.
 - Runtime validation:
   - Any created order ends as `completed`, `rejected`, or `cancelled`.
   - Non-terminal states (`pending`, `payment_processing`, `order_processing`, `ready`, robot transit states) force failure after cleanup attempts.
@@ -93,6 +117,10 @@ Implemented (Phase 36 Pending Order Trace Flow). Verification caveat: full Pytho
 
 ## Known Blockers / Assumptions
 
+- Orders page v1 uses existing public endpoints already documented by the simulator: `https://fainzy.tech` and `https://lastmile.fainzy.tech`.
+- Fainzy store-login rejects the default Python urllib client fingerprint with `403 error code: 1010`; the orders service sends a stable app-compatible `User-Agent` and no new env variables.
+- LastMile order lookup/update requires the product-auth `gAAAA...` token from `/v1/biz/product/authentication/?product=rds`; the 64-character token returned by store-login is profile metadata and is not valid for `/v1/core/orders/`.
+- Full lifecycle status updates are intentionally operator-powerful and may fail if the backend rejects an invalid transition for the current order state.
 - Existing simulator CLI behavior is treated as the execution source of truth for v1 of web orchestration.
 - Global contract supersedes permissive scenario success when orders are left open, except the explicitly documented `place_order` scenario whose purpose is pending-order seeding.
 - Existing git worktree is already dirty; unrelated files must not be reverted.
@@ -107,4 +135,4 @@ Implemented (Phase 36 Pending Order Trace Flow). Verification caveat: full Pytho
 
 ## Last Updated
 
-2026-06-02 00:04
+2026-06-03 02:47 WAT
