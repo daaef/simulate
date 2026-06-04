@@ -52,7 +52,7 @@ Use **trace** (or **`doctor`**, which runs in trace mode) when you need proof th
 | `cancelled` | Customer cancels while pending |
 | `place_order` | Seeds pending order(s) for manual store-app inspection; intentionally leaves them pending |
 | `backend_auto_cancel` | Store idle on pending, countdown ticks, observe `cancelled` (primary backend auto-cancel diagnostic) |
-| `auto_cancel` | Store accept, withhold payment, awaiting-payment countdown ticks, observe `cancelled` (optional; may time out if backend only cancels pending) |
+| `auto_cancel` | Explicit-only diagnostic: store accept, withhold payment, awaiting-payment countdown ticks, observe `cancelled` (optional; may time out if backend only cancels pending) |
 | `app_bootstrap` | Config, product auth, pricing, cards, coupons, active orders |
 | `store_dashboard` | Store orders, statistics, top customers |
 | `receipt_review_reorder` | Receipt PDF, review, reorder fetch after completion |
@@ -227,7 +227,7 @@ Orders is an authenticated operator page for looking up and mutating live Fainzy
 
 - Store selection comes from `sim_actors.json` (`defaults.store_id` and `stores[]`); no new Orders-specific environment variables are needed.
 - Store sign-in calls the simulator API, which fetches the LastMile product-auth `Fainzy-Token` and validates store metadata through the existing Fainzy store-login endpoint (`POST /v1/entities/store/login` with `Store-Request`). The LastMile token is persisted in browser `localStorage`.
-- Lookup accepts either a DB order id or reference (`#156382`). Numeric input first tries DB id, then falls back to reference `#<number>`.
+- Lookup accepts either a DB order id or reference (`#156382`). Numeric input first tries DB id, then falls back to reference `#<number>`. Reference lookup is scoped to the signed-in store; if the order belongs to a different store, the UI tells the operator to choose that store and retry.
 - Both tabs show a read-only raw order JSON pane after lookup.
 - `Order Summary` keeps the summary-details workflow. `Update Status` is the direct status-change tab: below lookup it shows only item names, total price, the lifecycle status selector, and `Update Status`; it does not repeat store details or item-level quantity/price rows.
 - Both tabs submit status updates through the LastMile token path: `PATCH /v1/core/orders/?order_id=<id>` with `Fainzy-Token`.
@@ -346,7 +346,7 @@ Richer plans can also carry non-sensitive defaults:
     "flow": "doctor",
     "mode": "trace",
     "trace_suite": "doctor",
-    "trace_scenarios": ["backend_auto_cancel", "auto_cancel"],
+    "trace_scenarios": ["backend_auto_cancel"],
     "store_auto_cancel_seconds": 120,
     "timing_profile": "fast",
     "users": 1,
@@ -384,7 +384,7 @@ Richer plans can also carry non-sensitive defaults:
 }
 ```
 
-Trace scenarios such as `backend_auto_cancel` and `auto_cancel` belong in `runtime_defaults.trace_scenarios` (or the Runs page scenario multiselect / catalog profile `scenarios`), not in `rules`. The `rules` block is boolean simulator behavior (`run_app_probes`, `strict_plan`, etc.). Use `runtime_defaults.store_auto_cancel_seconds` to override the awaiting-payment observe window for `auto_cancel` (no env var).
+Trace scenarios such as `backend_auto_cancel` and explicit diagnostics such as `auto_cancel` belong in `runtime_defaults.trace_scenarios` (or the Runs page scenario multiselect / catalog profile `scenarios`), not in `rules`. The `rules` block is boolean simulator behavior (`run_app_probes`, `strict_plan`, etc.). Use `runtime_defaults.store_auto_cancel_seconds` to override the awaiting-payment observe window for explicit `auto_cancel` runs (no env var).
 
 Keep these out of plan JSON: keys containing `secret`, `token`, `password`, `api_key`, or `private_key`. Plan validation rejects them. Stripe secret keys, cached auth tokens, test-user passwords, and deployment URLs stay in `.env`.
 

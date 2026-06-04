@@ -3583,10 +3583,10 @@ class StoreAutoCancelTests(unittest.TestCase):
 
         asyncio.run(run())
 
-    def test_full_suite_includes_backend_auto_cancel_scenarios(self) -> None:
+    def test_full_suite_includes_backend_auto_cancel_without_awaiting_payment_auto_cancel(self) -> None:
         resolved = resolve_trace_scenarios(suite="full", scenarios=None)
         self.assertIn("backend_auto_cancel", resolved)
-        self.assertIn("auto_cancel", resolved)
+        self.assertNotIn("auto_cancel", resolved)
         self.assertIn("completed", resolved)
 
 

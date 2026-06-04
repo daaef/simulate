@@ -14,7 +14,7 @@ PROFILE_SPECS: list[dict[str, Any]] = [
     {
         "catalog_slug": "api-sweep-max",
         "name": "API sweep max",
-        "description": "Maximum single-run trace/API sweep: full suite plus completed/rejected/cancelled and backend auto-cancel (pending + awaiting-payment) scenarios with websocket gates enforced.",
+        "description": "Maximum single-run trace/API sweep: full suite plus completed/rejected/cancelled and pending backend auto-cancel with websocket gates enforced.",
         "flow": "full",
         "plan": "sim_actors.json",
         "timing": "fast",
@@ -25,7 +25,6 @@ PROFILE_SPECS: list[dict[str, Any]] = [
             "rejected",
             "cancelled",
             "backend_auto_cancel",
-            "auto_cancel",
         ],
         "post_order_actions": True,
         "enforce_websocket_gates": True,

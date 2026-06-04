@@ -76,7 +76,7 @@ Scheduled launches now serialize identical active schedule/profile/command combi
 
 The authenticated **Orders** page (`/orders`) is an isolated operator tool for live order lookup and status updates. It reads store choices from `sim_actors.json`, signs into the selected store through the simulator API using the existing Fainzy store-login contract, and keeps the LastMile product-auth `Fainzy-Token` in browser `localStorage` for later lookups. It does not require new environment variables.
 
-Lookup accepts a database order id or an order reference such as `#156382`; numeric input falls back to `#<number>` if no DB-id match is found. Both Orders tabs show a read-only raw order JSON pane after lookup. `Order Summary` keeps the summary workflow, while `Update Status` is a direct status-change flow showing only item names, total price, the lifecycle status selector, and `Update Status`. Updates submit through `PATCH /v1/core/orders/?order_id=<id>` with the LastMile `Fainzy-Token`.
+Lookup accepts a database order id or an order reference such as `#156382`; numeric input falls back to `#<number>` if no DB-id match is found. Reference lookup is scoped to the signed-in store, and a miss tells the operator to choose the store that owns the order. Both Orders tabs show a read-only raw order JSON pane after lookup. `Order Summary` keeps the summary workflow, while `Update Status` is a direct status-change flow showing only item names, total price, the lifecycle status selector, and `Update Status`. Updates submit through `PATCH /v1/core/orders/?order_id=<id>` with the LastMile `Fainzy-Token`.
 
 ## Archive-First Delete/Restore
 

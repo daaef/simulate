@@ -179,6 +179,21 @@ class OrdersRoutesTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 401)
         self.assertIn("Fainzy token", str(raised.exception.detail))
 
+    def test_lookup_order_missing_result_mentions_selected_store(self) -> None:
+        with mock.patch.object(service, "fetch_by_query", return_value=None):
+            with self.assertRaises(HTTPException) as raised:
+                routes.lookup_order(
+                    query="#164235",
+                    subentity_id=7,
+                    x_fainzy_token="store-token",
+                    current_user={"role": "operator"},
+                )
+
+        self.assertEqual(raised.exception.status_code, 404)
+        detail = str(raised.exception.detail)
+        self.assertIn("selected store", detail.lower())
+        self.assertIn("owns this order", detail.lower())
+
     def test_lookup_order_maps_stale_token_to_auth_error(self) -> None:
         stale = urllib_error.HTTPError(
             url="https://lastmile.fainzy.tech/v1/core/orders/",

@@ -1132,6 +1132,38 @@ pre.log {
   line-height: 1.5;
 }
 
+.form-help--required {
+  color: var(--status-danger-text, var(--chart-danger));
+  margin-top: 8px;
+}
+
+.form-error-inline {
+  background: var(--status-danger-bg);
+  border: 1px solid var(--status-danger-border);
+  color: var(--status-danger-text);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.action-menu__confirm {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-primary);
+}
+
+.action-menu__confirm-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0 4px;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chip-valid {
   background: var(--status-success-bg);
   border-color: var(--status-success-border);
@@ -1534,8 +1566,7 @@ pre.log {
 }
 
 .metric-card--disabled:not(.metric-card--zero) {
-  background: color-mix(in srgb, var(--chart-danger) 10%, var(--bg-tertiary));
-  border-top-color: var(--chart-danger);
+  border-top-color: var(--border-secondary);
 }
 
 .metric-card--degraded { border-top-color: var(--chart-danger); }
@@ -1741,6 +1772,17 @@ pre.log {
 
 .drawer--open {
   transform: translateX(0);
+}
+
+.drawer .grid.three {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+@media (max-width: 520px) {
+  .drawer .grid.two,
+  .drawer .grid.three {
+    grid-template-columns: 1fr;
+  }
 }
 
 .drawer__header {

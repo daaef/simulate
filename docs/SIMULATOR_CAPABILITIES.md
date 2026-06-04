@@ -211,7 +211,7 @@ All names must appear in `TRACE_SCENARIOS`. Unsupported names raise at resolve t
 | `rejected` | Store rejects before payment; expect terminal `rejected`. |
 | `cancelled` | Customer cancels while pending. |
 | `backend_auto_cancel` | Store idle on `pending`, logs pending-backend countdown ticks, observes `cancelled` from backend or customer (no store PATCH; shared observe window via `auto_cancel_wait_seconds` / plan `store_auto_cancel_seconds`). |
-| `auto_cancel` | Store accepts to `payment_processing`, withholds customer payment, logs awaiting-payment countdown ticks, observes `cancelled` (optional diagnostic; may finish `unsupported` if backend does not cancel awaiting-payment orders). |
+| `auto_cancel` | Explicit-only diagnostic: store accepts to `payment_processing`, withholds customer payment, logs awaiting-payment countdown ticks, observes `cancelled` (optional; may finish `unsupported` if backend does not cancel awaiting-payment orders). |
 | `place_order` | Places `SIM_ORDERS` pending order(s), requires pending websocket proof, records `pending_order_seeded`, and intentionally leaves orders pending for manual store-app inspection. Cannot be combined with other scenarios or suites. |
 | `new_user_setup` | Validates new-user bootstrap path; user auth uses `scenario=bootstrap` hint when present in list. |
 | `returning_paid_no_coupon` | Paid Stripe path without coupon (`_run_payment_scenario`). |

@@ -3,17 +3,14 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ApiRequestError,
+  autoLoginForOrders,
   clearOrdersSession,
   FAINZY_ORDER_STATUSES,
   fetchFainzyOrder,
-  fetchOrdersStores,
   getOrdersSession,
-  loginAsStore,
   updateFainzyOrderStatus,
   type FainzyOrder,
-  type OrdersStoreOption,
   type OrdersStoreSession,
-  type OrdersStoresResponse,
 } from "../../../lib/api";
 import { getOrderItemNames } from "../../../lib/orders-display";
 
@@ -120,110 +117,6 @@ async function withReauth<T>(fn: () => Promise<T>, onAuthError: () => void): Pro
     }
     throw err;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Store login form
-// ---------------------------------------------------------------------------
-
-function storeOptionLabel(store: OrdersStoreOption): string {
-  const name = store.name || store.branch;
-  const suffix = store.is_default ? " (default)" : "";
-  return name ? `${store.store_id} - ${name}${suffix}` : `${store.store_id}${suffix}`;
-}
-
-function StoreLoginForm({
-  storesPayload,
-  loadingStores,
-  storesError,
-  onReloadStores,
-  onLogin,
-}: {
-  storesPayload: OrdersStoresResponse | null;
-  loadingStores: boolean;
-  storesError: string | null;
-  onReloadStores: () => void;
-  onLogin: (session: OrdersStoreSession) => void;
-}) {
-  const stores = storesPayload?.stores ?? [];
-  const initialStoreId =
-    storesPayload?.default_store_id && stores.some((store) => store.store_id === storesPayload.default_store_id)
-      ? storesPayload.default_store_id
-      : stores[0]?.store_id ?? "";
-  const [storeId, setStoreId] = useState(initialStoreId);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!storeId && initialStoreId) setStoreId(initialStoreId);
-  }, [initialStoreId, storeId]);
-
-  async function handleLogin() {
-    if (!storeId.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const session = await loginAsStore(storeId);
-      onLogin(session);
-    } catch (err) {
-      setError(formatError(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="panel" style={{ display: "flex", flexDirection: "column", gap: "16px", maxWidth: "480px" }}>
-      <div>
-        <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Sign in as a Store</p>
-        <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>
-          Choose a store from the simulator plan.
-        </p>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-        <label style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Store
-        </label>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <select
-            value={storeId}
-            onChange={(e) => setStoreId(e.target.value)}
-            style={{ flex: 1, minWidth: 0, width: "auto" }}
-            disabled={loading || loadingStores || stores.length === 0}
-            autoFocus
-          >
-            {stores.length === 0 ? (
-              <option value="">{loadingStores ? "Loading stores..." : "No stores available"}</option>
-            ) : (
-              stores.map((store) => (
-                <option key={store.store_id} value={store.store_id}>
-                  {storeOptionLabel(store)}
-                </option>
-              ))
-            )}
-          </select>
-          <button
-            onClick={handleLogin}
-            disabled={loading || loadingStores || !storeId.trim()}
-            style={{ width: "auto", flexShrink: 0, whiteSpace: "nowrap" }}
-          >
-            {loading ? "Signing in…" : "Sign In"}
-          </button>
-        </div>
-      </div>
-      {storesError && (
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-          <p style={{ margin: 0, color: "var(--status-danger-text)", fontSize: "13px" }}>{storesError}</p>
-          <button className="secondary" type="button" onClick={onReloadStores} style={{ width: "auto", fontSize: "12px", padding: "4px 10px" }}>
-            Retry
-          </button>
-        </div>
-      )}
-      {error && (
-        <p style={{ margin: 0, color: "var(--status-danger-text)", fontSize: "13px" }}>{error}</p>
-      )}
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -480,74 +373,53 @@ function OrderItemsTab({ onAuthError }: { onAuthError: () => void }) {
 export default function OrdersPage() {
   const [session, setSession] = useState<OrdersStoreSession | null>(null);
   const [tab, setTab] = useState<Tab>("summary");
-  const [storesPayload, setStoresPayload] = useState<OrdersStoresResponse | null>(null);
-  const [loadingStores, setLoadingStores] = useState(false);
-  const [storesError, setStoresError] = useState<string | null>(null);
+  const [autoLoginError, setAutoLoginError] = useState<string | null>(null);
   const initialised = useRef(false);
 
-  async function loadStores() {
-    setLoadingStores(true);
-    setStoresError(null);
+  async function doAutoLogin() {
+    setAutoLoginError(null);
     try {
-      setStoresPayload(await fetchOrdersStores());
+      const s = await autoLoginForOrders();
+      setSession(s);
     } catch (err) {
-      setStoresError(formatError(err));
-    } finally {
-      setLoadingStores(false);
+      clearOrdersSession();
+      setSession(null);
+      setAutoLoginError(formatError(err));
     }
   }
 
   useEffect(() => {
     if (initialised.current) return;
     initialised.current = true;
-    const stored = getOrdersSession();
-    if (stored) setSession(stored);
-    void loadStores();
+    void doAutoLogin();
   }, []);
-
-  function handleLogin(s: OrdersStoreSession) {
-    setSession(s);
-  }
-
-  function handleSignOut() {
-    clearOrdersSession();
-    setSession(null);
-  }
 
   function handleAuthError() {
     clearOrdersSession();
     setSession(null);
+    void doAutoLogin();
   }
 
   return (
     <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px", maxWidth: "1180px" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px" }}>
-        <div className="page-header">
-          <h1 className="page-title">Orders</h1>
-          <p className="page-subtitle">Look up orders by ID or reference and update their status.</p>
-        </div>
-        {session && (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px", flexShrink: 0 }}>
-            <span className="status-pill status-success" style={{ fontSize: "11px" }}>{session.storeName}</span>
-            <button
-              className="secondary"
-              onClick={handleSignOut}
-              style={{ width: "auto", padding: "4px 10px", fontSize: "12px" }}
-            >
-              Sign out
-            </button>
-          </div>
-        )}
+      <div className="page-header">
+        <h1 className="page-title">Orders</h1>
+        <p className="page-subtitle">Look up orders by ID or reference and update their status.</p>
       </div>
 
-      {!session ? (
-        <StoreLoginForm
-          storesPayload={storesPayload}
-          loadingStores={loadingStores}
-          storesError={storesError}
-          onReloadStores={() => { void loadStores(); }}
-          onLogin={handleLogin}
-        />
+      {autoLoginError ? (
+        <div className="panel" style={{ display: "flex", flexDirection: "column", gap: "10px", maxWidth: "480px" }}>
+          <p style={{ margin: 0, color: "var(--status-danger-text)", fontSize: "13px" }}>{autoLoginError}</p>
+          <button
+            className="secondary"
+            onClick={() => { void doAutoLogin(); }}
+            style={{ width: "auto", fontSize: "12px", padding: "4px 10px" }}
+          >
+            Retry
+          </button>
+        </div>
+      ) : !session ? (
+        <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: "13px" }}>Connecting to orders service…</p>
       ) : (
         <>
           <div className="tabs" role="tablist">

@@ -1488,6 +1488,21 @@ function withOrdersToken(init: RequestInit = {}): RequestInit {
   };
 }
 
+export async function autoLoginForOrders(): Promise<OrdersStoreSession> {
+  const payload = await unwrap<{ token: string }>(
+    await fetch("/api/v1/orders/auto-login", withSession()),
+    "orders-auto-login"
+  );
+  const session: OrdersStoreSession = {
+    storeId: "",
+    storeName: "",
+    token: payload.token,
+    subentityId: null,
+  };
+  ordersStorage()?.setItem(ORDERS_SESSION_KEY, JSON.stringify(session));
+  return session;
+}
+
 export async function loginAsStore(storeId: string): Promise<OrdersStoreSession> {
   const trimmed = storeId.trim().toUpperCase();
   if (!trimmed) throw new Error("Store ID is required.");

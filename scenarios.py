@@ -99,7 +99,6 @@ TRACE_SUITES = {
         "rejected",
         "cancelled",
         "backend_auto_cancel",
-        "auto_cancel",
     ),
 }
 

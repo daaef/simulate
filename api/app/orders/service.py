@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from urllib import error as urllib_error, parse as urllib_parse, request as urllib_request
 
 _FAINZY_BASE_URL = "https://fainzy.tech"
 _LASTMILE_BASE_URL = "https://lastmile.fainzy.tech"
+SIMULATOR_PRODUCT: str = os.getenv("SIMULATOR_PRODUCT", "rds")
 _ORDERS_PATH = "/v1/core/orders/"
 _USER_AGENT = "Fainzy-Simulator/1.0"
 _JSON_HEADERS = {
@@ -62,8 +64,9 @@ def _extract_token(payload: dict[str, Any]) -> str | None:
 
 
 def fetch_lastmile_token() -> str:
+    product = SIMULATOR_PRODUCT or "rds"
     req = urllib_request.Request(
-        f"{_fainzy_base()}/v1/biz/product/authentication/?product=rds",
+        f"{_fainzy_base()}/v1/biz/product/authentication/?product={product}",
         data=b"",
         method="POST",
         headers=_JSON_HEADERS,
@@ -74,6 +77,11 @@ def fetch_lastmile_token() -> str:
     if not token:
         raise RuntimeError("Store product auth returned no LastMile token.")
     return token
+
+
+def auto_login() -> dict[str, Any]:
+    token = fetch_lastmile_token()
+    return {"token": token}
 
 
 def get_store_config() -> dict[str, Any]:

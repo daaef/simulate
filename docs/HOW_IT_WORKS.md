@@ -82,7 +82,7 @@ The full list of flows:
 
 | Flow | Mode | What it runs |
 |------|------|--------------|
-| `full` | Trace | All 20 scenarios |
+| `full` | Trace | Broadest default suite plus pending backend auto-cancel |
 | `doctor` | Trace | 12 daily-recommended scenarios |
 | `audit` | Trace | 15 breadth scenarios |
 | `payments` | Trace | 3 payment scenarios only |
@@ -106,7 +106,7 @@ Each focused flow (`store-accept`, `paid-coupon`, etc.) is a **subset** of what 
 
 ## The `full` Profile — Step by Step
 
-`full` is the completeness test. It runs all 20 scenarios in a deliberate order designed to build on itself — setup first, then features, then edge cases.
+`full` is the completeness test. It runs the broadest default scenario suite in a deliberate order designed to build on itself — setup first, then features, then edge cases.
 
 Below is what happens, in plain language:
 
@@ -214,7 +214,7 @@ This is the only scenario that places two orders.
 
 ---
 
-### Phase 8 — Core Lifecycle Edge Cases (scenarios 16–20)
+### Phase 8 — Core Lifecycle Edge Cases
 
 These are the fundamental order lifecycle variants, run last because they stress-test cancellation and timeout paths.
 
@@ -224,15 +224,14 @@ These are the fundamental order lifecycle variants, run last because they stress
 | `rejected` | Store rejects before payment | `rejected` |
 | `cancelled` | User cancels while `pending` | `cancelled` |
 | `backend_auto_cancel` | Store does nothing; server countdown expires | `cancelled` |
-| `auto_cancel` | Store accepts, payment withheld; server countdown expires | `cancelled` |
 
-`backend_auto_cancel` and `auto_cancel` are the most diagnostic scenarios — they catch timeout-handling regressions on the server side.
+`backend_auto_cancel` is the enforced server-side timeout diagnostic for default suites. `auto_cancel` remains available as an explicit awaiting-payment diagnostic, but default suites do not run it unless the operator selects it.
 
 ---
 
 ### End of Run — Contract Enforcement
 
-After all 20 scenarios, the simulator enforces the **order lifecycle contract**:
+After the default scenario suite, the simulator enforces the **order lifecycle contract**:
 
 > Every order created during the run must have reached a terminal status (`completed`, `rejected`, or `cancelled`).
 
@@ -251,7 +250,7 @@ This prevents lingering test orders from polluting the live system.
 Every focused flow is a named subset of `full`. Here is the mapping:
 
 ```
-full (all 20 scenarios)
+full (broadest default suite)
 ├── doctor (12) ─── app_bootstrap, store_first_setup, store_dashboard,
 │                   menu_available, menu_unavailable, menu_sold_out, menu_store_closed,
 │                   paid_no_coupon, paid_coupon, store_accept, store_reject, robot_complete

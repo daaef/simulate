@@ -11,7 +11,7 @@
     "flow": "doctor",
     "mode": "trace",
     "trace_suite": "doctor",
-    "trace_scenarios": ["backend_auto_cancel", "auto_cancel"],
+    "trace_scenarios": ["backend_auto_cancel"],
     "store_auto_cancel_seconds": 120,
     "timing_profile": "fast",
     "users": 1,

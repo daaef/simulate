@@ -27,8 +27,16 @@ import {
 } from "../../../lib/api";
 import { formatDateTime, formatTimeUntil, parseTimestamp } from "../../../lib/time-format";
 
-const periodOptions: SchedulePeriod[] = ["daily", "weekly", "monthly"];
 const repeatOptions: ScheduleRepeatRule[] = ["none", "daily", "weekly", "monthly", "weekdays", "custom"];
+const repeatLabels: Record<ScheduleRepeatRule, string> = {
+  none: "Once (no repeat)",
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly",
+  annually: "Annually",
+  weekdays: "Weekdays (Mon–Fri)",
+  custom: "Custom days",
+};
 const weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
 function defaultScheduleTimezone(): string {
@@ -100,16 +108,23 @@ function nextTriggerLabel(schedule: Schedule): string {
 }
 
 function nextTriggerMeta(schedule: Schedule): string {
-  if (schedule.next_run_at) return `${formatTimeUntil(schedule.next_run_at)} - ${schedule.timezone || "UTC"}`;
+  if (schedule.next_run_at) return `${formatTimeUntil(schedule.next_run_at)} · ${schedule.timezone || "UTC"}`;
   if (schedule.next_run_reason === "outside_active_range") return "No future run: outside active range.";
   if (schedule.next_run_reason === "outside_stop_range") return "No future run: outside stop range.";
   if (schedule.next_run_reason === "window_clipped") return "Next run clipped by run window constraints.";
   if (schedule.next_run_reason === "blackout_skipped") return "Next run skipped one or more blackout dates.";
   if (schedule.next_run_reason === "shifted_to_window_start") return "Next run shifted to window start.";
-  if (schedule.status === "active" && schedule.execution_mode_label === "manual_only") return "Manual-only schedule.";
-  if (schedule.status === "paused") return "Resume to recalculate the next trigger.";
-  if (schedule.status === "disabled") return "Disabled schedules do not run automatically.";
+  if (schedule.status === "active" && schedule.execution_mode_label === "manual_only") return "Trigger manually to run.";
+  if (schedule.status === "paused") return "Resume to recalculate next trigger.";
+  if (schedule.status === "disabled") return "Disabled — will not run automatically.";
   return "No automatic trigger available.";
+}
+
+function executionModeLabel(label?: string | null): string {
+  if (!label) return "";
+  if (label === "manual_only") return "Manual trigger only";
+  if (label === "automatic") return "Automatic";
+  return label;
 }
 
 function toScheduleDateTime(value: string): string | undefined {
@@ -129,6 +144,11 @@ function toDateTimeLocalInput(value: string | null | undefined): string {
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+function capitalizeFirst(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function formatActiveRange(schedule: Schedule): string {
@@ -173,12 +193,16 @@ export default function SchedulesPage() {
   const [campaignSteps, setCampaignSteps] = useState<CampaignStep[]>([]);
   const [stepProfileId, setStepProfileId] = useState("");
   const [stepRepeatCount, setStepRepeatCount] = useState(1);
-  const [stepSpacingSeconds, setStepSpacingSeconds] = useState(0);
+  const [stepSpacingMinutes, setStepSpacingMinutes] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [busy, setBusy] = useState(false);
+  const [actionBusyIds, setActionBusyIds] = useState<Set<number>>(new Set());
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
+  const [editingScheduleName, setEditingScheduleName] = useState<string>("");
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const loadInFlightRef = useRef(false);
   const scheduleListRef = useRef<HTMLElement>(null);
@@ -200,6 +224,11 @@ export default function SchedulesPage() {
       .slice(0, 3);
   }, [schedules]);
 
+  const upcomingTotal = useMemo(
+    () => schedules.filter((s) => parseTimestamp(s.next_run_at) != null).length,
+    [schedules],
+  );
+
   const filteredSchedules = useMemo(() => {
     if (activeStatusFilter === "all") return schedules;
     return schedules.filter((schedule) => schedule.status === activeStatusFilter);
@@ -217,13 +246,13 @@ export default function SchedulesPage() {
   const schedulePreview = useMemo(() => {
     const mode = anchorStartAt ? "automatic" : "manual_only";
     if (mode === "manual_only") {
-      return { mode, nextRunAt: null as string | null, reason: "Set Start At to enable automatic scheduling." };
+      return { mode, nextRunAt: null as string | null, reason: "Set a Start date to enable automatic scheduling." };
     }
     const now = new Date();
     const anchor = new Date(anchorStartAt);
     let next = anchor;
     if (Number.isNaN(anchor.getTime())) {
-      return { mode: "manual_only", nextRunAt: null as string | null, reason: "Set a valid Start At date and time." };
+      return { mode: "manual_only", nextRunAt: null as string | null, reason: "Set a valid Start date and time." };
     }
     while (next.getTime() <= now.getTime()) {
       if (period === "daily") {
@@ -238,7 +267,7 @@ export default function SchedulesPage() {
     return {
       mode,
       nextRunAt: next.toISOString(),
-      reason: "Preview uses start, period, stop rule, window, and blackout constraints on submit.",
+      reason: "Approximate — final time is resolved on save using timezone, stop rules, and blackout dates.",
     };
   }, [period, anchorStartAt]);
 
@@ -260,11 +289,11 @@ export default function SchedulesPage() {
       if (!stepProfileId && profilePayload[0]) setStepProfileId(String(profilePayload[0].id));
       if (timezonePayload) {
         const local = defaultScheduleTimezone();
-        const options =
+        const tzOptions =
           timezonePayload.mode === "allowlist"
             ? (timezonePayload.allowed_timezones ?? [])
             : timezonePayload.available_timezones;
-        const next = options.includes(local) ? local : (options[0] ?? "UTC");
+        const next = tzOptions.includes(local) ? local : (tzOptions[0] ?? "UTC");
         setTimezone(next);
       }
       if (!options?.silent) {
@@ -321,7 +350,7 @@ export default function SchedulesPage() {
   const addCampaignStep = () => {
     const parsedProfileId = Number(stepProfileId);
     if (!parsedProfileId) {
-      setError("Choose a profile before adding a campaign step.");
+      setFormError("Choose a profile before adding a campaign step.");
       return;
     }
     setCampaignSteps((current) => [
@@ -329,20 +358,30 @@ export default function SchedulesPage() {
       {
         profile_id: parsedProfileId,
         repeat_count: Math.max(1, stepRepeatCount),
-        spacing_seconds: Math.max(0, stepSpacingSeconds),
+        spacing_seconds: Math.max(0, stepSpacingMinutes * 60),
         timeout_seconds: 900,
         failure_policy: "continue",
         execution_mode: "saved_profile",
       },
     ]);
-    setError(null);
+    setFormError(null);
+  };
+
+  const moveCampaignStep = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= campaignSteps.length) return;
+    setCampaignSteps((current) => {
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   };
 
   const addBlackoutDate = () => {
     if (!blackoutDateInput) return;
     setBlackoutDates((current) => Array.from(new Set([...current, blackoutDateInput])).sort());
     setBlackoutDateInput("");
-    setError(null);
+    setFormError(null);
   };
 
   const removeBlackoutDate = (date: string) => {
@@ -351,26 +390,31 @@ export default function SchedulesPage() {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setFormError(null);
     setBusy(true);
     try {
       const anchorMs = anchorStartAt ? new Date(anchorStartAt).getTime() : null;
       if (anchorMs == null || Number.isNaN(anchorMs)) {
-        setError("Choose a valid start date and time.");
+        setFormError("Choose a valid start date and time.");
         return;
       }
       if (stopRule === "end_at") {
         const endMs = endAt ? new Date(endAt).getTime() : null;
         if (endMs == null || Number.isNaN(endMs)) {
-          setError("Choose a valid end date and time.");
+          setFormError("Choose a valid end date and time.");
           return;
         }
         if (endMs <= anchorMs) {
-          setError("End time must be after Start time.");
+          setFormError("End time must be after Start time.");
           return;
         }
       }
       if (stopRule === "duration" && durationHours <= 0) {
-        setError("Duration must be greater than 0.");
+        setFormError("Duration must be greater than 0.");
+        return;
+      }
+      if (!campaignSteps.length) {
+        setFormError("Add at least one campaign step before saving.");
         return;
       }
 
@@ -390,10 +434,6 @@ export default function SchedulesPage() {
         }
       }
       const recurrenceConfig = repeat === "custom" ? { weekdays: customWeekdays } : {};
-      if (!campaignSteps.length) {
-        setError("Add at least one campaign step before creating the schedule.");
-        return;
-      }
       const payload: ScheduleUpsertRequest = {
         name,
         description,
@@ -434,11 +474,13 @@ export default function SchedulesPage() {
       setBlackoutDateInput("");
       setCampaignSteps([]);
       setEditingScheduleId(null);
+      setEditingScheduleName("");
       setShowForm(false);
+      setFormError(null);
       await load();
       setError(null);
     } catch (caughtError) {
-      setError(toMessage(caughtError, editingScheduleId ? "Failed to update schedule" : "Failed to create schedule"));
+      setFormError(toMessage(caughtError, editingScheduleId ? "Failed to update schedule" : "Failed to create schedule"));
     } finally {
       setBusy(false);
     }
@@ -446,6 +488,7 @@ export default function SchedulesPage() {
 
   const startEditSchedule = (schedule: Schedule) => {
     setEditingScheduleId(schedule.id);
+    setEditingScheduleName(schedule.name || "");
     setName(schedule.name || "");
     setDescription(schedule.description || "");
     setProfileId(String(schedule.profile_id || profiles[0]?.id || ""));
@@ -504,13 +547,17 @@ export default function SchedulesPage() {
         .filter((time) => Boolean(time));
       setDailyTimes(nextDaily.length ? nextDaily : ["09:00"]);
     }
+    setFormError(null);
     setShowForm(true);
     setError(null);
   };
 
   const cancelEditSchedule = () => {
     setEditingScheduleId(null);
+    setEditingScheduleName("");
     setShowForm(false);
+    setFormError(null);
+    setConfirmDeleteId(null);
     setName("");
     setDescription("");
     setAnchorStartAt("");
@@ -530,8 +577,8 @@ export default function SchedulesPage() {
     setError(null);
   };
 
-  const runAction = async (label: string, action: () => Promise<unknown>) => {
-    setBusy(true);
+  const runRowAction = async (scheduleId: number, label: string, action: () => Promise<unknown>) => {
+    setActionBusyIds((ids) => new Set([...ids, scheduleId]));
     try {
       await action();
       await load();
@@ -539,7 +586,11 @@ export default function SchedulesPage() {
     } catch (caughtError) {
       setError(toMessage(caughtError, `Failed to ${label}`));
     } finally {
-      setBusy(false);
+      setActionBusyIds((ids) => {
+        const next = new Set(ids);
+        next.delete(scheduleId);
+        return next;
+      });
     }
   };
 
@@ -555,7 +606,7 @@ export default function SchedulesPage() {
           <h1 className="page-title">Schedules</h1>
           <LastUpdatedIndicator updatedAt={lastUpdatedAt} onRefresh={() => void load()} />
         </div>
-        <p className="page-subtitle">Profile-backed scheduled runs and campaign launches.</p>
+        <p className="page-subtitle">Automate and schedule recurring simulation campaigns.</p>
       </section>
 
       {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
@@ -603,23 +654,28 @@ export default function SchedulesPage() {
 
       <section className="grid two schedules-activity-row">
         <div className="panel">
-          <span className="stat-label">Upcoming Triggers</span>
+          <h2 className="section-title">Upcoming Triggers</h2>
           {upcomingSchedules.length ? (
-            <div className="upcoming-list">
-              {upcomingSchedules.map((schedule) => (
-                <div key={schedule.id} className="upcoming-item">
-                  <div className="upcoming-item__meta">
-                    <strong>{schedule.name}</strong>
-                    <span className="muted">{schedule.period ?? schedule.cadence} / {schedule.timezone}</span>
+            <>
+              <div className="upcoming-list">
+                {upcomingSchedules.map((schedule) => (
+                  <div key={schedule.id} className="upcoming-item">
+                    <div className="upcoming-item__meta">
+                      <strong>{schedule.name}</strong>
+                      <span className="muted">{capitalizeFirst(schedule.period ?? schedule.cadence ?? "")} · {schedule.timezone}</span>
+                    </div>
+                    <div className="upcoming-item__detail">
+                      <span>{formatDateTime(schedule.next_run_at, { timeZone: schedule.timezone || "UTC" })}</span>
+                      <span className="muted">{formatTimeUntil(schedule.next_run_at)}</span>
+                      <span className={`status-pill ${statusClass(schedule.status)}`}>{capitalizeFirst(schedule.status)}</span>
+                    </div>
                   </div>
-                  <div className="upcoming-item__detail">
-                    <span>{formatDateTime(schedule.next_run_at, { timeZone: schedule.timezone || "UTC" })}</span>
-                    <span className="muted">{formatTimeUntil(schedule.next_run_at)}</span>
-                    <span className={`status-pill ${statusClass(schedule.status)}`}>{schedule.status}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              {upcomingTotal > 3 ? (
+                <p className="muted" style={{ marginTop: "8px", fontSize: "12px" }}>Showing 3 of {upcomingTotal} upcoming triggers.</p>
+              ) : null}
+            </>
           ) : (
             <p className="muted" style={{ marginTop: "10px" }}>No automatic triggers scheduled. Create or resume a schedule to see upcoming runs here.</p>
           )}
@@ -650,7 +706,7 @@ export default function SchedulesPage() {
                       <strong>{state.schedule_name || `Schedule #${state.schedule_id}`}</strong>
                       <div className="schedule-execution-primary">
                         {state.last_triggered_at ? formatDateTime(state.last_triggered_at) : "Not triggered yet"}
-                        {state.latest_run_finished_at ? ` - finished ${formatDateTime(state.latest_run_finished_at)}` : ""}
+                        {state.latest_run_finished_at ? ` · finished ${formatDateTime(state.latest_run_finished_at)}` : ""}
                       </div>
                       <div className="muted">
                         {state.latest_run_id ? `Run #${state.latest_run_id}` : "No run created yet"}
@@ -686,7 +742,7 @@ export default function SchedulesPage() {
                   className={`filter-tab${activeStatusFilter === f ? " filter-tab--active" : ""}`}
                   onClick={() => setActiveStatusFilter(f)}
                 >
-                  {f}
+                  {capitalizeFirst(f)}
                   <span className="filter-tab__count">
                   {f === "all" ? schedules.length : schedules.filter((s) => s.status === f).length}
                   </span>
@@ -703,9 +759,8 @@ export default function SchedulesPage() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Type</th>
                 <th>Status</th>
-                <th>Profile / Steps</th>
+                <th>Steps</th>
                 <th>Cadence</th>
                 <th>Next Trigger</th>
                 <th>Last Trigger</th>
@@ -720,51 +775,46 @@ export default function SchedulesPage() {
                   const canDisable = !isDisabled;
                   const canEnable = isDisabled;
                   const canTrigger = !isDisabled;
+                  const rowBusy = actionBusyIds.has(schedule.id);
                   return (
                     <tr key={schedule.id}>
                       <td>
                         <strong>{schedule.name}</strong>
                         {schedule.description ? <div className="muted">{schedule.description}</div> : null}
                       </td>
-                      <td>{schedule.schedule_type}</td>
-                      <td><span className={`status-pill ${statusClass(schedule.status)}`}>{schedule.status}</span></td>
+                      <td><span className={`status-pill ${statusClass(schedule.status)}`}>{capitalizeFirst(schedule.status)}</span></td>
                       <td>
                         {schedule.schedule_type === "simple"
                           ? profileById.get(schedule.profile_id ?? 0)?.name ?? schedule.profile_id ?? "--"
-                          : `${schedule.campaign_steps.length} steps`}
+                          : `${schedule.campaign_steps.length} step${schedule.campaign_steps.length !== 1 ? "s" : ""}`}
                       </td>
                       <td>
-                        <div>{(schedule.period ?? schedule.cadence)} / {schedule.timezone}</div>
+                        <div>{capitalizeFirst(schedule.period ?? schedule.cadence ?? "")} · {schedule.timezone}</div>
                         {schedule.anchor_start_at ? (
-                          <div className="muted">Start: {formatDateTime(schedule.anchor_start_at, { timeZone: schedule.timezone || "UTC" })}</div>
+                          <div className="muted">From {formatDateTime(schedule.anchor_start_at, { timeZone: schedule.timezone || "UTC" })}</div>
                         ) : null}
-                        {schedule.stop_rule ? (
+                        {schedule.stop_rule && schedule.stop_rule !== "never" ? (
                           <div className="muted">
-                            Stop: {schedule.stop_rule === "end_at" ? `End at ${schedule.end_at ? formatDateTime(schedule.end_at, { timeZone: schedule.timezone || "UTC" }) : "--"}` : schedule.stop_rule === "duration" ? `After ${(schedule.duration_seconds ?? 0) / 3600}h` : "Never"}
+                            {schedule.stop_rule === "end_at"
+                              ? `Until ${schedule.end_at ? formatDateTime(schedule.end_at, { timeZone: schedule.timezone || "UTC" }) : "--"}`
+                              : `After ${(schedule.duration_seconds ?? 0) / 3600}h`}
                           </div>
-                        ) : (
-                          <div className="muted">{formatActiveRange(schedule)}</div>
-                        )}
-                        <div className="muted">Runs per period: {schedule.runs_per_period ?? 1}</div>
-                        {schedule.blackout_dates.length ? (
-                          <div className="muted">Blackouts: {schedule.blackout_dates.join(", ")}</div>
                         ) : null}
                       </td>
                       <td>
                         <strong>{nextTriggerLabel(schedule)}</strong>
                         <div className="muted">{nextTriggerMeta(schedule)}</div>
-                        {schedule.current_period_runs?.length ? (
-                          <div className="muted">Current period runs: {schedule.current_period_runs.length}</div>
+                        {schedule.execution_mode_label ? (
+                          <div className="muted">{executionModeLabel(schedule.execution_mode_label)}</div>
                         ) : null}
-                        <div className="muted">Mode: {schedule.execution_mode_label}</div>
                       </td>
-                      <td>{schedule.last_triggered_at ? formatDateTime(schedule.last_triggered_at, { timeZone: schedule.timezone || "UTC" }) : "--"}</td>
+                      <td>{schedule.last_triggered_at ? formatDateTime(schedule.last_triggered_at, { timeZone: schedule.timezone || "UTC" }) : "Never"}</td>
                       <td>
                         <div className="row-actions">
-                          <button className="small" disabled={busy || !canTrigger} onClick={() => runAction("trigger schedule", () => triggerSchedule(schedule.id))}>
+                          <button className="small" disabled={rowBusy || !canTrigger} onClick={() => runRowAction(schedule.id, "trigger schedule", () => triggerSchedule(schedule.id))}>
                             Trigger
                           </button>
-                          <button className="secondary small" disabled={busy} onClick={() => startEditSchedule(schedule)}>
+                          <button className="secondary small" disabled={rowBusy} onClick={() => startEditSchedule(schedule)}>
                             Edit
                           </button>
                           <div className="action-menu">
@@ -773,25 +823,33 @@ export default function SchedulesPage() {
                               className="secondary small"
                               aria-label="More actions"
                               aria-expanded={openMenuId === schedule.id}
-                              onClick={() => setOpenMenuId(openMenuId === schedule.id ? null : schedule.id)}
+                              onClick={() => { setOpenMenuId(openMenuId === schedule.id ? null : schedule.id); setConfirmDeleteId(null); }}
                             >
                               ···
                             </button>
                             {openMenuId === schedule.id ? (
                               <div className="action-menu__dropdown">
                                 {isPaused ? (
-                                  <button type="button" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("resume schedule", () => setScheduleStatus(schedule.id, "resume")); }}>Resume</button>
+                                  <button type="button" disabled={rowBusy} onClick={() => { setOpenMenuId(null); void runRowAction(schedule.id, "resume schedule", () => setScheduleStatus(schedule.id, "resume")); }}>Resume</button>
                                 ) : null}
                                 {canPause ? (
-                                  <button type="button" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("pause schedule", () => setScheduleStatus(schedule.id, "pause")); }}>Pause</button>
+                                  <button type="button" disabled={rowBusy} onClick={() => { setOpenMenuId(null); void runRowAction(schedule.id, "pause schedule", () => setScheduleStatus(schedule.id, "pause")); }}>Pause</button>
                                 ) : null}
                                 {canEnable ? (
-                                  <button type="button" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("enable schedule", () => setScheduleStatus(schedule.id, "resume")); }}>Enable</button>
+                                  <button type="button" disabled={rowBusy} onClick={() => { setOpenMenuId(null); void runRowAction(schedule.id, "enable schedule", () => setScheduleStatus(schedule.id, "resume")); }}>Enable</button>
                                 ) : null}
                                 {canDisable ? (
-                                  <button type="button" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("disable schedule", () => setScheduleStatus(schedule.id, "disable")); }}>Disable</button>
+                                  <button type="button" disabled={rowBusy} onClick={() => { setOpenMenuId(null); void runRowAction(schedule.id, "disable schedule", () => setScheduleStatus(schedule.id, "disable")); }}>Disable</button>
                                 ) : null}
-                                <button type="button" className="danger" disabled={busy} onClick={() => { setOpenMenuId(null); void runAction("delete schedule", () => setScheduleStatus(schedule.id, "delete")); }}>Delete</button>
+                                {confirmDeleteId === schedule.id ? (
+                                  <div className="action-menu__confirm">
+                                    <span className="action-menu__confirm-label">Delete "{schedule.name}"?</span>
+                                    <button type="button" className="danger" disabled={rowBusy} onClick={() => { setConfirmDeleteId(null); setOpenMenuId(null); void runRowAction(schedule.id, "delete schedule", () => setScheduleStatus(schedule.id, "delete")); }}>Yes, delete</button>
+                                    <button type="button" disabled={rowBusy} onClick={() => setConfirmDeleteId(null)}>Cancel</button>
+                                  </div>
+                                ) : (
+                                  <button type="button" className="danger" disabled={rowBusy} onClick={() => setConfirmDeleteId(schedule.id)}>Delete…</button>
+                                )}
                               </div>
                             ) : null}
                           </div>
@@ -801,7 +859,7 @@ export default function SchedulesPage() {
                   );
                 })}
               {!filteredSchedules.length ? (
-                <tr><td colSpan={8} className="muted">
+                <tr><td colSpan={7} className="muted">
                   {activeStatusFilter === "all" ? "No schedules configured." : `No ${activeStatusFilter} schedules.`}
                 </td></tr>
               ) : null}
@@ -821,13 +879,16 @@ export default function SchedulesPage() {
         className={`drawer${showForm ? " drawer--open" : ""}`}
         role="dialog"
         aria-modal="true"
-        aria-label={editingScheduleId ? `Edit Schedule #${editingScheduleId}` : "Create Schedule"}
+        aria-label={editingScheduleId ? `Edit: ${editingScheduleName || `Schedule #${editingScheduleId}`}` : "Create Schedule"}
       >
         <div className="drawer__header">
-          <h2 className="section-title">{editingScheduleId ? `Edit Schedule #${editingScheduleId}` : "Create Schedule"}</h2>
+          <h2 className="section-title">{editingScheduleId ? `Edit: ${editingScheduleName || `Schedule #${editingScheduleId}`}` : "Create Schedule"}</h2>
           <button type="button" className="drawer__close secondary small" onClick={cancelEditSchedule} aria-label="Close drawer">×</button>
         </div>
         <form className="drawer__body grid" onSubmit={submit}>
+          {formError ? (
+            <div className="form-error-inline" role="alert">{formError}</div>
+          ) : null}
           <label className="grid">
             <span className="muted">Name</span>
             <input value={name} onChange={(event) => setName(event.target.value)} required />
@@ -836,34 +897,28 @@ export default function SchedulesPage() {
             <span className="muted">Description</span>
             <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} />
           </label>
-          <div className="grid three">
-            <label className="grid">
-              <span className="muted">Type</span>
-              <input value="campaign" disabled />
-            </label>
+          <div className="grid two">
             <label className="grid">
               <span className="muted">Repeat</span>
               <select value={repeat} onChange={(event) => setRepeat(event.target.value as ScheduleRepeatRule)}>
-                {repeatOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                {repeatOptions.map((item) => <option key={item} value={item}>{repeatLabels[item]}</option>)}
               </select>
             </label>
             <label className="grid">
-              <span className="muted">Runs</span>
+              <span className="muted">Runs per period</span>
               <input type="number" min={1} value={runsPerPeriod} onChange={(event) => setRunsPerPeriod(Math.max(1, Number(event.target.value) || 1))} />
             </label>
           </div>
-          <div className="grid">
-            <label className="grid">
-              <span className="muted">All Day</span>
-              <input type="checkbox" checked={allDay} onChange={(event) => setAllDay(event.target.checked)} />
-            </label>
-          </div>
+          <label className="grid" style={{ flexDirection: "row", alignItems: "center", gap: "8px" }}>
+            <input type="checkbox" checked={allDay} onChange={(event) => setAllDay(event.target.checked)} />
+            <span>All day (no specific run time)</span>
+          </label>
           {repeat === "custom" ? (
             <div className="grid">
-              <span className="muted">Custom Weekdays</span>
+              <span className="muted">Custom days</span>
               <div className="grid three">
                 {weekdays.map((day) => (
-                  <label key={day}>
+                  <label key={day} style={{ flexDirection: "row", alignItems: "center", gap: "6px" }}>
                     <input
                       type="checkbox"
                       checked={customWeekdays.includes(day)}
@@ -873,7 +928,7 @@ export default function SchedulesPage() {
                         );
                       }}
                     />
-                    {day}
+                    {capitalizeFirst(day)}
                   </label>
                 ))}
               </div>
@@ -881,7 +936,7 @@ export default function SchedulesPage() {
           ) : null}
           {!allDay ? (
             <div className="grid">
-              <span className="muted">Run Time Slots</span>
+              <span className="muted">Run time slots</span>
               {(repeat === "weekly" ? Array.from({ length: runsPerPeriod }).map((_, index) => (
                 <div className="grid two" key={`weekly-${index}`}>
                   <select value={weeklySlots[index]?.weekday ?? "monday"} onChange={(event) => setWeeklySlots((current) => {
@@ -889,7 +944,7 @@ export default function SchedulesPage() {
                     next[index] = { weekday: event.target.value, time: next[index]?.time ?? "09:00" };
                     return next;
                   })}>
-                    {weekdays.map((day) => <option key={day} value={day}>{day}</option>)}
+                    {weekdays.map((day) => <option key={day} value={day}>{capitalizeFirst(day)}</option>)}
                   </select>
                   <input type="time" value={weeklySlots[index]?.time ?? "09:00"} onChange={(event) => setWeeklySlots((current) => {
                     const next = [...current];
@@ -919,18 +974,18 @@ export default function SchedulesPage() {
                         </div>
                       ))
                     : Array.from({ length: runsPerPeriod }).map((_, index) => (
-                        <div className="grid three" key={`monthly-ord-${index}`}>
+                        <div className="grid two" key={`monthly-ord-${index}`}>
                           <select value={String(monthlyOrdinalSlots[index]?.ordinal ?? 1)} onChange={(event) => setMonthlyOrdinalSlots((current) => {
                             const next = [...current];
                             next[index] = { ordinal: Number(event.target.value), weekday: next[index]?.weekday ?? "monday", time: next[index]?.time ?? "09:00" };
                             return next;
-                          })}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}</select>
+                          })}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{["1st","2nd","3rd","4th","5th"][n-1]}</option>)}</select>
                           <select value={monthlyOrdinalSlots[index]?.weekday ?? "monday"} onChange={(event) => setMonthlyOrdinalSlots((current) => {
                             const next = [...current];
                             next[index] = { ordinal: next[index]?.ordinal ?? 1, weekday: event.target.value, time: next[index]?.time ?? "09:00" };
                             return next;
-                          })}>{weekdays.map((day) => <option key={day} value={day}>{day}</option>)}</select>
-                          <input type="time" value={monthlyOrdinalSlots[index]?.time ?? "09:00"} onChange={(event) => setMonthlyOrdinalSlots((current) => {
+                          })}>{weekdays.map((day) => <option key={day} value={day}>{capitalizeFirst(day)}</option>)}</select>
+                          <input type="time" value={monthlyOrdinalSlots[index]?.time ?? "09:00"} style={{ gridColumn: "1 / -1" }} onChange={(event) => setMonthlyOrdinalSlots((current) => {
                             const next = [...current];
                             next[index] = { ordinal: next[index]?.ordinal ?? 1, weekday: next[index]?.weekday ?? "monday", time: event.target.value };
                             return next;
@@ -949,7 +1004,7 @@ export default function SchedulesPage() {
           ) : null}
           <div className="grid two">
             <label className="grid">
-              <span className="muted">Start At</span>
+              <span className="muted">Start at</span>
               <input type="datetime-local" value={anchorStartAt} onChange={(event) => setAnchorStartAt(event.target.value)} required />
             </label>
             <label className="grid">
@@ -960,25 +1015,25 @@ export default function SchedulesPage() {
             </label>
           </div>
           <fieldset className="field-group">
-            <legend>Stop Rule</legend>
+            <legend>Stop rule</legend>
             <div className="grid three">
               <label className="grid">
                 <span className="muted">Rule</span>
                 <select value={stopRule} onChange={(event) => setStopRule(event.target.value as ScheduleStopRule)}>
                   <option value="never">Never</option>
-                  <option value="end_at">End At</option>
-                  <option value="duration">Duration</option>
+                  <option value="end_at">End at date</option>
+                  <option value="duration">After duration</option>
                 </select>
               </label>
               {stopRule === "end_at" ? (
                 <label className="grid">
-                  <span className="muted">End At</span>
+                  <span className="muted">End at</span>
                   <input type="datetime-local" value={endAt} onChange={(event) => setEndAt(event.target.value)} required />
                 </label>
               ) : null}
               {stopRule === "duration" ? (
                 <label className="grid">
-                  <span className="muted">Duration (Hours)</span>
+                  <span className="muted">Duration (hours)</span>
                   <input type="number" min={1} value={durationHours} onChange={(event) => setDurationHours(Math.max(1, Number(event.target.value) || 1))} />
                 </label>
               ) : null}
@@ -986,34 +1041,33 @@ export default function SchedulesPage() {
           </fieldset>
           <section className="panel" style={{ padding: "12px 14px" }}>
             <div className="grid">
-              <span className="muted">Before Submit Preview</span>
-              <strong>{schedulePreview.mode === "automatic" ? "Automatic" : "Manual-only"}</strong>
-              <span className="muted">
-                {schedulePreview.nextRunAt ? formatDateTime(schedulePreview.nextRunAt, { timeZone: timezone }) : "No automatic trigger yet"}
-              </span>
-              <span className="muted">{schedulePreview.reason}</span>
+              <span className="muted">Estimated next run</span>
+              <strong>{schedulePreview.mode === "automatic" ? "Automatic" : "Manual trigger only"}</strong>
+              {schedulePreview.nextRunAt ? (
+                <span className="muted">{formatDateTime(schedulePreview.nextRunAt, { timeZone: timezone })}</span>
+              ) : null}
+              <span className="muted" style={{ fontSize: "12px" }}>{schedulePreview.reason}</span>
             </div>
           </section>
-          <p className="form-help">Scheduling precedence is Start, Repeat, Stop Rule, then Blackout Dates.</p>
           <fieldset className="field-group">
-            <legend>Blackout Dates</legend>
-            <div className="grid two">
+            <legend>Blackout dates</legend>
+            <p className="form-help">Full calendar days (in the schedule timezone) when automatic triggers are skipped. Manual trigger still works on these days.</p>
+            <div className="grid two" style={{ marginTop: "8px" }}>
               <label className="grid">
-                <span className="muted">Skip Date</span>
+                <span className="muted">Skip date</span>
                 <input type="date" value={blackoutDateInput} onChange={(event) => setBlackoutDateInput(event.target.value)} />
               </label>
               <button className="secondary" type="button" onClick={addBlackoutDate} disabled={!blackoutDateInput}>
-                Add Blackout Date
+                Add date
               </button>
             </div>
-            <p className="form-help">Blackout dates are full calendar days in the schedule timezone when automatic triggers are skipped. Manual Trigger still works.</p>
             {blackoutDates.length ? (
-              <div className="pill-list" aria-label="Selected blackout dates">
+              <div className="pill-list" style={{ marginTop: "8px" }} aria-label="Selected blackout dates">
                 {blackoutDates.map((date) => (
                   <span className="chip" key={date}>
                     {date}
                     <button className="pill-remove" type="button" onClick={() => removeBlackoutDate(date)} aria-label={`Remove blackout date ${date}`}>
-                      x
+                      ×
                     </button>
                   </span>
                 ))}
@@ -1021,16 +1075,11 @@ export default function SchedulesPage() {
             ) : null}
           </fieldset>
 
-          <div className="grid">
-            <label className="grid">
-              <span className="muted">Default Profile (for Add Step)</span>
-              <select value={profileId} onChange={(event) => setProfileId(event.target.value)} required>
-                {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-              </select>
-            </label>
+          <fieldset className="field-group">
+            <legend>Campaign steps <span className="muted" style={{ fontWeight: 400, fontSize: "13px" }}>(required)</span></legend>
             <div className="grid three">
               <label className="grid">
-                <span className="muted">Step Profile</span>
+                <span className="muted">Profile</span>
                 <select value={stepProfileId} onChange={(event) => setStepProfileId(event.target.value)}>
                   {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
                 </select>
@@ -1040,39 +1089,43 @@ export default function SchedulesPage() {
                 <input type="number" min={1} max={100} value={stepRepeatCount} onChange={(event) => setStepRepeatCount(Number(event.target.value))} />
               </label>
               <label className="grid">
-                <span className="muted">Spacing Seconds</span>
-                <input type="number" min={0} value={stepSpacingSeconds} onChange={(event) => setStepSpacingSeconds(Number(event.target.value))} />
+                <span className="muted">Spacing (min)</span>
+                <input type="number" min={0} value={stepSpacingMinutes} onChange={(event) => setStepSpacingMinutes(Number(event.target.value))} />
               </label>
             </div>
-            <button className="secondary" type="button" onClick={addCampaignStep}>Add Campaign Step</button>
-            {campaignSteps.length ? (
-              <div className="responsive-table">
+            <button className="secondary" type="button" onClick={addCampaignStep} style={{ marginTop: "8px" }}>+ Add step</button>
+            {campaignSteps.length === 0 ? (
+              <p className="form-help form-help--required">At least one campaign step is required before saving.</p>
+            ) : (
+              <div className="responsive-table" style={{ marginTop: "10px" }}>
                 <table>
                   <thead>
-                    <tr><th>Step</th><th>Profile</th><th>Repeat</th><th>Spacing</th><th></th></tr>
+                    <tr><th>#</th><th>Profile</th><th>Repeat</th><th>Spacing</th><th></th></tr>
                   </thead>
                   <tbody>
                     {campaignSteps.map((step, index) => (
                       <tr key={`${step.profile_id}-${index}`}>
                         <td>{index + 1}</td>
                         <td>{profileById.get(step.profile_id)?.name ?? step.profile_id}</td>
-                        <td>{step.repeat_count}</td>
-                        <td>{step.spacing_seconds}s</td>
+                        <td>{step.repeat_count}×</td>
+                        <td>{step.spacing_seconds >= 60 ? `${Math.round(step.spacing_seconds / 60)}m` : step.spacing_seconds > 0 ? `${step.spacing_seconds}s` : "—"}</td>
                         <td>
-                          <button className="secondary small" type="button" onClick={() => setCampaignSteps((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
-                            Remove
-                          </button>
+                          <div style={{ display: "flex", gap: "4px" }}>
+                            <button className="secondary small" type="button" disabled={index === 0} onClick={() => moveCampaignStep(index, -1)} aria-label="Move step up">↑</button>
+                            <button className="secondary small" type="button" disabled={index === campaignSteps.length - 1} onClick={() => moveCampaignStep(index, 1)} aria-label="Move step down">↓</button>
+                            <button className="secondary small" type="button" onClick={() => setCampaignSteps((current) => current.filter((_, i) => i !== index))}>Remove</button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            ) : null}
-          </div>
+            )}
+          </fieldset>
 
           <div className="row-actions">
-            <button disabled={busy || !profiles.length}>{busy ? "Working..." : editingScheduleId ? "Save Changes" : "Create Schedule"}</button>
+            <button disabled={busy || !profiles.length}>{busy ? "Saving…" : editingScheduleId ? "Save changes" : "Create schedule"}</button>
             <button className="secondary" type="button" disabled={busy} onClick={cancelEditSchedule}>
               Cancel
             </button>

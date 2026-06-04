@@ -3233,7 +3233,7 @@ class CatalogSeedTests(unittest.TestCase):
                 self.assertTrue(row["post_order_actions"])
                 self.assertEqual(
                     row["scenarios"],
-                    ["completed", "rejected", "cancelled", "backend_auto_cancel", "auto_cancel"],
+                    ["completed", "rejected", "cancelled", "backend_auto_cancel"],
                 )
 
     def test_catalog_profiles_are_pinned_with_api_sweep_max_first(self) -> None:
@@ -3286,7 +3286,7 @@ class CatalogSeedTests(unittest.TestCase):
         self.assertEqual(cmd[reject_idx + 1], "0.35")
         self.assertNotIn("--bounded-tail-reject-rate", cmd)
 
-    def test_catalog_api_sweep_max_command_uses_full_suite_and_explicit_scenarios(self) -> None:
+    def test_catalog_api_sweep_max_command_uses_full_suite_without_awaiting_payment_auto_cancel(self) -> None:
         profiles = web_api._list_run_profiles()
         row = next(p for p in profiles if p.get("catalog_slug") == "api-sweep-max")
         req = web_api._profile_request_to_run_request(row)
@@ -3299,7 +3299,7 @@ class CatalogSeedTests(unittest.TestCase):
         self.assertIn("rejected", scenario_values)
         self.assertIn("cancelled", scenario_values)
         self.assertIn("backend_auto_cancel", scenario_values)
-        self.assertIn("auto_cancel", scenario_values)
+        self.assertNotIn("auto_cancel", scenario_values)
         self.assertIn("--enforce-websocket-gates", cmd)
         self.assertIn("--post-order-actions", cmd)
 

@@ -10,6 +10,10 @@ from ..auth.policies import require_permission
 from . import service
 
 router = APIRouter(tags=["orders"])
+ORDER_LOOKUP_NOT_FOUND_DETAIL = (
+    "No matching order found for the selected store. "
+    "Choose the store that owns this order and try again."
+)
 
 
 class OrderStatusUpdate(BaseModel):
@@ -43,8 +47,18 @@ def _fainzy_error(exc: urllib_error.HTTPError, *, context: str = "orders") -> HT
             detail="Fainzy token was rejected. Please sign in again.",
         )
     if exc.code == 404:
-        return HTTPException(status_code=404, detail="Order not found.")
+        return HTTPException(status_code=404, detail=ORDER_LOOKUP_NOT_FOUND_DETAIL)
     return HTTPException(status_code=502, detail=f"Fainzy API {exc.code}: {body[:300]}")
+
+
+@router.get("/api/v1/orders/auto-login")
+def auto_login(
+    current_user: dict = Depends(require_permission("orders", "read")),
+) -> dict[str, Any]:
+    try:
+        return service.auto_login()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/api/v1/orders/config")
@@ -123,7 +137,7 @@ def lookup_order(
         raise HTTPException(status_code=400, detail="Provide order_id or ref.")
 
     if order is None:
-        raise HTTPException(status_code=404, detail="Order not found.")
+        raise HTTPException(status_code=404, detail=ORDER_LOOKUP_NOT_FOUND_DETAIL)
     return {"order": order}
 
 
