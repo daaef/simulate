@@ -194,16 +194,15 @@ def fetch_by_reference(ref: str, *, token: str, subentity_id: int | None = None)
     normalized = ref.strip()
     if not normalized.startswith("#"):
         normalized = f"#{normalized}"
-    params: dict[str, str] = {"filter_params": "all"}
+    params: dict[str, str] = {"reference_code": normalized}
     if subentity_id is not None:
         params["subentity_id"] = str(subentity_id)
     payload = _get(params, token=token)
-    items = payload.get("data", [])
-    if not isinstance(items, list):
-        return None
-    for item in items:
-        if isinstance(item, dict) and str(item.get("order_id", "")).strip() == normalized:
-            return item
+    data = payload.get("data", [])
+    if isinstance(data, list):
+        return data[0] if data else None
+    if isinstance(data, dict):
+        return data
     return None
 
 
