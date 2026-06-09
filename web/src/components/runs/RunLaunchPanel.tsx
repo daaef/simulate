@@ -13,12 +13,6 @@ import {
   resolveLoadPaceSelection,
   type LoadPaceSelection,
 } from "../../lib/load-mode-controls";
-import {
-  hasNoRandomPhone,
-  hasNoRandomStore,
-  setNoRandomPhone,
-  setNoRandomStore,
-} from "../../lib/random-actor-args";
 import type { LauncherFieldId } from "../../lib/run-launcher-config";
 import LaunchActorSelect from "./LaunchActorSelect";
 import { launcherFieldFocusHandlers, notifyLauncherField } from "./RunLaunchHelpSidebar";
@@ -105,8 +99,6 @@ export default function RunLaunchPanel({
 }: RunLaunchPanelProps) {
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const manualLoadIntervalRef = useRef<number | undefined>(undefined);
-  const noRandomPhone = hasNoRandomPhone(form.extra_args);
-  const noRandomStore = hasNoRandomStore(form.extra_args);
   const capability = useMemo(() => flowCapabilities[form.flow] || null, [flowCapabilities, form.flow]);
   const suiteOptions = capability?.available_suites || [];
   const scenarioOptions = capability?.available_scenarios || [];
@@ -278,27 +270,6 @@ export default function RunLaunchPanel({
                 onTouch={() => touch("store")}
                 onChange={(store_id) => onFormChange((prev) => ({ ...prev, store_id }))}
               />
-              <label
-                className="checkbox"
-                style={{ marginTop: 6 }}
-                title={
-                  form.store_id
-                    ? "Store is explicitly pinned; random store selection is already bypassed."
-                    : "Disable default random store selection and use deterministic plan/default store selection."
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={noRandomStore}
-                  onChange={(event) => {
-                    onFormChange((prev) => ({
-                      ...prev,
-                      extra_args: setNoRandomStore(prev.extra_args, event.target.checked),
-                    }));
-                  }}
-                />
-                Disable random store
-              </label>
             </label>
             <div {...focus("phone")}>
               <div>Phone</div>
@@ -311,27 +282,6 @@ export default function RunLaunchPanel({
                 onTouch={() => touch("phone")}
                 onChange={(phone) => onFormChange((prev) => ({ ...prev, phone }))}
               />
-              <label
-                className="checkbox"
-                style={{ marginTop: 6 }}
-                title={
-                  form.phone
-                    ? "Phone is explicitly pinned; random phone selection is already bypassed."
-                    : "Disable default random phone selection and use deterministic plan/default phone selection."
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={noRandomPhone}
-                  onChange={(event) => {
-                    onFormChange((prev) => ({
-                      ...prev,
-                      extra_args: setNoRandomPhone(prev.extra_args, event.target.checked),
-                    }));
-                  }}
-                />
-                Disable random phone
-              </label>
             </div>
             {isLoadMode ? (
               <label {...focus("users")}>

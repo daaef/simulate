@@ -141,6 +141,24 @@ def lookup_order(
     return {"order": order}
 
 
+@router.get("/api/v1/orders/list")
+def list_orders_page(
+    next_url: Optional[str] = Query(default=None),
+    x_fainzy_token: Optional[str] = Header(default=None),
+    current_user: dict = Depends(require_permission("orders", "read")),
+) -> dict[str, Any]:
+    token = (x_fainzy_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="No Fainzy token — please sign in again.")
+    try:
+        result = service.list_orders_page(token=token, next_url=next_url or None)
+    except urllib_error.HTTPError as exc:
+        raise _fainzy_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return result
+
+
 @router.patch("/api/v1/orders/status")
 def update_order_status(
     body: OrderStatusUpdate,

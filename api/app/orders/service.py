@@ -218,5 +218,18 @@ def fetch_by_query(query: str, *, token: str, subentity_id: int | None = None) -
     return fetch_by_reference(value, token=token, subentity_id=subentity_id)
 
 
+def list_orders_page(*, token: str, next_url: str | None = None) -> dict[str, Any]:
+    """Fetch one page of orders. Returns {orders, next} where next is the raw next-page URL or None."""
+    if next_url:
+        parsed = urllib_parse.urlparse(next_url)
+        params = dict(urllib_parse.parse_qsl(parsed.query))
+    else:
+        params = {"filter_params": "all"}
+    payload = _get(params, token=token)
+    data = payload.get("data", [])
+    orders = data if isinstance(data, list) else []
+    return {"orders": orders, "next": payload.get("next") or None}
+
+
 def update_status(order_id: int, status: str, *, token: str) -> Any:
     return _patch({"order_id": str(order_id)}, {"status": status}, token=token)

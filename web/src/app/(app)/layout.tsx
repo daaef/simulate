@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AppNav } from "../../components/AppNav";
+import { AppShell } from "../../components/AppShell";
 import AuthGuard from "../../components/AuthGuard";
 import UserProfile from "../../components/UserProfile";
 import { ThemeToggle } from "../../components/ThemeToggle";
@@ -57,7 +58,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <main>{children}</main>
+        <main><AppShell>{children}</AppShell></main>
       </div>
     </AuthGuard>
   );

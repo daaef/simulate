@@ -1546,6 +1546,14 @@ export async function fetchFainzyOrderByRef(ref: string): Promise<FainzyOrder> {
   return fetchFainzyOrder(ref);
 }
 
+export async function fetchFainzyOrdersPage(nextUrl?: string): Promise<{ orders: FainzyOrder[]; next: string | null }> {
+  const params = nextUrl ? `?next_url=${encodeURIComponent(nextUrl)}` : "";
+  return unwrap<{ orders: FainzyOrder[]; next: string | null }>(
+    await fetch(`/api/v1/orders/list${params}`, withOrdersToken()),
+    "orders-list"
+  );
+}
+
 export async function updateFainzyOrderStatus(orderId: number, status: string): Promise<void> {
   await unwrap<{ ok: boolean }>(
     await fetch("/api/v1/orders/status", {
