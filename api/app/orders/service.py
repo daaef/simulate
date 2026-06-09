@@ -153,13 +153,13 @@ def login_store(store_id: str) -> dict[str, Any]:
     }
 
 
-def _get(params: dict[str, str], *, token: str) -> Any:
+def _get(params: dict[str, str], *, token: str, timeout: int = 15) -> Any:
     url = f"{_lastmile_base()}{_ORDERS_PATH}?" + urllib_parse.urlencode(params)
     req = urllib_request.Request(
         url,
         headers={**_JSON_HEADERS, "Fainzy-Token": token},
     )
-    with urllib_request.urlopen(req, timeout=15) as resp:
+    with urllib_request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
 
 
@@ -225,7 +225,7 @@ def list_orders_page(*, token: str, next_url: str | None = None) -> dict[str, An
         params = dict(urllib_parse.parse_qsl(parsed.query))
     else:
         params = {"filter_params": "all"}
-    payload = _get(params, token=token)
+    payload = _get(params, token=token, timeout=45)
     data = payload.get("data", [])
     orders = data if isinstance(data, list) else []
     return {"orders": orders, "next": payload.get("next") or None}
@@ -233,3 +233,152 @@ def list_orders_page(*, token: str, next_url: str | None = None) -> dict[str, An
 
 def update_status(order_id: int, status: str, *, token: str) -> Any:
     return _patch({"order_id": str(order_id)}, {"status": status}, token=token)
+
+
+def fetch_all_orders(*, token: str, subentity_id: int | None = None) -> list[dict[str, Any]]:
+    all_orders: list[dict[str, Any]] = []
+    next_url: str | None = None
+    while True:
+        result = list_orders_page(token=token, next_url=next_url)
+        all_orders.extend(result.get("orders") or [])
+        next_url = result.get("next")
+        if not next_url:
+            break
+    if subentity_id is not None:
+        sid = str(subentity_id)
+        all_orders = [
+            o for o in all_orders
+            if str(
+                o.get("subentity_id") or
+                o.get("subentity") or
+                (o.get("restaurant") or {}).get("id") or ""
+            ).strip() == sid
+        ]
+    return all_orders
+
+
+def _order_amount(order: dict[str, Any]) -> float:
+    for key in ("total_price", "amount", "grand_total", "total", "price"):
+        val = order.get(key)
+        try:
+            f = float(val)  # type: ignore[arg-type]
+            if f == f:  # not NaN
+                return f
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+def _order_subentity_id(order: dict[str, Any]) -> str:
+    return str(
+        order.get("subentity_id") or
+        order.get("subentity") or
+        (order.get("restaurant") or {}).get("id") or ""
+    ).strip()
+
+
+def _order_status(order: dict[str, Any]) -> str:
+    return str(order.get("status") or order.get("order_status") or "unknown").strip().lower()
+
+
+def _customer_key(order: dict[str, Any]) -> str:
+    user = order.get("user") or {}
+    return str(
+        user.get("id") or
+        order.get("customer_id") or
+        user.get("email") or
+        order.get("customer_name") or
+        order.get("user_fullname") or
+        user.get("full_name") or ""
+    ).strip()
+
+
+def _customer_name(order: dict[str, Any]) -> str:
+    user = order.get("user") or {}
+    parts = [user.get("first_name"), user.get("last_name")]
+    return str(
+        order.get("customer_name") or
+        order.get("user_fullname") or
+        user.get("full_name") or
+        " ".join(p for p in parts if p) or
+        user.get("name") or ""
+    ).strip()
+
+
+def compute_store_stats(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
+    for order in orders:
+        sid = _order_subentity_id(order)
+        if not sid:
+            continue
+        if sid not in buckets:
+            restaurant = order.get("restaurant") or {}
+            subentity_meta = order.get("subentity_metadata") or {}
+            store_name = (
+                restaurant.get("name") or
+                subentity_meta.get("name") or
+                order.get("store_name") or
+                sid
+            )
+            buckets[sid] = {
+                "subentity_id": sid,
+                "store_name": store_name,
+                "order_count": 0,
+                "revenue": 0.0,
+                "status_breakdown": {
+                    "completed": 0,
+                    "pending": 0,
+                    "missed": 0,
+                    "cancelled": 0,
+                    "rejected": 0,
+                    "other": 0,
+                },
+            }
+        b = buckets[sid]
+        b["order_count"] += 1
+        b["revenue"] += _order_amount(order)
+        status = _order_status(order)
+        breakdown = b["status_breakdown"]
+        if status in breakdown:
+            breakdown[status] += 1
+        else:
+            breakdown["other"] += 1
+
+    result = []
+    for b in buckets.values():
+        count = b["order_count"]
+        b["avg_order_value"] = b["revenue"] / count if count else 0.0
+        result.append(b)
+
+    return sorted(result, key=lambda x: x["order_count"], reverse=True)
+
+
+def compute_customer_stats(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
+    for order in orders:
+        key = _customer_key(order)
+        if not key:
+            continue
+        name = _customer_name(order)
+        if not name:
+            continue
+        if key not in buckets:
+            buckets[key] = {
+                "name": name,
+                "order_count": 0,
+                "total_spend": 0.0,
+                "last_order_date": None,
+            }
+        b = buckets[key]
+        b["order_count"] += 1
+        b["total_spend"] += _order_amount(order)
+        raw_date = (
+            order.get("created") or
+            order.get("created_at") or
+            order.get("ordered_at") or
+            order.get("placed_at")
+        )
+        if raw_date and (b["last_order_date"] is None or raw_date > b["last_order_date"]):
+            b["last_order_date"] = raw_date
+
+    return sorted(buckets.values(), key=lambda x: x["order_count"], reverse=True)

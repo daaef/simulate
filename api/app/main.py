@@ -55,6 +55,7 @@ from .integrations.models import IntegrationMappingUpsertRequest
 from .integrations.routes import router as integrations_router
 from .integrations.service import configure_runtime as configure_integrations_runtime
 from .orders.routes import router as orders_router
+from .subentities.routes import router as subentities_router
 from .runs.models import RunCreateRequest
 from .runs.routes import (
     router as runs_router,
@@ -6649,4 +6650,5 @@ app.include_router(simulation_plans_router)
 app.include_router(system_router)
 app.include_router(integrations_router)
 app.include_router(orders_router)
+app.include_router(subentities_router)
 app.include_router(overview_router)

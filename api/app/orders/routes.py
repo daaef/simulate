@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import socket
 from typing import Any, Optional
 from urllib import error as urllib_error
 
@@ -154,9 +155,73 @@ def list_orders_page(
         result = service.list_orders_page(token=token, next_url=next_url or None)
     except urllib_error.HTTPError as exc:
         raise _fainzy_error(exc) from exc
+    except (TimeoutError, socket.timeout, urllib_error.URLError) as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="The orders API took too long to respond. Try again in a moment.",
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return result
+
+
+@router.get("/api/v1/orders/store-stats")
+def get_store_stats(
+    subentity_id: Optional[int] = Query(default=None),
+    x_fainzy_token: Optional[str] = Header(default=None),
+    current_user: dict = Depends(require_permission("orders", "read")),
+) -> dict[str, Any]:
+    token = (x_fainzy_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="No Fainzy token — please sign in again.")
+    try:
+        orders = service.fetch_all_orders(token=token, subentity_id=subentity_id)
+    except urllib_error.HTTPError as exc:
+        raise _fainzy_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"data": service.compute_store_stats(orders)}
+
+
+@router.get("/api/v1/orders/customer-stats")
+def get_customer_stats(
+    subentity_id: Optional[int] = Query(default=None),
+    x_fainzy_token: Optional[str] = Header(default=None),
+    current_user: dict = Depends(require_permission("orders", "read")),
+) -> dict[str, Any]:
+    token = (x_fainzy_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="No Fainzy token — please sign in again.")
+    try:
+        orders = service.fetch_all_orders(token=token, subentity_id=subentity_id)
+    except urllib_error.HTTPError as exc:
+        raise _fainzy_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"data": service.compute_customer_stats(orders)}
+
+
+@router.get("/api/v1/orders/customers/search")
+def search_customers(
+    q: str = Query(default=""),
+    subentity_id: Optional[int] = Query(default=None),
+    x_fainzy_token: Optional[str] = Header(default=None),
+    current_user: dict = Depends(require_permission("orders", "read")),
+) -> dict[str, Any]:
+    token = (x_fainzy_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="No Fainzy token — please sign in again.")
+    try:
+        orders = service.fetch_all_orders(token=token, subentity_id=subentity_id)
+    except urllib_error.HTTPError as exc:
+        raise _fainzy_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    customers = service.compute_customer_stats(orders)
+    if q.strip():
+        term = q.strip().lower()
+        customers = [c for c in customers if term in c["name"].lower()]
+    return {"data": customers, "query": q}
 
 
 @router.patch("/api/v1/orders/status")

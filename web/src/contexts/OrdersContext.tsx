@@ -18,6 +18,7 @@ interface OrdersContextType {
   error: string | null;
   sessionError: string | null;
   reload: () => void;
+  softRefresh: () => Promise<void>;
   updateOrder: (id: number, patch: Partial<FainzyOrder>) => void;
 }
 
@@ -29,8 +30,16 @@ const OrdersContext = createContext<OrdersContextType>({
   error: null,
   sessionError: null,
   reload: () => {},
+  softRefresh: () => Promise.resolve(),
   updateOrder: () => {},
 });
+
+/** Merge a fresh page-1 result into the cached list.
+ *  Fresh records overwrite stale ones; new records are prepended; old records not on page 1 are kept. */
+function mergeOrders(existing: FainzyOrder[], fresh: FainzyOrder[]): FainzyOrder[] {
+  const freshIds = new Set(fresh.map((o) => o.id));
+  return [...fresh, ...existing.filter((o) => !freshIds.has(o.id))];
+}
 
 export function useOrders() {
   return useContext(OrdersContext);
@@ -107,6 +116,23 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     }
   }, [session, fetchOrders, doLogin]);
 
+  const softRefresh = useCallback(async (): Promise<void> => {
+    if (!session) { void doLogin(); return; }
+    abortRef.current = false;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const result = await fetchFainzyOrdersPage(undefined);
+      if (!abortRef.current) {
+        setOrders((prev) => mergeOrders(prev, result.orders));
+      }
+    } catch (err) {
+      if (!abortRef.current) setError(formatErr(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [session, doLogin]);
+
   const updateOrder = useCallback((id: number, patch: Partial<FainzyOrder>) => {
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
   }, []);
@@ -117,7 +143,7 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <OrdersContext.Provider value={{ session, orders, loading, loadingMore, error, sessionError, reload, updateOrder }}>
+    <OrdersContext.Provider value={{ session, orders, loading, loadingMore, error, sessionError, reload, softRefresh, updateOrder }}>
       {children}
     </OrdersContext.Provider>
   );

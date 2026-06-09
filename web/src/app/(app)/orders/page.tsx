@@ -16,8 +16,27 @@ import { useOrders } from "../../../contexts/OrdersContext";
 // ---------------------------------------------------------------------------
 
 type Tab = "summary" | "items" | "recent";
-type StatusFilter = "all" | "completed" | "pending" | "missed" | "cancelled" | "rejected";
+type RecentView = "orders" | "stores" | "customers";
+type StatusFilter = "all" | "active" | "completed" | "pending" | "missed" | "cancelled" | "rejected";
 type DateFilter = "today" | "yesterday" | "7d" | "30d" | "all";
+
+type StoreStats = {
+  restaurantId: number;
+  name: string;
+  branch: string;
+  orderCount: number;
+  revenue: number;
+  avgOrderValue: number;
+  statusBreakdown: Record<string, number>;
+};
+
+type CustomerStats = {
+  userId: number;
+  name: string;
+  orderCount: number;
+  totalSpend: number;
+  lastOrderDate: string;
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,8 +90,15 @@ function filterByDate(orders: FainzyOrder[], filter: DateFilter): FainzyOrder[] 
   });
 }
 
+const ACTIVE_STATUSES = new Set([
+  "payment_processing", "order_processing", "ready",
+  "enroute_pickup", "robot_arrived_for_pickup",
+  "enroute_delivery", "robot_arrived_for_delivery",
+]);
+
 function filterByStatus(orders: FainzyOrder[], filter: StatusFilter): FainzyOrder[] {
   if (filter === "all") return orders;
+  if (filter === "active") return orders.filter((o) => ACTIVE_STATUSES.has(o.status));
   return orders.filter((o) => o.status === filter);
 }
 
@@ -82,6 +108,206 @@ function filterBySearch(orders: FainzyOrder[], q: string): FainzyOrder[] {
   return orders.filter((o) =>
     o.order_id.toLowerCase().includes(lower) ||
     `${o.user.first_name} ${o.user.last_name}`.toLowerCase().includes(lower)
+  );
+}
+
+function computeStoreStats(orders: FainzyOrder[]): StoreStats[] {
+  const map = new Map<number, StoreStats>();
+  for (const order of orders) {
+    const id = order.restaurant.id;
+    if (!map.has(id)) {
+      map.set(id, { restaurantId: id, name: order.restaurant.name, branch: order.restaurant.branch, orderCount: 0, revenue: 0, avgOrderValue: 0, statusBreakdown: {} });
+    }
+    const s = map.get(id)!;
+    s.orderCount++;
+    s.revenue += order.is_free ? 0 : order.total_price;
+    s.statusBreakdown[order.status] = (s.statusBreakdown[order.status] ?? 0) + 1;
+  }
+  return [...map.values()]
+    .map((s) => ({ ...s, avgOrderValue: s.orderCount ? s.revenue / s.orderCount : 0 }))
+    .sort((a, b) => b.orderCount - a.orderCount);
+}
+
+function computeCustomerStats(orders: FainzyOrder[]): CustomerStats[] {
+  const map = new Map<number, CustomerStats>();
+  for (const order of orders) {
+    const id = order.user.id;
+    if (!map.has(id)) {
+      const name = `${order.user.first_name} ${order.user.last_name}`.trim() || order.user.email;
+      map.set(id, { userId: id, name, orderCount: 0, totalSpend: 0, lastOrderDate: "" });
+    }
+    const c = map.get(id)!;
+    c.orderCount++;
+    c.totalSpend += order.is_free ? 0 : order.total_price;
+    if (!c.lastOrderDate || order.created > c.lastOrderDate) c.lastOrderDate = order.created;
+  }
+  return [...map.values()].sort((a, b) => b.orderCount - a.orderCount);
+}
+
+// ---------------------------------------------------------------------------
+// Stores view
+// ---------------------------------------------------------------------------
+
+type StoresViewProps = { orders: FainzyOrder[]; loading: boolean };
+
+function StoresView({ orders, loading }: StoresViewProps): ReactNode {
+  const [search, setSearch] = useState("");
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  const stores = useMemo(() => computeStoreStats(orders), [orders]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return stores;
+    return stores.filter((s) => s.name.toLowerCase().includes(q) || s.branch.toLowerCase().includes(q));
+  }, [stores, search]);
+
+  if (loading) return <p style={{ color: "var(--text-secondary)", fontSize: "13px" }}>Loading orders…</p>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <input
+          type="text"
+          placeholder="Search stores…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: "160px" }}
+          aria-label="Search stores"
+        />
+        <span style={{ fontSize: "12px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+          {filtered.length} store{filtered.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <p style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
+          {stores.length === 0 ? "No orders loaded yet." : "No stores match your search."}
+        </p>
+      ) : (
+        <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+          {filtered.map((store, i) => {
+            const isExpanded = expanded === store.restaurantId;
+            const topStatuses = Object.entries(store.statusBreakdown)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 4);
+            return (
+              <div key={store.restaurantId} style={{ borderBottom: i < filtered.length - 1 ? "1px solid var(--border-primary)" : undefined }}>
+                <button
+                  onClick={() => setExpanded(isExpanded ? null : store.restaurantId)}
+                  aria-expanded={isExpanded}
+                  style={{ width: "100%", background: "none", border: "none", padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", textAlign: "left" }}
+                >
+                  <div>
+                    <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>{store.name}</span>
+                    <span style={{ fontSize: "12px", color: "var(--text-secondary)", marginLeft: "8px" }}>{store.branch}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
+                    <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>{store.orderCount} orders</span>
+                    <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>{isExpanded ? "▲" : "▼"}</span>
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div style={{ padding: "0 16px 14px", background: "var(--surface-secondary)", borderTop: "1px solid var(--border-primary)" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "10px", paddingTop: "12px" }}>
+                      {[
+                        { label: "Orders", value: String(store.orderCount) },
+                        { label: "Gross Sales", value: formatCurrency(store.revenue) },
+                        { label: "Avg Order", value: formatCurrency(store.avgOrderValue) },
+                      ].map(({ label, value }) => (
+                        <div key={label} style={{ background: "var(--surface-hover)", borderRadius: "6px", padding: "8px 10px" }}>
+                          <p style={{ margin: "0 0 2px", fontSize: "11px", color: "var(--text-secondary)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</p>
+                          <p style={{ margin: 0, fontSize: "15px", fontWeight: 600, color: "var(--text-primary)" }}>{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {topStatuses.length > 0 && (
+                      <div style={{ marginTop: "10px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                        {topStatuses.map(([status, count]) => (
+                          <span key={status} className={statusPillClass(status)} style={{ fontSize: "11px" }}>
+                            {statusLabel(status)}: {count}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Customers view
+// ---------------------------------------------------------------------------
+
+type CustomersViewProps = { orders: FainzyOrder[]; loading: boolean };
+
+function CustomersView({ orders, loading }: CustomersViewProps): ReactNode {
+  const [search, setSearch] = useState("");
+
+  const customers = useMemo(() => computeCustomerStats(orders), [orders]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter((c) => c.name.toLowerCase().includes(q));
+  }, [customers, search]);
+
+  if (loading) return <p style={{ color: "var(--text-secondary)", fontSize: "13px" }}>Loading orders…</p>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <input
+          type="text"
+          placeholder="Search customers…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: "160px" }}
+          aria-label="Search customers"
+        />
+        <span style={{ fontSize: "12px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+          {filtered.length} customer{filtered.length !== 1 ? "s" : ""} · ranked by orders
+        </span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <p style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
+          {customers.length === 0 ? "No orders loaded yet." : "No customers match your search."}
+        </p>
+      ) : (
+        <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border-primary)" }}>
+                  {["#", "Customer", "Orders", "Total Spend", "Last Order"].map((h) => (
+                    <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c, i) => (
+                  <tr key={c.userId} style={{ borderBottom: "1px solid var(--border-primary)" }}>
+                    <td style={{ padding: "10px 16px", color: "var(--text-secondary)", fontSize: "12px" }}>{i + 1}</td>
+                    <td style={{ padding: "10px 16px", fontWeight: 500, color: "var(--text-primary)" }}>{c.name}</td>
+                    <td style={{ padding: "10px 16px", color: "var(--status-info-text)", fontWeight: 600 }}>{c.orderCount}</td>
+                    <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>{formatCurrency(c.totalSpend)}</td>
+                    <td style={{ padding: "10px 16px", whiteSpace: "nowrap", color: "var(--text-secondary)" }}>
+                      {c.lastOrderDate ? formatDate(c.lastOrderDate) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -288,6 +514,7 @@ const DATE_OPTIONS: { label: string; value: DateFilter }[] = [
 
 const STATUS_TABS: { label: string; value: StatusFilter }[] = [
   { label: "All", value: "all" },
+  { label: "Active", value: "active" },
   { label: "Completed", value: "completed" },
   { label: "Missed", value: "missed" },
   { label: "Cancelled", value: "cancelled" },
@@ -315,8 +542,15 @@ function StatusChip({ label, count, tone }: { label: string; count: number; tone
   );
 }
 
+const RECENT_VIEWS: { label: string; value: RecentView }[] = [
+  { label: "Orders", value: "orders" },
+  { label: "Stores", value: "stores" },
+  { label: "Customers", value: "customers" },
+];
+
 function RecentOrdersTab({ onAuthError }: { onAuthError: () => void }) {
-  const { orders: allOrders, loading, loadingMore, error, reload, updateOrder } = useOrders();
+  const { orders: allOrders, loading, loadingMore, error, softRefresh, updateOrder } = useOrders();
+  const [recentView, setRecentView] = useState<RecentView>("orders");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [search, setSearch] = useState("");
@@ -331,8 +565,12 @@ function RecentOrdersTab({ onAuthError }: { onAuthError: () => void }) {
     const avgValue = total > 0 ? grossSales / total : 0;
     const exceptions = datePassed.filter((o) => ["missed", "cancelled", "rejected"].includes(o.status)).length;
     const exceptionRate = total > 0 ? Math.round((exceptions / total) * 100) : 0;
+    const storeCount = new Set(datePassed.map((o) => o.restaurant.id)).size;
+    const customerCount = new Set(datePassed.map((o) => o.user.id)).size;
+    const activeOrderCount = datePassed.filter((o) => ACTIVE_STATUSES.has(o.status)).length;
     return {
       total, grossSales, avgValue, exceptionRate, exceptions,
+      storeCount, customerCount, activeOrderCount,
       completed: datePassed.filter((o) => o.status === "completed").length,
       pending: datePassed.filter((o) => ["pending", "payment_processing", "order_processing", "ready", "enroute_pickup", "robot_arrived_for_pickup", "enroute_delivery", "robot_arrived_for_delivery"].includes(o.status)).length,
       missed: datePassed.filter((o) => o.status === "missed").length,
@@ -341,7 +579,6 @@ function RecentOrdersTab({ onAuthError }: { onAuthError: () => void }) {
     };
   }, [datePassed]);
 
-  // Keep selected order in sync when updateOrder is called
   const handleOrderUpdated = (id: number, newStatus: string) => {
     updateOrder(id, { status: newStatus });
     setSelected((prev) => prev?.id === id ? { ...prev, status: newStatus } : prev);
@@ -365,103 +602,135 @@ function RecentOrdersTab({ onAuthError }: { onAuthError: () => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
 
-      {/* Filters row */}
+      {/* View switcher + refresh */}
       <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
         <div className="tabs" role="tablist" style={{ margin: 0 }}>
-          {STATUS_TABS.map((t) => (
-            <button key={t.value} role="tab" aria-selected={statusFilter === t.value}
-              className={statusFilter !== t.value ? "secondary" : undefined}
-              onClick={() => setStatusFilter(t.value)}
+          {RECENT_VIEWS.map((v) => (
+            <button key={v.value} role="tab" aria-selected={recentView === v.value}
+              className={recentView !== v.value ? "secondary" : undefined}
+              onClick={() => setRecentView(v.value)}
               style={{ width: "auto" }}>
-              {t.label}
+              {v.label}
             </button>
           ))}
         </div>
-        <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value as DateFilter)} style={{ width: "auto", minWidth: "140px" }}>
-          {DATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <input
-          type="text"
-          placeholder="Search orders…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: "160px" }}
-        />
-        <button className="secondary" onClick={() => { reload(); setSelected(null); }} disabled={loading} style={{ width: "auto", fontSize: "12px", padding: "4px 10px", flexShrink: 0 }}>
-          {loading ? "Loading…" : "Refresh"}
+        <div style={{ flex: 1 }} />
+        <button className="secondary" onClick={() => { softRefresh(); setSelected(null); }} disabled={loading || loadingMore} style={{ width: "auto", fontSize: "12px", padding: "4px 10px", flexShrink: 0 }}>
+          {loading ? "Loading…" : loadingMore ? "Refreshing…" : "Refresh"}
         </button>
       </div>
 
-      {/* Metrics */}
-      {!loading && allOrders.length > 0 && (
+      {/* Stores view */}
+      {recentView === "stores" && <StoresView orders={allOrders} loading={loading} />}
+
+      {/* Customers view */}
+      {recentView === "customers" && <CustomersView orders={allOrders} loading={loading} />}
+
+      {/* Orders view */}
+      {recentView === "orders" && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "12px" }}>
-            <MetricCard label="Orders" value={String(metrics.total)} sub={loadingMore ? "Loading more…" : undefined} />
-            <MetricCard label="Gross Sales" value={formatCurrency(metrics.grossSales)} sub="Total value across visible orders" />
-            <MetricCard label="Avg Order Value" value={formatCurrency(metrics.avgValue)} sub="Per visible order" />
-            <MetricCard label="Exception Rate" value={`${metrics.exceptionRate}%`} sub={`${metrics.exceptions} orders need attention`} />
+          {/* Filters row */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <div className="tabs" role="tablist" style={{ margin: 0 }}>
+              {STATUS_TABS.map((t) => (
+                <button key={t.value} role="tab" aria-selected={statusFilter === t.value}
+                  className={statusFilter !== t.value ? "secondary" : undefined}
+                  onClick={() => setStatusFilter(t.value)}
+                  style={{ width: "auto" }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value as DateFilter)} style={{ width: "auto", minWidth: "140px" }}>
+              {DATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <input
+              type="text"
+              placeholder="Search orders…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ flex: 1, minWidth: "160px" }}
+            />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: "12px" }}>
-            <StatusChip label="Completed" count={metrics.completed} tone="success" />
-            <StatusChip label="Pending" count={metrics.pending} tone="info" />
-            <StatusChip label="Missed" count={metrics.missed} tone="danger" />
-            <StatusChip label="Cancelled" count={metrics.cancelled} tone="danger" />
-            <StatusChip label="Rejected" count={metrics.rejected} tone="danger" />
+
+          {/* Metrics */}
+          {!loading && allOrders.length > 0 && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: "12px" }}>
+                <MetricCard label="Orders" value={String(metrics.total)} sub={loadingMore ? "Loading more…" : undefined} />
+                <MetricCard label="Gross Sales" value={formatCurrency(metrics.grossSales)} sub="Total value across visible orders" />
+                <MetricCard label="Avg Order Value" value={formatCurrency(metrics.avgValue)} sub="Per visible order" />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 200px), 1fr))", gap: "12px" }}>
+                <MetricCard label="Exception Rate" value={`${metrics.exceptionRate}%`} sub={`${metrics.exceptions} orders need attention`} />
+                <MetricCard label="Stores" value={String(metrics.storeCount)} sub="Distinct stores in view" />
+                <MetricCard label="Customers" value={String(metrics.customerCount)} sub="Distinct customers in view" />
+                <MetricCard label="Active" value={String(metrics.activeOrderCount)} sub="Orders currently in progress" />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: "12px" }}>
+                <StatusChip label="Completed" count={metrics.completed} tone="success" />
+                <StatusChip label="Pending" count={metrics.pending} tone="info" />
+                <StatusChip label="Missed" count={metrics.missed} tone="danger" />
+                <StatusChip label="Cancelled" count={metrics.cancelled} tone="danger" />
+                <StatusChip label="Rejected" count={metrics.rejected} tone="danger" />
+              </div>
+            </>
+          )}
+
+          {/* Order Activity table */}
+          <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border-primary)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+              <div>
+                <p style={{ margin: "0 0 2px", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Order Activity</p>
+                <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>
+                  {loading ? "Loading orders…"
+                    : error ? "Failed to load orders."
+                    : filtered.length > 0 ? "Open any order to inspect detail and update its status."
+                    : "No orders match the current filters."}
+                </p>
+              </div>
+              {loadingMore && <span style={{ fontSize: "12px", color: "var(--text-secondary)", flexShrink: 0 }}>Loading more…</span>}
+            </div>
+
+            {error && <p style={{ margin: "12px 16px", color: "var(--status-danger-text)", fontSize: "13px" }}>{error}</p>}
+
+            {!loading && !error && filtered.length > 0 && (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border-primary)" }}>
+                      {["Order ID", "Status", "Store", "Customer", "Amount", "Date"].map((h) => (
+                        <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((order) => (
+                      <tr key={order.id}
+                        onClick={() => setSelected(order)}
+                        style={{ borderBottom: "1px solid var(--border-primary)", cursor: "pointer", transition: "background 0.1s" }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "var(--surface-hover)"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = ""; }}
+                      >
+                        <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>
+                          <span style={{ color: "var(--status-info-text)", fontWeight: 600 }}>{order.order_id}</span>
+                        </td>
+                        <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>
+                          <span className={statusPillClass(order.status)}>{statusLabel(order.status)}</span>
+                        </td>
+                        <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>{order.restaurant.name}</td>
+                        <td style={{ padding: "10px 16px" }}>{order.user.first_name} {order.user.last_name}</td>
+                        <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>{order.is_free ? "Free" : formatCurrency(order.total_price)}</td>
+                        <td style={{ padding: "10px 16px", whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{formatDate(order.created)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </>
       )}
-
-      {/* Order Activity table */}
-      <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border-primary)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
-          <div>
-            <p style={{ margin: "0 0 2px", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Order Activity</p>
-            <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>
-              {loading ? "Loading orders…"
-                : error ? "Failed to load orders."
-                : filtered.length > 0 ? "Open any order to inspect detail and update its status."
-                : "No orders match the current filters."}
-            </p>
-          </div>
-          {loadingMore && <span style={{ fontSize: "12px", color: "var(--text-secondary)", flexShrink: 0 }}>Loading more…</span>}
-        </div>
-
-        {error && <p style={{ margin: "12px 16px", color: "var(--status-danger-text)", fontSize: "13px" }}>{error}</p>}
-
-        {!loading && !error && filtered.length > 0 && (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--border-primary)" }}>
-                  {["Order ID", "Status", "Customer", "Amount", "Date"].map((h) => (
-                    <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((order) => (
-                  <tr key={order.id}
-                    onClick={() => setSelected(order)}
-                    style={{ borderBottom: "1px solid var(--border-primary)", cursor: "pointer", transition: "background 0.1s" }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "var(--surface-hover)"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = ""; }}
-                  >
-                    <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>
-                      <span style={{ color: "var(--status-info-text)", fontWeight: 600 }}>{order.order_id}</span>
-                    </td>
-                    <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>
-                      <span className={statusPillClass(order.status)}>{statusLabel(order.status)}</span>
-                    </td>
-                    <td style={{ padding: "10px 16px" }}>{order.user.first_name} {order.user.last_name}</td>
-                    <td style={{ padding: "10px 16px", whiteSpace: "nowrap" }}>{order.is_free ? "Free" : formatCurrency(order.total_price)}</td>
-                    <td style={{ padding: "10px 16px", whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{formatDate(order.created)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
