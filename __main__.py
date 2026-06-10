@@ -1003,6 +1003,18 @@ async def main() -> None:
     if run_error is not None:
         raise run_error
     if int(websocket_validation.get("blocking_failures", 0)) > 0:
+        error_issues = [i for i in recorder.issues if i.get("severity") == "error"]
+        if error_issues:
+            console.print(
+                f"\n[bold red]Run failed — {len(error_issues)} blocking error(s):[/]"
+            )
+            for issue in error_issues:
+                order_label = issue.get("order_db_id") or issue.get("order_ref") or "-"
+                scenario_label = issue.get("scenario") or "-"
+                console.print(
+                    f"  [red]✗[/] order={order_label} scenario={scenario_label} "
+                    f"[{issue.get('code')}] {issue.get('message')}"
+                )
         raise RuntimeError(
             "websocket_lifecycle_proof_failed: missing or late websocket evidence "
             "for one or more order lifecycle states."

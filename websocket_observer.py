@@ -676,6 +676,11 @@ def validate_websocket_events(
                         "order_ref": order_ref,
                     },
                 )
+                ref_label = f" ({order_ref})" if order_ref else ""
+                console.print(
+                    f"[bold red]lifecycle proof:[/] order {order_db_id}{ref_label} "
+                    f"status={required_status} — no websocket evidence [{code}]"
+                )
                 if strict:
                     blocking_failures += 1
 

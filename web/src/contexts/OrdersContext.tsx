@@ -10,6 +10,13 @@ import {
   type OrdersStoreSession,
 } from "../lib/api";
 
+const TOKEN_REFRESH_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+
+function isTokenRejected(err: unknown): boolean {
+  if (!(err instanceof ApiRequestError)) return false;
+  return err.status === 401 || err.status === 403;
+}
+
 interface OrdersContextType {
   session: OrdersStoreSession | null;
   orders: FainzyOrder[];
@@ -53,6 +60,9 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const abortRef = useRef<boolean>(false);
+  const reloginInProgressRef = useRef<boolean>(false);
+  // Stable ref so fetchOrders can call doLogin without circular useCallback deps.
+  const doLoginRef = useRef<() => Promise<void>>(async () => {});
 
   function formatErr(err: unknown): string {
     if (err instanceof ApiRequestError) return err.message;
@@ -60,7 +70,7 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     return "Something went wrong.";
   }
 
-  const fetchOrders = useCallback(async (sess: OrdersStoreSession) => {
+  const fetchOrders = useCallback(async (_sess: OrdersStoreSession) => {
     abortRef.current = false;
     setLoading(true);
     setError(null);
@@ -87,7 +97,19 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
         if (nextUrl) setLoadingMore(true);
       } while (nextUrl);
     } catch (err) {
-      if (!abortRef.current) setError(formatErr(err));
+      if (abortRef.current) return;
+      if (isTokenRejected(err) && !reloginInProgressRef.current) {
+        reloginInProgressRef.current = true;
+        try {
+          await doLoginRef.current();
+        } catch {
+          setError(formatErr(err));
+        } finally {
+          reloginInProgressRef.current = false;
+        }
+        return;
+      }
+      setError(formatErr(err));
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -106,6 +128,9 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
       setSessionError(formatErr(err));
     }
   }, [fetchOrders]);
+
+  // Keep ref in sync so fetchOrders can call doLogin without a dep cycle.
+  doLoginRef.current = doLogin;
 
   const reload = useCallback(() => {
     abortRef.current = true;
@@ -127,7 +152,22 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
         setOrders((prev) => mergeOrders(prev, result.orders));
       }
     } catch (err) {
-      if (!abortRef.current) setError(formatErr(err));
+      if (abortRef.current) return;
+      if (isTokenRejected(err) && !reloginInProgressRef.current) {
+        reloginInProgressRef.current = true;
+        try {
+          const fresh = await autoLoginForOrders();
+          setSession(fresh);
+          const retried = await fetchFainzyOrdersPage(undefined);
+          if (!abortRef.current) setOrders((prev) => mergeOrders(prev, retried.orders));
+        } catch {
+          setError(formatErr(err));
+        } finally {
+          reloginInProgressRef.current = false;
+        }
+        return;
+      }
+      setError(formatErr(err));
     } finally {
       setLoadingMore(false);
     }
@@ -137,9 +177,25 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
   }, []);
 
+  // Initial login on mount.
   useEffect(() => {
     void doLogin();
     return () => { abortRef.current = true; };
+  }, []);
+
+  // Proactively refresh the Fainzy token in the background so it never goes
+  // stale while the page is open.
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (reloginInProgressRef.current) return;
+      try {
+        const fresh = await autoLoginForOrders();
+        setSession(fresh);
+      } catch {
+        // Silent — the next API call will trigger an explicit relogin if needed.
+      }
+    }, TOKEN_REFRESH_INTERVAL_MS);
+    return () => clearInterval(id);
   }, []);
 
   return (

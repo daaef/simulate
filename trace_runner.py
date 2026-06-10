@@ -813,6 +813,13 @@ async def _wait_for_ws_gate(
             ),
             details={"sources": sorted(sources), "enforced": True},
         )
+        _sim_log(
+            scenario,
+            "websocket",
+            f"GATE FAILED order={order_db_id} ({order_ref}) "
+            f"expected={expected_status} step={step}: {_gate_failure_code(exc)}",
+            level="error",
+        )
         _finish_checked(
             recorder,
             scenario,
