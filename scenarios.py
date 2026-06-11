@@ -12,7 +12,6 @@ TRACE_SCENARIOS = (
     "completed",
     "rejected",
     "cancelled",
-    "auto_cancel",
     "backend_auto_cancel",
     "place_order",
     "new_user_setup",
@@ -37,7 +36,6 @@ TRACE_SUITES = {
         "returning_paid_no_coupon",
         "returning_paid_with_coupon",
         "returning_free_with_coupon",
-        "backend_auto_cancel",
     ),
     "menus": (
         "menu_available",

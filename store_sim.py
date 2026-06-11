@@ -140,6 +140,12 @@ async def _auth_request(
             track_order=track_order,
         )
     except RequestError as exc:
+        http_status = exc.result.response.status_code if exc.result else 0
+        latency = exc.result.latency_ms if exc.result else 0
+        console.print(
+            f"[bold red]{actor}:[/] {method.upper()} {endpoint}"
+            f"  →  {http_status or exc.reason_code}  ({latency} ms)  ✗"
+        )
         if exc.result is not None:
             raise HttpApiError(
                 url=url,
@@ -155,6 +161,10 @@ async def _auth_request(
             related_event_id=exc.event["id"] if exc.event else None,
             reason_code=exc.reason_code,
         ) from exc
+    console.print(
+        f"[dim]{actor}:[/] {method.upper()} {endpoint}"
+        f"  →  {result.response.status_code}  ({result.latency_ms} ms)"
+    )
     return result.payload
 
 
@@ -369,7 +379,7 @@ class _StoreOrderWatcher:
                     ping_interval=20,
                     ping_timeout=20,
                 ) as ws:
-                    console.print(f"[blue]store_ws:[/] connected /ws/soc/store_{self.store_id}/")
+                    console.print(f"[blue]store_ws:[/] connected   store_orders  →  {url}")
                     async for raw in ws:
                         self._dispatch(str(raw))
             except asyncio.CancelledError:
@@ -1123,7 +1133,7 @@ async def patch_status(
     action: str = "patch_status",
 ) -> bool:
     try:
-        await request_json(
+        result = await request_json(
             client,
             recorder=recorder,
             actor=actor,
@@ -1149,9 +1159,20 @@ async def patch_status(
             response_order_info=_order_identity,
             expect_websocket=True,
         )
-        console.print(f"[yellow]store_sim:[/] order={order_db_id} -> {status}")
+        console.print(
+            f"[dim]{actor}:[/] PATCH /v1/core/orders/"
+            f"  →  {result.response.status_code}  ({result.latency_ms} ms)"
+            f"  order={order_db_id}  status={status}"
+        )
         return True
     except RequestError as exc:
+        http_status = exc.result.response.status_code if exc.result else 0
+        latency = exc.result.latency_ms if exc.result else 0
+        console.print(
+            f"[bold red]{actor}:[/] PATCH /v1/core/orders/"
+            f"  →  {http_status or exc.reason_code}  ({latency} ms)  ✗"
+            f"  order={order_db_id}  failed to set status={status}"
+        )
         recorder.record_issue(
             severity="error",
             code="store_patch_http_error",

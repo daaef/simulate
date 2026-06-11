@@ -384,18 +384,14 @@ def apply_actor_selection(
         if isinstance(store, dict) and store.get("store_id")
     }
 
-    has_manual_user_phone = bool(str(USER_PHONE_NUMBER or "").strip()) and not SIM_PHONE_AUTO_SELECTED
-    has_manual_store_id = bool(str(store_id or STORE_ID or "").strip()) and not SIM_STORE_AUTO_SELECTED
-    explicit_user_phone = (
-        str(USER_PHONE_NUMBER or "").strip()
-        if SIM_PHONE_EXPLICIT or has_manual_user_phone
-        else ""
-    )
-    explicit_store_id = (
-        str(store_id or STORE_ID or "").strip()
-        if SIM_STORE_EXPLICIT or has_manual_store_id
-        else ""
-    )
+    # Explicit only when the corresponding CLI flag was passed (--phone / --store).
+    # When SIM_STORE_EXPLICIT/SIM_PHONE_EXPLICIT is True the globals were set from the
+    # CLI arg (not .env) so it is safe to read them here as the authoritative value.
+    # When False, ignore both the parameter and the globals — randomise from plan only.
+    has_manual_user_phone = SIM_PHONE_EXPLICIT
+    has_manual_store_id = SIM_STORE_EXPLICIT
+    explicit_user_phone = str(USER_PHONE_NUMBER or "").strip() if SIM_PHONE_EXPLICIT else ""
+    explicit_store_id = str(store_id or STORE_ID or "").strip() if SIM_STORE_EXPLICIT else ""
     if explicit_user_phone and allowed_phones and explicit_user_phone not in allowed_phones:
         raise RuntimeError(
             f"Configured phone {explicit_user_phone!r} is not present in selected plan users[]."

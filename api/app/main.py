@@ -14,7 +14,8 @@ import time
 import hashlib
 import hmac
 import uuid
-from collections import OrderedDict
+from collections import OrderedDict, deque
+import random
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -117,6 +118,58 @@ AUTO_REFRESH_SECONDS = max(5, int(os.getenv("RUN_AUTO_REFRESH_SECONDS", "30")))
 ALLOW_ORIGINS = os.getenv("WEB_CORS_ORIGINS", "*")
 
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Actor shuffle-without-replacement pools (plan-default store / phone)
+# Keyed by plan name (e.g. "sim_actors.json"). State lives for the API
+# server process lifetime — resets on restart, which is acceptable.
+# ---------------------------------------------------------------------------
+_store_pools: dict[str, deque[str]] = {}
+_phone_pools: dict[str, deque[str]] = {}
+_actor_pool_lock = threading.Lock()
+
+
+def _load_plan_actor_candidates(plan_name: str) -> tuple[list[str], list[str]]:
+    """Return (store_ids, phone_numbers) from the named plan JSON file."""
+    try:
+        if plan_name == "sim_actors.json":
+            path = Path(PROJECT_DIR) / "sim_actors.json"
+        else:
+            safe = re.sub(r"[^\w\-.]", "_", plan_name.removesuffix(".json"))[:64] or "plan"
+            path = Path(PROJECT_DIR) / "runs" / "gui-plans" / f"{safe}.json"
+        with path.open() as fh:
+            content = json.load(fh)
+        store_ids = [
+            str(s["store_id"])
+            for s in (content.get("stores") or [])
+            if isinstance(s, dict) and s.get("store_id")
+        ]
+        phones = [
+            str(u["phone"])
+            for u in (content.get("users") or [])
+            if isinstance(u, dict) and u.get("phone")
+        ]
+        return store_ids, phones
+    except Exception:
+        return [], []
+
+
+def _pick_from_actor_pool(
+    plan_name: str,
+    pool_dict: dict[str, deque[str]],
+    candidates: list[str],
+) -> str | None:
+    """Pop the next value from a shuffle-without-replacement pool.
+
+    Refills and reshuffles the pool when empty. Returns None when
+    candidates is empty (plan has no actors of that type).
+    """
+    if not candidates:
+        return None
+    key = plan_name
+    if key not in pool_dict or len(pool_dict[key]) == 0:
+        pool_dict[key] = deque(random.sample(candidates, len(candidates)))
+    return pool_dict[key].popleft()
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 SIMULATION_PLANS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2379,10 +2432,19 @@ def _build_command(request: RunCreateRequest) -> list[str]:
     for scenario in request.scenarios or []:
         if scenario:
             command.extend(["--scenario", scenario])
-    if request.store_id:
-        command.extend(["--store", request.store_id])
-    if request.phone:
-        command.extend(["--phone", request.phone])
+    resolved_store = request.store_id
+    resolved_phone = request.phone
+    if request.store_is_plan_default or request.phone_is_plan_default:
+        store_candidates, phone_candidates = _load_plan_actor_candidates(request.plan)
+        with _actor_pool_lock:
+            if request.store_is_plan_default:
+                resolved_store = _pick_from_actor_pool(request.plan, _store_pools, store_candidates)
+            if request.phone_is_plan_default:
+                resolved_phone = _pick_from_actor_pool(request.plan, _phone_pools, phone_candidates)
+    if resolved_store:
+        command.extend(["--store", resolved_store])
+    if resolved_phone:
+        command.extend(["--phone", resolved_phone])
     if request.all_users:
         command.append("--all-users")
     if request.strict_plan:

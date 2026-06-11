@@ -17,8 +17,10 @@ export function buildRunCommandPreview(form: RunCreateRequest): string {
   for (const scenario of form.scenarios || []) {
     if (scenario.trim()) parts.push("--scenario", scenario.trim());
   }
-  if (form.store_id && form.store_id.trim()) parts.push("--store", form.store_id.trim());
-  if (form.phone && form.phone.trim()) parts.push("--phone", form.phone.trim());
+  if (form.store_is_plan_default) parts.push("--plan-default-store");
+  else if (form.store_id && form.store_id.trim()) parts.push("--store", form.store_id.trim());
+  if (form.phone_is_plan_default) parts.push("--plan-default-phone");
+  else if (form.phone && form.phone.trim()) parts.push("--phone", form.phone.trim());
   if (form.all_users) parts.push("--all-users");
   if (form.strict_plan) parts.push("--strict-plan");
   if (form.skip_app_probes) parts.push("--skip-app-probes");

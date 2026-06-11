@@ -153,6 +153,20 @@ class WebsocketObserver:
         required = set(sources or REQUIRED_WEBSOCKET_SOURCES)
         return required.difference(self.connected_sources(required))
 
+    def last_seen_status(
+        self,
+        order_db_id: int,
+        sources: set[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the most recent order event for this order_db_id, optionally filtered by sources."""
+        for event in reversed(self._order_events):
+            if event.get("order_db_id") != int(order_db_id):
+                continue
+            if sources is not None and event.get("source") not in sources:
+                continue
+            return event
+        return None
+
     def _set_source_status(self, source: str, *, status: str, reason: str | None = None) -> None:
         if source not in self.coverage:
             return
@@ -362,6 +376,7 @@ class WebsocketObserver:
             try:
                 if self.coverage.get(source, {}).get("status") != "connected":
                     self._set_source_status(source, status="connecting")
+                    console.print(f"[dim]websocket:[/] connecting  {source}  →  {url}")
                 async with websockets.connect(
                     url,
                     subprotocols=subprotocols,
@@ -370,7 +385,7 @@ class WebsocketObserver:
                     ping_interval=20,
                     ping_timeout=20,
                 ) as websocket:
-                    console.print(f"[blue]websocket:[/] connected {source}")
+                    console.print(f"[blue]websocket:[/] connected   {source}  →  {url}")
                     self._set_source_status(source, status="connected")
                     self.recorder.record_event(
                         actor="websocket",

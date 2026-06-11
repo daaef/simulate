@@ -112,14 +112,19 @@ export function resolveLaunchActors(
   const users = planUsers(planContent);
   const stores = planStores(planContent);
 
-  const explicitStore = String(form.store_id ?? "").trim();
-  const explicitPhone = String(form.phone ?? "").trim();
+  const isStorePlanDefault = form.store_is_plan_default === true;
+  const isPhonePlanDefault = form.phone_is_plan_default === true;
+  const explicitStore = isStorePlanDefault ? "" : String(form.store_id ?? "").trim();
+  const explicitPhone = isPhonePlanDefault ? "" : String(form.phone ?? "").trim();
   const disableRandomStore = hasNoRandomStore(form.extra_args);
   const disableRandomPhone = hasNoRandomPhone(form.extra_args);
 
   let storeId = "";
   let storeSource: ActorSource = "plan_first_store";
-  if (explicitStore) {
+  if (isStorePlanDefault) {
+    storeId = "";
+    storeSource = "random_plan_pool";
+  } else if (explicitStore) {
     storeId = explicitStore;
     storeSource = "form";
   } else if (!disableRandomStore && stores.length > 0) {
@@ -139,7 +144,10 @@ export function resolveLaunchActors(
 
   let phone = "";
   let phoneSource: ActorSource = "plan_first_user";
-  if (explicitPhone) {
+  if (isPhonePlanDefault) {
+    phone = "";
+    phoneSource = "random_plan_pool";
+  } else if (explicitPhone) {
     phone = explicitPhone;
     phoneSource = "form";
   } else if (!disableRandomPhone && users.length > 0) {

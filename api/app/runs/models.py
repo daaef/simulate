@@ -14,6 +14,8 @@ class RunCreateRequest(BaseModel):
     scenarios: List[str] = Field(default_factory=list)
     store_id: Optional[str] = None
     phone: Optional[str] = None
+    store_is_plan_default: Optional[bool] = None
+    phone_is_plan_default: Optional[bool] = None
     all_users: bool = False
     strict_plan: bool = False
     skip_app_probes: bool = False

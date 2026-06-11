@@ -204,6 +204,12 @@ async def _auth_request(
             track_order=track_order,
         )
     except RequestError as exc:
+        http_status = exc.result.response.status_code if exc.result else 0
+        latency = exc.result.latency_ms if exc.result else 0
+        console.print(
+            f"[bold red]{actor}:[/] {method.upper()} {endpoint}"
+            f"  →  {http_status or exc.reason_code}  ({latency} ms)  ✗"
+        )
         if exc.result is not None:
             raise HttpApiError(
                 url=url,
@@ -219,6 +225,10 @@ async def _auth_request(
             related_event_id=exc.event["id"] if exc.event else None,
             reason_code=exc.reason_code,
         ) from exc
+    console.print(
+        f"[dim]{actor}:[/] {method.upper()} {endpoint}"
+        f"  →  {result.response.status_code}  ({result.latency_ms} ms)"
+    )
     return result.payload
 
 
@@ -1333,7 +1343,7 @@ class _UserOrderWatcher:
                     ping_interval=20,
                     ping_timeout=20,
                 ) as ws:
-                    console.print(f"[blue]user_ws:[/] connected /ws/soc/{self.user_id}/")
+                    console.print(f"[blue]user_ws:[/] connected   user_orders  →  {url}")
                     async for raw in ws:
                         self._dispatch(str(raw))
             except asyncio.CancelledError:
@@ -1509,6 +1519,12 @@ async def place_order_with_payload(
         response_text = ""
         if exc.result is not None:
             response_text = exc.result.response.text[:1000]
+        http_status = exc.result.response.status_code if exc.result else 0
+        latency = exc.result.latency_ms if exc.result else 0
+        console.print(
+            f"[bold red]user[{worker_id}]:[/] POST /v1/core/orders/"
+            f"  →  {http_status or exc.reason_code}  ({latency} ms)  ✗  {order_ref}"
+        )
         console.print(f"[red]user[{worker_id}]:[/] Error placing order: {exc}")
         recorder.record_issue(
             severity="error",
@@ -1541,6 +1557,11 @@ async def place_order_with_payload(
         )
         return None
 
+    console.print(
+        f"[dim]user[{worker_id}]:[/] POST /v1/core/orders/"
+        f"  →  {result.response.status_code}  ({result.latency_ms} ms)"
+        f"  db_id={order_db_id}  ref={returned_ref}"
+    )
     console.print(
         f"[green]user[{worker_id}]:[/] Order placed — db_id={order_db_id}  ref={returned_ref}"
     )

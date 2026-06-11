@@ -70,7 +70,6 @@ FIXTURE_REQUIRED_SCENARIOS = {
     "completed",
     "rejected",
     "cancelled",
-    "auto_cancel",
     "backend_auto_cancel",
     "place_order",
     "new_user_setup",
@@ -761,6 +760,19 @@ async def _wait_for_ws_gate(
     phase: str,
     timeout_seconds: float | None = None,
 ) -> bool:
+    effective_timeout = float(
+        timeout_seconds if timeout_seconds is not None
+        else config.SIM_WEBSOCKET_EVENT_TIMEOUT_SECONDS
+    )
+    _sim_log(
+        scenario,
+        "websocket",
+        f"waiting for status=[bold]{expected_status}[/bold]"
+        f"  channels={sorted(sources)}"
+        f"  timeout={effective_timeout:.0f}s"
+        f"  order={order_db_id} ({order_ref}) …",
+    )
+    t_start = time.monotonic()
     try:
         event = await observer.wait_for_order_status(
             order_db_id=order_db_id,
@@ -770,10 +782,21 @@ async def _wait_for_ws_gate(
             timeout_seconds=timeout_seconds,
         )
     except RuntimeError as exc:
+        elapsed = time.monotonic() - t_start
+        failure_code = _gate_failure_code(exc)
+        last_seen = observer.last_seen_status(order_db_id, sources=sources)
+        if last_seen:
+            last_seen_str = (
+                f"{last_seen['status']} (via {last_seen['source']})"
+                f"  — expected {expected_status}"
+            )
+        else:
+            last_seen_str = "no events received for this order on these channels"
+
         if not config.SIM_ENFORCE_WEBSOCKET_GATES:
             recorder.record_issue(
                 severity="warning",
-                code=_gate_failure_code(exc),
+                code=failure_code,
                 actor="websocket",
                 scenario=scenario,
                 step=step,
@@ -799,10 +822,17 @@ async def _wait_for_ws_gate(
                     "enforced": False,
                 },
             )
+            _sim_log(
+                scenario,
+                "websocket",
+                f"gate bypassed  status={expected_status}  order={order_db_id} ({order_ref})"
+                f"  last seen: {last_seen_str}",
+                level="warn",
+            )
             return True
         recorder.record_issue(
             severity="error",
-            code=_gate_failure_code(exc),
+            code=failure_code,
             actor="websocket",
             scenario=scenario,
             step=step,
@@ -813,23 +843,22 @@ async def _wait_for_ws_gate(
             ),
             details={"sources": sorted(sources), "enforced": True},
         )
-        _sim_log(
-            scenario,
-            "websocket",
-            f"GATE FAILED order={order_db_id} ({order_ref}) "
-            f"expected={expected_status} step={step}: {_gate_failure_code(exc)}",
-            level="error",
-        )
+        _sim_log(scenario, "websocket", f"✗ GATE FAILED  status={expected_status}  order={order_db_id} ({order_ref})", level="error")
+        _sim_log(scenario, "websocket", f"  step     : {step}", level="error")
+        _sim_log(scenario, "websocket", f"  channels : {', '.join(sorted(sources))}", level="error")
+        _sim_log(scenario, "websocket", f"  waited   : {elapsed:.1f}s  ({failure_code})", level="error")
+        _sim_log(scenario, "websocket", f"  last seen: {last_seen_str}", level="error")
         _finish_checked(
             recorder,
             scenario,
-            actual_final_status=_gate_failure_code(exc),
+            actual_final_status=failure_code,
             order_db_id=order_db_id,
             order_ref=order_ref,
             note=f"Websocket gate failed at step={step}",
         )
         return False
 
+    elapsed = time.monotonic() - t_start
     recorder.record_event(
         actor="websocket",
         action=(
@@ -847,6 +876,14 @@ async def _wait_for_ws_gate(
             "source": event.get("source"),
             "sources": sorted(sources),
         },
+    )
+    _sim_log(
+        scenario,
+        "websocket",
+        f"✓ status=[bold]{expected_status}[/bold]"
+        f"  confirmed via [bold]{event.get('source')}[/bold]"
+        f"  ({elapsed:.1f}s)  order={order_db_id} ({order_ref})",
+        level="success",
     )
     return True
 
@@ -2083,33 +2120,6 @@ async def _run_backend_auto_cancel_observe_countdown(
     return "timeout", status or eligible
 
 
-async def _run_awaiting_payment_auto_cancel_countdown(
-    client: httpx.AsyncClient,
-    *,
-    user_session: user_sim.UserSession,
-    order_db_id: int,
-    order_ref: str,
-    recorder: RunRecorder,
-    scenario: str,
-    total_seconds: float,
-    tick_interval: float | None = None,
-    eligible_status: str = "payment_processing",
-) -> tuple[BackendAutoCancelObserveOutcome, str]:
-    return await _run_backend_auto_cancel_observe_countdown(
-        client,
-        user_session=user_session,
-        order_db_id=order_db_id,
-        order_ref=order_ref,
-        recorder=recorder,
-        scenario=scenario,
-        total_seconds=total_seconds,
-        event_prefix="awaiting_payment_auto_cancel",
-        phase_label="awaiting-payment",
-        tick_interval=tick_interval,
-        eligible_status=eligible_status,
-    )
-
-
 async def _finish_backend_auto_cancel_observe(
     recorder: RunRecorder,
     *,
@@ -2294,184 +2304,6 @@ async def _run_backend_auto_cancel(
         success_note="Backend auto-cancelled the untouched pending order.",
         terminal_early_note=(
             "Order left pending before backend/customer cancelled (status={terminal_status})."
-        ),
-    )
-
-
-async def _run_auto_cancel(
-    client: httpx.AsyncClient,
-    *,
-    user_session: user_sim.UserSession,
-    store_session: store_sim.StoreSession,
-    fixtures: user_sim.UserFixtures,
-    recorder: RunRecorder,
-    timing: TimingProfile,
-    observer: WebsocketObserver,
-) -> None:
-    scenario = "auto_cancel"
-    cancel_seconds = timing.auto_cancel_wait_seconds
-    recorder.start_scenario(
-        scenario,
-        expected_final_status="cancelled",
-        note=(
-            "Store accepts into payment processing, customer payment is withheld, "
-            f"a visible countdown runs for {cancel_seconds:.0f}s while awaiting payment, "
-            "then the simulator observes whether backend or customer moves the order to "
-            "cancelled (store does not PATCH cancelled)."
-        ),
-    )
-    _sim_log(scenario, "user", "placing order (payment will be withheld — watching for auto-cancel) …")
-    order = await user_sim.place_order(
-        client,
-        user_token=user_session.token,
-        token_source=user_session.token_source,
-        worker_id=1,
-        fixtures=fixtures,
-        recorder=recorder,
-        scenario=scenario,
-        step="place_order",
-    )
-    if order is None:
-        _sim_log(scenario, "user", "order placement failed — could not create order", level="error")
-        recorder.finish_scenario(
-            scenario,
-            verdict="unsupported",
-            actual_final_status="placement_failed",
-            note="Order could not be created.",
-        )
-        return
-
-    _sim_log(scenario, "user", f"order {order['order_ref']} created ✓ — withholding payment, watching for auto-cancel …", level="success")
-    if not await _wait_for_ws_gate(
-        observer,
-        recorder=recorder,
-        scenario=scenario,
-        step="wait_pending_before_store_accept",
-        order_db_id=order["order_db_id"],
-        order_ref=order["order_ref"],
-        expected_status="pending",
-        sources={"store_orders"},
-        phase="precondition",
-    ):
-        return
-
-    recorder.record_event(
-        actor="store",
-        action="pending_order_actions_available",
-        category="ui_gate",
-        scenario=scenario,
-        step="pending_order_actions",
-        order_db_id=order["order_db_id"],
-        order_ref=order["order_ref"],
-        observed_status="pending",
-        details={"allowed": ["accept", "reject"], "ready_allowed": False},
-    )
-
-    await traced_sleep(
-        timing.store_decision_delay.pick(),
-        recorder=recorder,
-        actor="store",
-        action="simulate_store_decision_delay",
-        scenario=scenario,
-        step="accept_order_delay",
-        order_db_id=order["order_db_id"],
-        order_ref=order["order_ref"],
-    )
-    accepted = await store_sim.patch_status(
-        client,
-        order_db_id=order["order_db_id"],
-        order_ref=order["order_ref"],
-        status="payment_processing",
-        store_token=store_session.last_mile_token,
-        token_source=store_session.token_source,
-        recorder=recorder,
-        scenario=scenario,
-        step="accept_order",
-    )
-    if not accepted:
-        _finish_checked(
-            recorder,
-            scenario,
-            actual_final_status="accept_failed",
-            order_db_id=order["order_db_id"],
-            order_ref=order["order_ref"],
-        )
-        return
-
-    if not await _wait_for_ws_gate(
-        observer,
-        recorder=recorder,
-        scenario=scenario,
-        step="wait_payment_processing_before_auto_cancel",
-        order_db_id=order["order_db_id"],
-        order_ref=order["order_ref"],
-        expected_status="payment_processing",
-        sources={"user_orders", "store_orders"},
-        phase="precondition",
-    ):
-        return
-
-    recorder.record_event(
-        actor="store",
-        action="ready_blocked_before_payment",
-        category="ui_gate",
-        scenario=scenario,
-        step="payment_processing_gate",
-        order_db_id=order["order_db_id"],
-        order_ref=order["order_ref"],
-        observed_status="payment_processing",
-        details={"ready_allowed": False},
-    )
-
-    recorder.record_event(
-        actor="user",
-        action="withhold_user_payment",
-        category="scenario",
-        scenario=scenario,
-        step="withhold_user_payment",
-        order_db_id=order["order_db_id"],
-        order_ref=order["order_ref"],
-        details={
-            "reason": (
-                "Customer payment withheld so the awaiting-payment countdown can run "
-                "while observing backend or customer cancellation."
-            ),
-            "awaiting_payment_observe_seconds": cancel_seconds,
-        },
-        track_order=False,
-    )
-
-    outcome, terminal_status = await _run_awaiting_payment_auto_cancel_countdown(
-        client,
-        user_session=user_session,
-        order_db_id=int(order["order_db_id"]),
-        order_ref=str(order["order_ref"]),
-        recorder=recorder,
-        scenario=scenario,
-        total_seconds=cancel_seconds,
-        eligible_status="payment_processing",
-    )
-
-    await _finish_backend_auto_cancel_observe(
-        recorder,
-        scenario=scenario,
-        order=order,
-        cancel_seconds=cancel_seconds,
-        outcome=outcome,
-        terminal_status=terminal_status,
-        observer=observer,
-        ws_step="wait_awaiting_payment_auto_cancel",
-        timeout_note=(
-            "Backend or customer did not cancel the unpaid awaiting-payment order "
-            "within the diagnostic window."
-        ),
-        success_note=(
-            "Backend or customer cancelled the order while awaiting payment "
-            "(store did not PATCH cancelled)."
-        ),
-        terminal_early_note=(
-            "Order left payment_processing before backend/customer cancelled "
-            "(status={terminal_status})."
         ),
     )
 
@@ -3168,7 +3000,6 @@ async def run(
         "completed",
         "rejected",
         "cancelled",
-        "auto_cancel",
         "backend_auto_cancel",
         "place_order",
         "returning_paid_no_coupon",
@@ -3308,16 +3139,6 @@ async def run(
                     )
                 elif name == "cancelled":
                     await _run_cancelled(
-                        client,
-                        user_session=user_session,
-                        store_session=store_session,
-                        fixtures=fixtures,
-                        recorder=recorder,
-                        timing=timing,
-                        observer=observer,
-                    )
-                elif name == "auto_cancel":
-                    await _run_auto_cancel(
                         client,
                         user_session=user_session,
                         store_session=store_session,

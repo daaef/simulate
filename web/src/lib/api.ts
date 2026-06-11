@@ -70,6 +70,8 @@ export type RunCreateRequest = {
   scenarios?: string[];
   store_id?: string;
   phone?: string;
+  store_is_plan_default?: boolean;
+  phone_is_plan_default?: boolean;
   all_users?: boolean;
   strict_plan?: boolean;
   skip_app_probes?: boolean;

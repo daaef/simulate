@@ -268,7 +268,7 @@ export default function RunLaunchPanel({
                 onFocus={() => onFocusField("store")}
                 onBlur={() => onFocusField(null)}
                 onTouch={() => touch("store")}
-                onChange={(store_id) => onFormChange((prev) => ({ ...prev, store_id }))}
+                onChange={(store_id, isPlanDefault) => onFormChange((prev) => ({ ...prev, store_id, store_is_plan_default: isPlanDefault }))}
               />
             </label>
             <div {...focus("phone")}>
@@ -280,7 +280,7 @@ export default function RunLaunchPanel({
                 onFocus={() => onFocusField("phone")}
                 onBlur={() => onFocusField(null)}
                 onTouch={() => touch("phone")}
-                onChange={(phone) => onFormChange((prev) => ({ ...prev, phone }))}
+                onChange={(phone, isPlanDefault) => onFormChange((prev) => ({ ...prev, phone, phone_is_plan_default: isPlanDefault }))}
               />
             </div>
             {isLoadMode ? (

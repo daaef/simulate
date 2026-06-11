@@ -23,7 +23,7 @@ interface LaunchActorSelectProps {
   fieldId: LaunchActorFieldId;
   planContent: SimulationPlanContent | null;
   value: string | undefined;
-  onChange: (value: string) => void;
+  onChange: (value: string, isPlanDefault: boolean) => void;
   onFocus?: () => void;
   onBlur?: () => void;
   onTouch?: () => void;
@@ -67,14 +67,14 @@ export default function LaunchActorSelect({
   function handleSelectChange(nextSelectValue: string) {
     onTouch?.();
     if (nextSelectValue === ACTOR_SELECT_DEFAULT) {
-      onChange("");
+      onChange("", true);
       return;
     }
     if (nextSelectValue === ACTOR_SELECT_OTHER) {
-      onChange(String(value ?? "").trim());
+      onChange(String(value ?? "").trim(), false);
       return;
     }
-    onChange(nextSelectValue);
+    onChange(nextSelectValue, false);
   }
 
   return (
@@ -115,7 +115,7 @@ export default function LaunchActorSelect({
           onBlur={onBlur}
           onChange={(event) => {
             onTouch?.();
-            onChange(event.target.value);
+            onChange(event.target.value, false);
           }}
         />
       ) : null}
