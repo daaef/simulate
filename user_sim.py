@@ -439,7 +439,7 @@ async def bootstrap_auth(
             endpoint="/v1/auth/otp/send/",
             scenario=scenario,
             step="auth_request_user_otp",
-            json_body={"phone_number": effective_phone},
+            json_body={"action": "simulator", "phone_number": effective_phone},
             response_transform=_otp_response,
         )
         otp = api_data(otp_payload)
