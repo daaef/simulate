@@ -536,6 +536,7 @@ export type SimulationPlan = {
   name: string;
   path: string;
   content: SimulationPlanContent;
+  is_default?: boolean;
 };
 
 export type SimulationPlanUpsertRequest = {

@@ -169,6 +169,8 @@ export default function ConfigPage() {
     [plans, selectedPlanId]
   );
 
+  const isDefaultPlan = selectedPlan?.is_default === true;
+
   const debouncedEditorValue = useDebouncedValue(editorValue, 300);
   const jsonValidation = useMemo(() => {
     try {
@@ -426,9 +428,19 @@ export default function ConfigPage() {
           </section>
 
           <section className="panel grid" style={{ gap: 12 }}>
+            {isDefaultPlan ? (
+              <div id="plan-readonly-notice" className="muted" style={{ fontSize: "12px" }}>
+                Default plan — read-only. Create a copy to customise.
+              </div>
+            ) : null}
             <label>
               Plan Name
-              <input value={planName} onChange={(event) => setPlanName(event.target.value)} />
+              <input
+                value={planName}
+                onChange={(event) => setPlanName(event.target.value)}
+                readOnly={isDefaultPlan}
+                aria-describedby={isDefaultPlan ? "plan-readonly-notice" : undefined}
+              />
             </label>
             {selectedPlan ? (
               <div style={{ color: "var(--text-secondary)" }}>
@@ -442,35 +454,43 @@ export default function ConfigPage() {
                 onChange={(event) => setEditorValue(event.target.value)}
                 rows={28}
                 spellCheck={false}
-                aria-invalid={!jsonValidation.valid}
+                readOnly={isDefaultPlan}
+                aria-invalid={!isDefaultPlan && !jsonValidation.valid}
+                aria-describedby={isDefaultPlan ? "plan-readonly-notice" : undefined}
                 style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
               />
             </label>
-            {!jsonValidation.valid ? (
+            {!isDefaultPlan && !jsonValidation.valid ? (
               <div className="json-editor-error" role="alert">
                 Invalid JSON: {jsonValidation.message}
               </div>
-            ) : (
+            ) : !isDefaultPlan ? (
               <div className="json-editor-valid">{jsonValidation.message}</div>
-            )}
+            ) : null}
             {error ? <ErrorBanner message={error} onRetry={() => void loadPlans()} /> : null}
             {message ? (
               <div style={{ border: "1px solid #86efac", color: "#166534", borderRadius: 6, padding: "10px 12px" }}>
                 {message}
               </div>
             ) : null}
-            <div className="grid two">
-              <button
-                type="button"
-                disabled={isSaving || !planName.trim() || !jsonValidation.valid}
-                onClick={() => void savePlan()}
-              >
-                {isSaving ? "Saving..." : selectedPlanId ? "Save Plan" : "Create Plan"}
+            {isDefaultPlan ? (
+              <button type="button" onClick={startNewPlan}>
+                Create from this plan
               </button>
-              <button type="button" className="secondary" disabled={isSaving || !selectedPlanId} onClick={() => void removePlan()}>
-                Delete Selected
-              </button>
-            </div>
+            ) : (
+              <div className="grid two">
+                <button
+                  type="button"
+                  disabled={isSaving || !planName.trim() || !jsonValidation.valid}
+                  onClick={() => void savePlan()}
+                >
+                  {isSaving ? "Saving..." : selectedPlanId ? "Save Plan" : "Create Plan"}
+                </button>
+                <button type="button" className="secondary" disabled={isSaving || !selectedPlanId} onClick={() => void removePlan()}>
+                  Delete Selected
+                </button>
+              </div>
+            )}
           </section>
       </div>
       ) : null}

@@ -5568,6 +5568,7 @@ def _default_sim_actors_plan_payload() -> dict[str, Any] | None:
         "name": name,
         "path": "sim_actors.json",
         "content": content,
+        "is_default": True,
     }
 
 
