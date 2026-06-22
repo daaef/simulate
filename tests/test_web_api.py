@@ -3341,3 +3341,228 @@ class CatalogSeedTests(unittest.TestCase):
             self.assertTrue(catalog_seed.catalog_seed_skip_requested())
         with mock.patch.dict(os.environ, {"SIM_SKIP_CATALOG_SEED": ""}, clear=False):
             self.assertFalse(catalog_seed.catalog_seed_skip_requested())
+
+
+class SocketMonitorCoreTests(unittest.TestCase):
+    def test_resolves_store_target_from_env_first(self) -> None:
+        from api.app.socket_monitor import SocketMonitorConfig, resolve_socket_target
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plan = pathlib.Path(tmpdir) / "sim_actors.json"
+            plan.write_text(json.dumps({"defaults": {"store_id": "FZY_FROM_PLAN"}}), encoding="utf-8")
+            config = SocketMonitorConfig(
+                enabled=True,
+                project_dir=pathlib.Path(tmpdir),
+                lastmile_base_url="https://lastmile.fainzy.tech",
+                store_id="FZY_FROM_ENV",
+                interval_seconds=60,
+                connect_timeout_seconds=5.0,
+                failure_threshold=2,
+                notification_dedupe_seconds=600,
+            )
+
+            target = resolve_socket_target(config)
+
+        self.assertEqual(target["store_id"], "FZY_FROM_ENV")
+        self.assertEqual(target["source"], "SIM_SOCKET_MONITOR_STORE_ID")
+        self.assertEqual(target["base_url"], "https://lastmile.fainzy.tech")
+
+    def test_resolves_store_target_from_plan_default(self) -> None:
+        from api.app.socket_monitor import SocketMonitorConfig, resolve_socket_target
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plan = pathlib.Path(tmpdir) / "sim_actors.json"
+            plan.write_text(json.dumps({"defaults": {"store_id": "FZY_FROM_PLAN"}}), encoding="utf-8")
+            config = SocketMonitorConfig(
+                enabled=True,
+                project_dir=pathlib.Path(tmpdir),
+                lastmile_base_url="https://lastmile.fainzy.tech/",
+                store_id="",
+                interval_seconds=60,
+                connect_timeout_seconds=5.0,
+                failure_threshold=2,
+                notification_dedupe_seconds=600,
+            )
+
+            target = resolve_socket_target(config)
+
+        self.assertEqual(target["store_id"], "FZY_FROM_PLAN")
+        self.assertEqual(target["source"], "sim_actors.json defaults.store_id")
+        self.assertEqual(target["base_url"], "https://lastmile.fainzy.tech")
+
+    def test_missing_store_target_returns_none(self) -> None:
+        from api.app.socket_monitor import SocketMonitorConfig, resolve_socket_target
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = SocketMonitorConfig(
+                enabled=True,
+                project_dir=pathlib.Path(tmpdir),
+                lastmile_base_url="https://lastmile.fainzy.tech",
+                store_id="",
+                interval_seconds=60,
+                connect_timeout_seconds=5.0,
+                failure_threshold=2,
+                notification_dedupe_seconds=600,
+            )
+
+            self.assertIsNone(resolve_socket_target(config))
+
+    def test_reduces_socket_rows_to_overall_status(self) -> None:
+        from api.app.socket_monitor import reduce_socket_status
+
+        self.assertEqual(reduce_socket_status([{"status": "up"}, {"status": "up"}]), "up")
+        self.assertEqual(reduce_socket_status([{"status": "up"}, {"status": "degraded"}]), "degraded")
+        self.assertEqual(reduce_socket_status([{"status": "down"}, {"status": "up"}]), "down")
+        self.assertEqual(reduce_socket_status([]), "unknown")
+
+    def test_snapshot_uses_failure_threshold(self) -> None:
+        from api.app.socket_monitor import SocketMonitorConfig, SocketMonitor
+
+        config = SocketMonitorConfig(
+            enabled=True,
+            project_dir=ROOT,
+            lastmile_base_url="https://lastmile.fainzy.tech",
+            store_id="FZY_TEST",
+            interval_seconds=60,
+            connect_timeout_seconds=5.0,
+            failure_threshold=2,
+            notification_dedupe_seconds=600,
+        )
+        sent: list[dict[str, object]] = []
+        monitor = SocketMonitor(
+            config=config,
+            send_failure_email=lambda snapshot: sent.append(snapshot) or {"sent": True},
+            load_notification_state=lambda: {},
+            save_notification_state=lambda payload: None,
+            now=lambda: "2026-06-18T12:00:00+00:00",
+            now_epoch=lambda: 1000.0,
+        )
+
+        first = monitor.build_snapshot_from_probe_results(
+            [
+                {"key": "store_orders", "label": "Orders", "ok": False, "latency_ms": None, "reason": "timeout"},
+                {"key": "store_stats", "label": "Stats", "ok": True, "latency_ms": 12, "reason": None},
+            ]
+        )
+        second = monitor.build_snapshot_from_probe_results(
+            [
+                {"key": "store_orders", "label": "Orders", "ok": False, "latency_ms": None, "reason": "timeout"},
+                {"key": "store_stats", "label": "Stats", "ok": True, "latency_ms": 12, "reason": None},
+            ]
+        )
+
+        self.assertEqual(first["status"], "degraded")
+        self.assertEqual(second["status"], "down")
+        self.assertEqual(second["required"][0]["failure_streak"], 2)
+        self.assertEqual(len(sent), 1)
+
+    def test_notification_dedupe_uses_persisted_signature_and_window(self) -> None:
+        from api.app.socket_monitor import SocketMonitorConfig, SocketMonitor
+
+        state: dict[str, object] = {}
+        sent: list[dict[str, object]] = []
+        epoch = {"value": 1000.0}
+        config = SocketMonitorConfig(
+            enabled=True,
+            project_dir=ROOT,
+            lastmile_base_url="https://lastmile.fainzy.tech",
+            store_id="FZY_TEST",
+            interval_seconds=60,
+            connect_timeout_seconds=5.0,
+            failure_threshold=1,
+            notification_dedupe_seconds=600,
+        )
+        monitor = SocketMonitor(
+            config=config,
+            send_failure_email=lambda snapshot: sent.append(snapshot) or {"sent": True},
+            load_notification_state=lambda: dict(state),
+            save_notification_state=lambda payload: state.update(payload),
+            now=lambda: "2026-06-18T12:00:00+00:00",
+            now_epoch=lambda: epoch["value"],
+        )
+        failed_probe = [
+            {"key": "store_orders", "label": "Orders", "ok": False, "latency_ms": None, "reason": "timeout"},
+            {"key": "store_stats", "label": "Stats", "ok": True, "latency_ms": 12, "reason": None},
+        ]
+
+        monitor.build_snapshot_from_probe_results(failed_probe)
+        monitor.build_snapshot_from_probe_results(failed_probe)
+        epoch["value"] = 1701.0
+        monitor.build_snapshot_from_probe_results(failed_probe)
+
+        self.assertEqual(len(sent), 2)
+
+
+class SocketMonitorApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_auth = _FakeCookieAuthManager()
+        self.auth_enabled_patch = mock.patch.object(web_api.auth_service, "AUTH_ENABLED", True)
+        self.auth_enabled_patch.start()
+        self.auth_manager_patch = mock.patch.object(web_api.auth_service, "get_auth_manager", return_value=self.fake_auth)
+        self.auth_manager_patch.start()
+        self.client = TestClient(web_api.app)
+        login = self.client.post("/api/v1/auth/login", json={"username": "alice", "password": "secret"})
+        assert login.status_code == 200
+
+    def tearDown(self) -> None:
+        self.client.close()
+        self.auth_manager_patch.stop()
+        self.auth_enabled_patch.stop()
+
+    def test_socket_status_endpoint_returns_cached_status_and_latest_evidence(self) -> None:
+        status_payload = {
+            "enabled": True,
+            "status": "up",
+            "checked_at": "2026-06-18T12:00:00+00:00",
+            "target": {"store_id": "FZY_1", "source": "SIM_SOCKET_MONITOR_STORE_ID", "base_url": "https://lastmile.fainzy.tech"},
+            "required": [{"key": "store_orders", "label": "Orders", "status": "up", "latency_ms": 10, "failure_streak": 0, "reason": None}],
+            "reason": None,
+        }
+        run = {"id": 44, "status": "succeeded"}
+        events = [
+            {"id": 1, "actor": "store", "action": "mark_ready", "expect_websocket": True, "websocket_match": {"matched": True}},
+            {"id": 2, "actor": "websocket", "category": "websocket", "details": {"source": "store_orders"}},
+        ]
+        with mock.patch.object(overview_service, "_socket_status_provider", return_value=status_payload):
+            with mock.patch.object(overview_service, "_load_latest_run", return_value=run):
+                with mock.patch.object(overview_service, "_load_events", return_value=(events, [], {})):
+                    response = self.client.get("/api/v1/overview/socket-status")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "up")
+        self.assertEqual(payload["latest_run_evidence"]["run_id"], 44)
+        self.assertEqual(payload["latest_run_evidence"]["matched"], 1)
+        self.assertEqual(payload["latest_run_evidence"]["missed"], 0)
+
+    def test_socket_down_adds_alert(self) -> None:
+        with mock.patch.object(
+            web_api,
+            "_socket_monitor_status_payload",
+            return_value={
+                "enabled": True,
+                "status": "down",
+                "checked_at": "2026-06-18T12:00:00+00:00",
+                "target": {"store_id": "FZY_1"},
+                "required": [{"key": "store_stats", "label": "Stats", "status": "down", "reason": "timeout"}],
+            },
+        ):
+            response = self.client.get("/api/v1/alerts")
+
+        self.assertEqual(response.status_code, 200)
+        alerts = response.json()["alerts"]
+        self.assertTrue(any(alert["id"] == "socket-monitor-down" and alert["domain"] == "sockets" for alert in alerts))
+
+    def test_email_settings_accept_socket_failure_trigger(self) -> None:
+        response = self.client.put(
+            "/api/v1/system/email",
+            json={
+                "email_enabled": True,
+                "email_from_email": "alerts@example.com",
+                "email_recipients": ["ops@example.com"],
+                "email_event_triggers": ["socket_failure"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["email_event_triggers"], ["socket_failure"])

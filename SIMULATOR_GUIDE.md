@@ -24,6 +24,34 @@ Docker note: this stack runs the Next.js web app with `next start` from the buil
 
 **`/healthz` is not last-mile green:** The JSON from `GET /healthz` reports the FastAPI process (`status`, `project_dir`, `simulator_workdir`, `db_path`). It does **not** exercise last-mile HTTP, menus, payment, or `wss://` gateways. Use **doctor** or **trace** for end-to-end proof.
 
+### Socket status service
+
+The web UI has a cached socket monitor for two required LastMile websocket channels:
+
+- `store_orders`: `/ws/soc/store_<store_id>/`
+- `store_stats`: `/ws/soc/store_statistics_<store_id>/`
+
+The AppNav badge reports the active monitor state:
+
+- **Sockets Up:** both required sockets connected on the last probe.
+- **Sockets Degraded:** at least one required socket failed below the failure threshold.
+- **Sockets Down:** at least one required socket failed at or above the failure threshold.
+- **Sockets Unknown:** monitor disabled, target missing, or first probe pending.
+
+The **Overview → Socket Service** panel also shows latest-run websocket evidence. That evidence is historical run context and is intentionally separate from the active connection probe, which proves websocket connection reachability only.
+
+The monitor probes from the API container, so `LASTMILE_BASE_URL` and the `SIM_SOCKET_MONITOR_*` vars must be present there (compose passes them through). It assumes a single API worker — production pins workers to 1; with more workers the badge status is per-worker (email dedupe stays correct via persisted `system_settings`). In production, set `SIM_SOCKET_MONITOR_STORE_ID` explicitly, since the `sim_actors.json` fallback depends on the image-baked file.
+
+Environment controls:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SIM_SOCKET_MONITOR_ENABLED` | `true` | Enable API-side socket probing. |
+| `SIM_SOCKET_MONITOR_STORE_ID` | empty | Explicit store id to probe; falls back to `sim_actors.json` `defaults.store_id`. |
+| `SIM_SOCKET_MONITOR_INTERVAL_SECONDS` | `60` | Probe interval; minimum 15 seconds. |
+| `SIM_SOCKET_MONITOR_CONNECT_TIMEOUT_SECONDS` | `5` | Per-socket connection timeout. |
+| `SIM_SOCKET_MONITOR_FAILURE_THRESHOLD` | `2` | Consecutive failures before status becomes Down and email can fire. |
+
 ### Which simulation flow should I use?
 
 1. **End-to-end platform health** → `doctor` + agreed plan (`sim_actors.json` or `runs/gui-plans/daily-doctor.json` or another standard GUI plan).
@@ -1123,7 +1151,7 @@ Config page `Email` tab includes an Email Notifications panel to manage persiste
 - `email_from_name`
 - `email_subject_prefix`
 - `email_recipients`
-- `email_event_triggers` (`run_failed`, `schedule_launch_failed`, `critical_alert`)
+- `email_event_triggers` (`run_failed`, `schedule_launch_failed`, `critical_alert`, `socket_failure`)
 
 Key endpoints:
 
@@ -1147,6 +1175,7 @@ Docker wiring:
 
 Behavior notes:
 - `critical_alert` maps to run-failure events in v1 (deduped).
+- `socket_failure` sends only when the socket monitor transitions to Down after the configured failure threshold. It can be disabled independently from run-failure emails and is deduped via persisted `system_settings` state.
 - Test-email endpoint has a cooldown and may return HTTP 429 if called repeatedly.
 - SMTP secrets are never returned in API payloads.
 - Failure emails include launch context first in this order: `Profile`, `Trigger`, `Project`, `Repository` (plus `Schedule` for schedule triggers).

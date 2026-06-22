@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from decision_reasons import is_informational_decision_reason
 from session_flow_labels import flow_label_for
@@ -976,3 +976,49 @@ def _build_overview_payload(
         "issues": findings_payload["critical"],
         "run_meta": run_meta,
     }
+
+
+_socket_status_provider: Callable[[], dict[str, Any]] | None = None
+
+
+def configure_socket_status_provider(provider: Callable[[], dict[str, Any]]) -> None:
+    global _socket_status_provider
+    _socket_status_provider = provider
+
+
+def _latest_run_websocket_evidence() -> dict[str, Any]:
+    run = _load_latest_run()
+    if run is None:
+        return {"status": "unknown", "run_id": None, "run_status": None, "matched": 0, "expected": 0, "missed": 0}
+    try:
+        events, _artifact_issues, _run_meta = _load_events(int(run["id"]))
+        summary = _websocket_summary(events)
+    except Exception:
+        return {"status": "unknown", "run_id": run.get("id"), "run_status": run.get("status"), "matched": 0, "expected": 0, "missed": 0}
+    missed = int(summary.get("missed") or 0)
+    expected = int(summary.get("expected") or 0)
+    matched = int(summary.get("matched") or 0)
+    status = "up" if expected > 0 and missed == 0 else "degraded" if missed > 0 else "unknown"
+    return {
+        "status": status,
+        "run_id": run.get("id"),
+        "run_status": run.get("status"),
+        "matched": matched,
+        "expected": expected,
+        "missed": missed,
+    }
+
+
+def socket_status() -> dict[str, Any]:
+    if _socket_status_provider is None:
+        payload = {
+            "enabled": False,
+            "status": "unknown",
+            "checked_at": None,
+            "target": None,
+            "required": [],
+            "reason": "provider_not_configured",
+        }
+    else:
+        payload = _socket_status_provider()
+    return {**payload, "latest_run_evidence": _latest_run_websocket_evidence()}

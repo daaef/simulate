@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { fetchDashboardSummary } from "../lib/api";
+import { fetchDashboardSummary, fetchSocketStatus, type SocketStatusResponse } from "../lib/api";
+import { socketBadgeClass, socketBadgeLabel, socketStatusTooltip } from "../lib/socket-status";
 
 const navItems = [
   { href: "/overview", label: "Overview" },
@@ -24,6 +25,7 @@ function isActivePath(pathname: string, href: string): boolean {
 export function AppNav() {
   const pathname = usePathname() || "/overview";
   const [activeRunCount, setActiveRunCount] = useState(0);
+  const [socketStatus, setSocketStatus] = useState<SocketStatusResponse | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +44,27 @@ export function AppNav() {
 
     refresh();
     const timer = window.setInterval(refresh, 10000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refresh = () => {
+      fetchSocketStatus()
+        .then((payload) => {
+          if (!cancelled) setSocketStatus(payload);
+        })
+        .catch(() => {
+          if (!cancelled) setSocketStatus(null);
+        });
+    };
+
+    refresh();
+    const timer = window.setInterval(refresh, 30000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -72,6 +95,14 @@ export function AppNav() {
           </Link>
         );
       })}
+      <Link
+        href="/overview#socket-service"
+        className={socketBadgeClass(socketStatus)}
+        title={socketStatusTooltip(socketStatus)}
+        aria-label={socketBadgeLabel(socketStatus)}
+      >
+        {socketBadgeLabel(socketStatus)}
+      </Link>
     </nav>
   );
 }

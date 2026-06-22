@@ -72,6 +72,14 @@ Run ownership/liveness is now persisted (`process_pid`, launcher instance, heart
 
 Scheduled launches now serialize identical active schedule/profile/command combinations. Overlap skips are recorded in schedule execution history with status `overlap_skipped`.
 
+## Socket status service (web UI)
+
+The authenticated web UI includes a lightweight socket status monitor for the store order and store stats websocket channels. The navigation bar shows a compact socket badge, and **Overview → Socket Service** shows per-socket status, last check time, target store, and latest-run websocket evidence.
+
+The active probe proves websocket connection reachability only. Doctor/trace runs remain the proof for end-to-end ordering lifecycle events.
+
+Optional email notifications can include the `socket_failure` trigger from **Config → Email**. Socket failure emails are sent only after repeated required-socket failures and are deduped via persisted `system_settings` state. The monitor assumes a single API worker (production pins workers to 1); with multiple workers the cached badge status is per-worker, though email dedupe remains correct.
+
 ## Orders page (web UI)
 
 The authenticated **Orders** page (`/orders`) is an isolated operator tool for live order lookup and status updates. It reads store choices from `sim_actors.json`, signs into the selected store through the simulator API using the existing Fainzy store-login contract, and keeps the LastMile product-auth `Fainzy-Token` in browser `localStorage` for later lookups. It does not require new environment variables.

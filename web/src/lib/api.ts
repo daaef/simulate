@@ -634,7 +634,39 @@ export type SystemTimezonesPolicy = {
   available_timezones: string[];
 };
 
-export type EmailEventTrigger = "run_failed" | "schedule_launch_failed" | "critical_alert";
+export type EmailEventTrigger = "run_failed" | "schedule_launch_failed" | "critical_alert" | "socket_failure";
+
+export type SocketMonitorStatus = "up" | "degraded" | "down" | "unknown" | string;
+
+export type SocketStatusRow = {
+  key: string;
+  label: string;
+  status: SocketMonitorStatus;
+  latency_ms?: number | null;
+  failure_streak?: number;
+  reason?: string | null;
+};
+
+export type SocketStatusResponse = {
+  enabled: boolean;
+  status: SocketMonitorStatus;
+  checked_at?: string | null;
+  target?: {
+    store_id?: string | null;
+    source?: string | null;
+    base_url?: string | null;
+  } | null;
+  required: SocketStatusRow[];
+  reason?: string | null;
+  latest_run_evidence?: {
+    status?: SocketMonitorStatus;
+    run_id?: number | null;
+    run_status?: string | null;
+    matched?: number;
+    expected?: number;
+    missed?: number;
+  } | null;
+};
 
 export type SystemEmailSettings = {
   email_enabled: boolean;
@@ -772,6 +804,13 @@ export async function fetchRunsCount(): Promise<number> {
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   return unwrap<DashboardSummary>(await fetch("/api/v1/dashboard/summary", withSession()), "dashboard-summary");
+}
+
+export async function fetchSocketStatus(): Promise<SocketStatusResponse> {
+  return unwrap<SocketStatusResponse>(
+    await fetch("/api/v1/overview/socket-status", withSession()),
+    "socket-status"
+  );
 }
 
 export async function fetchLatestRunOverview(): Promise<LatestRunOverview> {

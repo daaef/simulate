@@ -1,0 +1,58 @@
+opt<h2>Socket Status Placement</h2>
+<p class="subtitle">Pick the layout direction that feels right for an operator-facing health signal.</p>
+
+<div class="split">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Option A: Quiet nav badge + Overview panel</div>
+        <div class="mockup-body">
+          <div class="mock-nav">
+            Fainzy Simulator &nbsp; Overview &nbsp; Runs &nbsp; Orders &nbsp; Config
+            <span style="float:right;padding:2px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:12px">Sockets Up</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+            <div class="placeholder" style="height:82px">Latest Run Command Center</div>
+            <div class="placeholder" style="height:82px">Alerts</div>
+          </div>
+          <div class="placeholder" style="margin-top:12px;height:130px">
+            Socket Service<br>
+            store orders: up · store stats: up<br>
+            latest run evidence: matched 18/18
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Calm Status</h3>
+      <p>Best for avoiding visual noise. Nav shows the summary; Overview explains details and timestamps.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Option B: Persistent header module</div>
+        <div class="mockup-body">
+          <div class="mock-nav">
+            Fainzy Simulator &nbsp; Overview &nbsp; Runs &nbsp; Orders &nbsp; Config
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <span style="padding:8px 10px;border-radius:6px;background:#dcfce7;color:#166534;font-size:13px">Orders socket up</span>
+            <span style="padding:8px 10px;border-radius:6px;background:#fee2e2;color:#991b1b;font-size:13px">Stats socket down</span>
+            <span style="padding:8px 10px;border-radius:6px;background:#fef9c3;color:#854d0e;font-size:13px">Last checked 30s ago</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+            <div class="placeholder" style="height:82px">Latest Run Command Center</div>
+            <div class="placeholder" style="height:82px">Alerts</div>
+          </div>
+          <div class="placeholder" style="margin-top:12px;height:90px">Socket event detail</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. High Visibility</h3>
+      <p>Best when socket status is a constant operational concern. More visible, but it competes with navigation.</p>
+    </div>
+  </div>
+</div>

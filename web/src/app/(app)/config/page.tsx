@@ -134,6 +134,7 @@ const EMAIL_TRIGGER_OPTIONS: { value: EmailEventTrigger; label: string }[] = [
   { value: "run_failed", label: "Run failed" },
   { value: "schedule_launch_failed", label: "Schedule launch failed" },
   { value: "critical_alert", label: "Critical alert (mapped to run failed)" },
+  { value: "socket_failure", label: "Socket failure" },
 ];
 
 const DEFAULT_EMAIL_SETTINGS: SystemEmailSettings = {

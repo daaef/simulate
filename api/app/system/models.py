@@ -13,7 +13,7 @@ class TimezonePolicyUpdateRequest(BaseModel):
     allowed_timezones: Optional[List[str]] = Field(default=None)
 
 
-EmailEventTrigger = Literal["run_failed", "schedule_launch_failed", "critical_alert"]
+EmailEventTrigger = Literal["run_failed", "schedule_launch_failed", "critical_alert", "socket_failure"]
 
 
 class EmailSettingsPayload(BaseModel):

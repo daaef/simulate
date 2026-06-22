@@ -10,6 +10,7 @@ import { ErrorBanner } from "../../../components/ErrorBanner";
 import { LastUpdatedIndicator } from "../../../components/LastUpdatedIndicator";
 import { PageLoadingSkeleton } from "../../../components/PageLoadingSkeleton";
 import LatestRunCommandCenter from "../../../components/overview/LatestRunCommandCenter";
+import SocketServicePanel from "../../../components/overview/SocketServicePanel";
 import { formatDateTime } from "../../../lib/time-format";
 
 import {
@@ -22,6 +23,8 @@ import {
   fetchRuns,
   fetchScheduleSummary,
   fetchLatestRunOverview,
+  fetchSocketStatus,
+  type SocketStatusResponse,
   type LatestRunOverview,
   type AlertItem,
   type ArchiveSummary,
@@ -79,6 +82,7 @@ export default function OverviewPage() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [latestRunOverview, setLatestRunOverview] = useState<LatestRunOverview | null>(null);
+  const [socketStatus, setSocketStatus] = useState<SocketStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
 
@@ -93,6 +97,7 @@ export default function OverviewPage() {
         alertsPayload,
         runsPayload,
         latestRunPayload,
+        socketStatusPayload,
       ] = await Promise.all([
         fetchDashboardSummary(),
         fetchHealth(),
@@ -102,6 +107,7 @@ export default function OverviewPage() {
         fetchAlerts(),
         fetchRuns(50, 0),
         fetchLatestRunOverview(),
+        fetchSocketStatus(),
       ]);
       setSummary(summaryPayload);
       setHealth(healthPayload);
@@ -111,6 +117,7 @@ export default function OverviewPage() {
       setAlerts(alertsPayload);
       setRecentRuns(runsPayload.runs);
       setLatestRunOverview(latestRunPayload);
+      setSocketStatus(socketStatusPayload);
       setError(null);
       setLastUpdatedAt(new Date());
     } catch (caughtError) {
@@ -206,6 +213,8 @@ export default function OverviewPage() {
       {isLoading && !summary ? <PageLoadingSkeleton statCount={4} panelCount={2} /> : null}
 
       <LatestRunCommandCenter overview={latestRunOverview} />
+
+      <SocketServicePanel status={socketStatus} />
 
       <CollapsibleSection
         title="Which simulation should I run?"

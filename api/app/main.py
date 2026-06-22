@@ -73,6 +73,8 @@ from .runs.routes import (
     delete_run,
 )
 from .overview.routes import router as overview_router
+from .overview import service as overview_service
+from .socket_monitor import SocketMonitor, SocketMonitorConfig, unknown_snapshot
 from .runs.service import configure_runtime as configure_runs_runtime
 
 # Database configuration
@@ -235,7 +237,8 @@ TERMINAL_RUN_STATUSES = {"succeeded", "failed", "cancelled"}
 PLACE_ORDER_FLOW = "place-order"
 PLACE_ORDER_MAX_ORDERS = 10
 EMAIL_SETTINGS_KEY = "email_notifications"
-EMAIL_EVENT_TRIGGERS = {"run_failed", "schedule_launch_failed", "critical_alert"}
+EMAIL_EVENT_TRIGGERS = {"run_failed", "schedule_launch_failed", "critical_alert", "socket_failure"}
+SOCKET_MONITOR_NOTIFICATIONS_KEY = "socket_monitor_notifications"
 EMAIL_TEST_COOLDOWN_SECONDS = max(10, int(os.getenv("SIM_EMAIL_TEST_COOLDOWN_SECONDS", "30")))
 EMAIL_EVENT_DEDUPE_WINDOW_SECONDS = max(60, int(os.getenv("SIM_EMAIL_EVENT_DEDUPE_WINDOW_SECONDS", "600")))
 EMAIL_EVENT_LOCK = threading.Lock()
@@ -1153,6 +1156,57 @@ def _save_email_settings(settings_payload: dict[str, Any]) -> None:
             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
             """,
             (EMAIL_SETTINGS_KEY, payload, now),
+        )
+
+
+def _load_system_setting_json(key: str, default: dict[str, Any]) -> dict[str, Any]:
+    raw: dict[str, Any] | None = None
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT value FROM system_settings WHERE key = %s", (key,))
+                row = cursor.fetchone()
+                if row:
+                    raw = row[0] if isinstance(row[0], dict) else json.loads(row[0] or "{}")
+        finally:
+            conn.close()
+    else:
+        with DB_LOCK, _db() as conn:
+            row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (key,)).fetchone()
+            if row is not None:
+                raw = json.loads(row["value"] or "{}")
+    return raw if isinstance(raw, dict) else dict(default)
+
+
+def _save_system_setting_json(key: str, payload: dict[str, Any]) -> None:
+    value = json.dumps(payload)
+    now = _utc_now()
+    if USE_POSTGRES:
+        conn = _get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO system_settings (key, value, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (key)
+                    DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+                    """,
+                    (key, value),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return
+    with DB_LOCK, _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO system_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (key, value, now),
         )
 
 
@@ -6077,6 +6131,24 @@ def _alerts_payload() -> dict[str, Any]:
     alerts: list[dict[str, Any]] = []
     runs = _list_runs(limit=200)
     now = _utc_now()
+    socket_status = _socket_monitor_status_payload()
+    if socket_status.get("status") == "down":
+        failing = [
+            str(row.get("label") or row.get("key"))
+            for row in socket_status.get("required", [])
+            if row.get("status") == "down"
+        ]
+        alerts.append(
+            {
+                "id": "socket-monitor-down",
+                "domain": "sockets",
+                "severity": "critical",
+                "title": "Socket monitor down",
+                "message": f"Required sockets failing: {', '.join(failing) or 'unknown'}.",
+                "href": "/overview#socket-service",
+                "created_at": socket_status.get("checked_at") or now,
+            }
+        )
     for run in runs:
         status = str(run.get("status") or "").lower()
         if status == "failed":
@@ -6552,6 +6624,83 @@ _init_db()
 from .catalog_seed import ensure_catalog_seed
 
 ensure_catalog_seed()
+
+
+def _int_env(name: str, default: int, minimum: int) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def _float_env(name: str, default: float, minimum: float) -> float:
+    try:
+        return max(minimum, float(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def _socket_monitor_config() -> SocketMonitorConfig:
+    return SocketMonitorConfig(
+        enabled=_as_bool(os.getenv("SIM_SOCKET_MONITOR_ENABLED"), default=True),
+        project_dir=Path(PROJECT_DIR),
+        lastmile_base_url=os.getenv("LASTMILE_BASE_URL", "https://lastmile.fainzy.tech"),
+        store_id=os.getenv("SIM_SOCKET_MONITOR_STORE_ID", ""),
+        interval_seconds=_int_env("SIM_SOCKET_MONITOR_INTERVAL_SECONDS", 60, 15),
+        connect_timeout_seconds=_float_env("SIM_SOCKET_MONITOR_CONNECT_TIMEOUT_SECONDS", 5.0, 1.0),
+        failure_threshold=_int_env("SIM_SOCKET_MONITOR_FAILURE_THRESHOLD", 2, 1),
+        notification_dedupe_seconds=EMAIL_EVENT_DEDUPE_WINDOW_SECONDS,
+    )
+
+
+def _send_socket_failure_email(snapshot: dict[str, Any]) -> dict[str, Any]:
+    target = snapshot.get("target") or {}
+    failing = [
+        f"{row.get('label') or row.get('key')}: {row.get('reason') or row.get('status')}"
+        for row in snapshot.get("required", [])
+        if row.get("status") == "down"
+    ]
+    return _send_email_notification(
+        "socket_failure",
+        f"Socket failure: {target.get('store_id') or 'unknown store'}",
+        [
+            f"Store ID: {target.get('store_id') or 'unknown'}",
+            f"Target source: {target.get('source') or 'unknown'}",
+            f"Checked At: {snapshot.get('checked_at') or _utc_now()}",
+            f"Status: {snapshot.get('status')}",
+            "Failing sockets:",
+            *(f"- {item}" for item in failing),
+            "Status URL: /overview#socket-service",
+            *_email_observability_footer_lines(),
+        ],
+        dedupe_key=None,
+    )
+
+
+socket_monitor = SocketMonitor(
+    config=_socket_monitor_config(),
+    send_failure_email=_send_socket_failure_email,
+    load_notification_state=lambda: _load_system_setting_json(SOCKET_MONITOR_NOTIFICATIONS_KEY, {}),
+    save_notification_state=lambda payload: _save_system_setting_json(SOCKET_MONITOR_NOTIFICATIONS_KEY, payload),
+)
+
+
+def _socket_monitor_status_payload() -> dict[str, Any]:
+    try:
+        return socket_monitor.current_status()
+    except Exception:
+        return unknown_snapshot(enabled=False, reason="socket_monitor_unavailable")
+
+
+def _run_socket_monitor_job() -> None:
+    try:
+        socket_monitor.run_once_sync()
+    except Exception as exc:
+        LOGGER.warning("socket monitor job failed error=%s", exc)
+
+
+overview_service.configure_socket_status_provider(_socket_monitor_status_payload)
+
 scheduler = BackgroundScheduler(timezone="UTC")
 scheduler.add_job(
     _run_scheduled_jobs,
@@ -6565,6 +6714,13 @@ scheduler.add_job(
     trigger="interval",
     hours=1,
     id="retention-sweep",
+    replace_existing=True,
+)
+scheduler.add_job(
+    _run_socket_monitor_job,
+    trigger="interval",
+    seconds=socket_monitor.config.interval_seconds,
+    id="socket-monitor",
     replace_existing=True,
 )
 if _as_bool(os.getenv("SIM_GUI_ENABLE_DAILY_DOCTOR"), default=False):

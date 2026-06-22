@@ -17,6 +17,13 @@ def latest_run_overview(
     return service.latest_run_overview()
 
 
+@router.get("/api/v1/overview/socket-status")
+def socket_status(
+    current_user: dict = Depends(require_permission("dashboard", "read")),
+) -> dict[str, Any]:
+    return service.socket_status()
+
+
 @router.get("/api/v1/overview/runs/{run_id}")
 def run_overview(
     run_id: int = Path(..., ge=1),
