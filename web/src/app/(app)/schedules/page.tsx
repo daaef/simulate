@@ -205,6 +205,7 @@ export default function SchedulesPage() {
   const [editingScheduleName, setEditingScheduleName] = useState<string>("");
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const loadInFlightRef = useRef(false);
+  const showFormRef = useRef(false);
   const scheduleListRef = useRef<HTMLElement>(null);
   const [activeStatusFilter, setActiveStatusFilter] = useState<"all" | "active" | "paused" | "disabled">("all");
 
@@ -285,16 +286,21 @@ export default function SchedulesPage() {
       setSchedules(schedulePayload);
       setSummary(summaryPayload);
       setTimezonePolicy(timezonePayload);
-      if (!profileId && profilePayload[0]) setProfileId(String(profilePayload[0].id));
-      if (!stepProfileId && profilePayload[0]) setStepProfileId(String(profilePayload[0].id));
-      if (timezonePayload) {
-        const local = defaultScheduleTimezone();
-        const tzOptions =
-          timezonePayload.mode === "allowlist"
-            ? (timezonePayload.allowed_timezones ?? [])
-            : timezonePayload.available_timezones;
-        const next = tzOptions.includes(local) ? local : (tzOptions[0] ?? "UTC");
-        setTimezone(next);
+      // Seed form-input defaults only when the form is closed, so the 15s poll
+      // never clobbers values the user is actively editing. Read the ref (not
+      // `showForm`) because the interval's captured closure sees stale state.
+      if (!showFormRef.current) {
+        if (!profileId && profilePayload[0]) setProfileId(String(profilePayload[0].id));
+        if (!stepProfileId && profilePayload[0]) setStepProfileId(String(profilePayload[0].id));
+        if (timezonePayload) {
+          const local = defaultScheduleTimezone();
+          const tzOptions =
+            timezonePayload.mode === "allowlist"
+              ? (timezonePayload.allowed_timezones ?? [])
+              : timezonePayload.available_timezones;
+          const next = tzOptions.includes(local) ? local : (tzOptions[0] ?? "UTC");
+          setTimezone(next);
+        }
       }
       if (!options?.silent) {
         setError(null);
@@ -304,6 +310,10 @@ export default function SchedulesPage() {
       loadInFlightRef.current = false;
     }
   };
+
+  useEffect(() => {
+    showFormRef.current = showForm;
+  }, [showForm]);
 
   useEffect(() => {
     let active = true;
