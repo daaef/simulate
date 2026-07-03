@@ -9,6 +9,33 @@
 
 ## Tasks
 
+### Phase 41: Orders Numeric Reference Lookup Fix
+
+- [x] Record workstream and current hypothesis
+  - Dependency: User report with `/orders` lookup screenshot.
+  - Notes: Bare six-digit reference appears to hit DB-id lookup first and surface a gateway-style failure before reference fallback.
+  - Completion evidence: Tracker README, plan, tasks, and session log updated for Phase 41.
+
+- [x] Add regression tests for lookup routing and transport errors
+  - Dependency: Workstream recorded.
+  - Notes: Cover six-digit numeric reference-first lookup, short numeric DB-id-first lookup, reference miss fallback, and lookup transport error mapping.
+  - Completion evidence: `docker compose run --rm api python -m unittest tests.test_orders_api -v` fails before implementation on the three new Phase 41 cases.
+
+- [x] Implement backend lookup fix
+  - Dependency: Regression coverage.
+  - Notes: Route reference-like six-digit numeric input to `#<number>` first; map `URLError`/timeout during lookup to a clear API response.
+  - Completion evidence: `docker compose run --rm api python -m unittest tests.test_orders_api -v` passes with 13 tests.
+
+- [x] Update user-facing docs
+  - Dependency: Behavior stabilized.
+  - Notes: README and SIMULATOR_GUIDE should describe six-digit bare references as reference-first.
+  - Completion evidence: Docs mention reference-like numeric lookup behavior.
+
+- [x] Run verification and final tracker update
+  - Dependency: Implementation and docs.
+  - Notes: Run focused tests, compile changed Python files, and whitespace check.
+  - Completion evidence: Session log records passing focused tests, compile, whitespace check, and local Docker cleanup.
+
 ### Phase 40: Orders Update Status Tab Polish
 
 - [x] Add focused display helper coverage
@@ -104,7 +131,7 @@
 
 ## Next Immediate Task
 
-Phase 40 complete. Next immediate task: manually open `/orders`, look up a live order in both tabs, and visually confirm JSON pane plus direct `Update Status` flow.
+Phase 41 complete. Next immediate task: deploy the change and retry `/orders` lookup for live reference `954460`.
 
 ### Phase 36: Pending Order Trace Flow
 

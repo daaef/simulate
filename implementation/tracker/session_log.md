@@ -1,5 +1,95 @@
 # Session Log
 
+## 2026-07-03 11:04
+
+### Summary
+
+Started Phase 41 after the live `/orders` page showed `Gateway failed to reach the backend API.` for a bare reference lookup value `954460`. Initial code inspection found the frontend maps generic gateway `502` responses to that exact message, while the orders backend currently treats digit-only input as a database order id before trying `#<number>`.
+
+### Working Hypothesis
+
+The value `954460` is a six-digit order reference, but the API first calls LastMile with `order_id=954460`. If that DB-id path returns a proxy/gateway failure or other non-404 error, fallback to `reference_code=#954460` never happens.
+
+### Planned Files
+
+- `api/app/orders/service.py`
+- `api/app/orders/routes.py`
+- `tests/test_orders_api.py`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/implementation_plan.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Tests / Commands Run
+
+```bash
+sed -n '...' README.md SIMULATOR_GUIDE.md ARCHITECTURE.md
+sed -n '...' implementation/tracker/*.md
+rg -n 'Gateway failed to reach|orders/lookup|store-login|fetch' web api infra .github docker-compose.yml
+docker compose ps
+docker compose logs --tail 120 api
+docker compose logs --tail 120 nginx
+date '+%Y-%m-%d %H:%M %Z'
+```
+
+### Results
+
+- Required repo docs and tracker were read.
+- User-level engineering protocol path `/home/jude/.config/coding-agents/ENGINEERING_PROTOCOL.md` was missing.
+- Local Docker stack is not running, so no local API/nginx logs were available.
+- Existing code confirms `fetch_by_query()` tries numeric DB-id lookup before numeric-reference fallback.
+
+### Issues / Blockers
+
+- Live production logs are not available from this local workspace.
+- The fix will be validated with focused backend tests and static compile locally.
+
+### Next Steps
+
+1. Add regression tests for reference-like numeric lookup routing and lookup transport error mapping.
+2. Implement the targeted backend fix.
+3. Update Orders docs and tracker with verification results.
+
+### Completion Update
+
+Implemented the Phase 41 fix. `fetch_by_query()` now treats six-or-more-digit numeric input as reference-like and tries `#<number>` first, then falls back to DB id on a reference miss. Short numeric values still try DB id first. Reference lookup now treats LastMile `404` as a clean miss, and the lookup route maps `URLError`/socket timeout failures to HTTP `504` with a retry message.
+
+### Files Modified
+
+- `api/app/orders/service.py`
+- `api/app/orders/routes.py`
+- `tests/test_orders_api.py`
+- `README.md`
+- `SIMULATOR_GUIDE.md`
+- `implementation/tracker/README.md`
+- `implementation/tracker/implementation_plan.md`
+- `implementation/tracker/tasks.md`
+- `implementation/tracker/session_log.md`
+
+### Verification
+
+```bash
+docker compose run --rm api python -m unittest tests.test_orders_api -v
+PYTHONPYCACHEPREFIX=/tmp/fainzy-pycache python3 -m py_compile api/app/orders/routes.py api/app/orders/service.py tests/test_orders_api.py
+git diff --check
+docker compose down
+docker compose ps
+```
+
+### Results
+
+- Pre-fix focused API test run failed on the three new Phase 41 cases: six-digit reference-first routing, reference-miss fallback order, and lookup transport error mapping.
+- Post-fix focused API test run passed: 13 tests.
+- Python compile check passed.
+- `git diff --check` passed.
+- Local test Postgres container was stopped with `docker compose down`; final `docker compose ps` showed no running services.
+
+### Remaining Risk
+
+- Live production logs were not available from this workspace, so the exact upstream response for `order_id=954460` could not be confirmed directly. The code now avoids that DB-id-first path for reference-like values and should exercise the intended `reference_code=#954460` lookup.
+
 ## 2026-06-03 02:47
 
 ### Summary

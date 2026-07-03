@@ -119,23 +119,22 @@ def lookup_order(
     if not token:
         raise HTTPException(status_code=401, detail="No Fainzy token — please sign in again.")
 
-    if query is not None and query.strip():
-        try:
+    try:
+        if query is not None and query.strip():
             order = service.fetch_by_query(query, token=token, subentity_id=subentity_id)
-        except urllib_error.HTTPError as exc:
-            raise _fainzy_error(exc) from exc
-    elif order_id is not None:
-        try:
+        elif order_id is not None:
             order = service.fetch_by_numeric_id(order_id, token=token)
-        except urllib_error.HTTPError as exc:
-            raise _fainzy_error(exc) from exc
-    elif ref:
-        try:
+        elif ref:
             order = service.fetch_by_reference(ref, token=token, subentity_id=subentity_id)
-        except urllib_error.HTTPError as exc:
-            raise _fainzy_error(exc) from exc
-    else:
-        raise HTTPException(status_code=400, detail="Provide order_id or ref.")
+        else:
+            raise HTTPException(status_code=400, detail="Provide order_id or ref.")
+    except urllib_error.HTTPError as exc:
+        raise _fainzy_error(exc) from exc
+    except (TimeoutError, socket.timeout, urllib_error.URLError) as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="The orders API took too long to respond. Try again in a moment.",
+        ) from exc
 
     if order is None:
         raise HTTPException(status_code=404, detail=ORDER_LOOKUP_NOT_FOUND_DETAIL)
