@@ -12,8 +12,8 @@ from . import service
 
 router = APIRouter(tags=["orders"])
 ORDER_LOOKUP_NOT_FOUND_DETAIL = (
-    "No matching order found for the selected store. "
-    "Choose the store that owns this order and try again."
+    "No matching order found. "
+    "Check your input and try again."
 )
 
 
