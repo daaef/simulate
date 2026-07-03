@@ -1,0 +1,64 @@
+name: Shutdown Simulator (docker compose down)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Set to SHUTDOWN to confirm you want to stop the production stack (containers only; volumes/data are preserved)."
+        type: choice
+        options:
+          - cancel
+          - SHUTDOWN
+        default: cancel
+
+concurrency:
+  group: simulator-production
+  cancel-in-progress: false
+
+jobs:
+  shutdown:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "SHUTDOWN" ]; then
+            echo "Confirmation input was '${{ inputs.confirm }}', not 'SHUTDOWN'. Aborting without touching the host."
+            exit 1
+          fi
+
+      - name: Shut down over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_PATH: ${{ secrets.SIMULATOR_DEPLOY_PATH }}
+        with:
+          host: ${{ secrets.SIMULATOR_DEPLOY_HOST }}
+          username: ${{ secrets.SIMULATOR_DEPLOY_USERNAME }}
+          key: ${{ secrets.SIMULATOR_DEPLOY_SSH_KEY }}
+          port: ${{ secrets.SIMULATOR_DEPLOY_PORT || '22' }}
+          envs: DEPLOY_PATH
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+
+            TARGET_PATH="${DEPLOY_PATH:-/root/simulator}"
+
+            if [ ! -d "$TARGET_PATH/.git" ]; then
+              echo "ERROR: $TARGET_PATH is not a deployed simulator checkout. Nothing to shut down."
+              exit 1
+            fi
+
+            cd "$TARGET_PATH"
+
+            if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+              echo "ERROR: docker / docker compose plugin not available on target host"
+              exit 1
+            fi
+
+            echo "Stack status before shutdown:"
+            docker compose -f docker-compose.prod.yml ps || true
+
+            # never pass -v/--volumes here: postgres + run/plan data volumes must survive a shutdown
+            docker compose -f docker-compose.prod.yml down --remove-orphans
+
+            echo "Shutdown complete. Remaining containers (should be none):"
+            docker compose -f docker-compose.prod.yml ps

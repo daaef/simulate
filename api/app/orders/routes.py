@@ -49,6 +49,8 @@ def _fainzy_error(exc: urllib_error.HTTPError, *, context: str = "orders") -> HT
         )
     if exc.code == 404:
         return HTTPException(status_code=404, detail=ORDER_LOOKUP_NOT_FOUND_DETAIL)
+    if context == "lookup" and 400 <= exc.code < 500:
+        return HTTPException(status_code=404, detail=ORDER_LOOKUP_NOT_FOUND_DETAIL)
     return HTTPException(status_code=502, detail=f"Fainzy API {exc.code}: {body[:300]}")
 
 
@@ -123,17 +125,32 @@ def lookup_order(
         try:
             order = service.fetch_by_query(query, token=token, subentity_id=subentity_id)
         except urllib_error.HTTPError as exc:
-            raise _fainzy_error(exc) from exc
+            raise _fainzy_error(exc, context="lookup") from exc
+        except (TimeoutError, socket.timeout, urllib_error.URLError) as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="The orders API took too long to respond. Try again in a moment.",
+            ) from exc
     elif order_id is not None:
         try:
             order = service.fetch_by_numeric_id(order_id, token=token)
         except urllib_error.HTTPError as exc:
-            raise _fainzy_error(exc) from exc
+            raise _fainzy_error(exc, context="lookup") from exc
+        except (TimeoutError, socket.timeout, urllib_error.URLError) as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="The orders API took too long to respond. Try again in a moment.",
+            ) from exc
     elif ref:
         try:
             order = service.fetch_by_reference(ref, token=token, subentity_id=subentity_id)
         except urllib_error.HTTPError as exc:
-            raise _fainzy_error(exc) from exc
+            raise _fainzy_error(exc, context="lookup") from exc
+        except (TimeoutError, socket.timeout, urllib_error.URLError) as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="The orders API took too long to respond. Try again in a moment.",
+            ) from exc
     else:
         raise HTTPException(status_code=400, detail="Provide order_id or ref.")
 

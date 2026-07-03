@@ -236,6 +236,64 @@ class OrdersRoutesTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 401)
         self.assertIn("sign in again", str(raised.exception.detail).lower())
 
+    def test_lookup_order_maps_lastmile_invalid_reference_400_to_not_found(self) -> None:
+        bad_reference = urllib_error.HTTPError(
+            url="https://lastmile.fainzy.tech/v1/core/orders/",
+            code=400,
+            msg="Bad Request",
+            hdrs=None,
+            fp=BytesIO(b'{"status":"error","message":"invalid reference_code"}'),
+        )
+
+        with mock.patch.object(service, "fetch_by_query", side_effect=bad_reference):
+            with self.assertRaises(HTTPException) as raised:
+                routes.lookup_order(
+                    query="not-a-real-ref",
+                    subentity_id=7,
+                    x_fainzy_token="store-token",
+                    current_user={"role": "operator"},
+                )
+
+        self.assertEqual(raised.exception.status_code, 404)
+        self.assertIn("no matching order", str(raised.exception.detail).lower())
+
+    def test_lookup_order_maps_lastmile_server_error_to_gateway_error(self) -> None:
+        upstream_failure = urllib_error.HTTPError(
+            url="https://lastmile.fainzy.tech/v1/core/orders/",
+            code=500,
+            msg="Internal Server Error",
+            hdrs=None,
+            fp=BytesIO(b"{}"),
+        )
+
+        with mock.patch.object(service, "fetch_by_query", side_effect=upstream_failure):
+            with self.assertRaises(HTTPException) as raised:
+                routes.lookup_order(
+                    query="156382",
+                    subentity_id=7,
+                    x_fainzy_token="store-token",
+                    current_user={"role": "operator"},
+                )
+
+        self.assertEqual(raised.exception.status_code, 502)
+
+    def test_lookup_order_maps_lastmile_timeout_to_504(self) -> None:
+        with mock.patch.object(
+            service,
+            "fetch_by_query",
+            side_effect=urllib_error.URLError("timed out"),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                routes.lookup_order(
+                    query="156382",
+                    subentity_id=7,
+                    x_fainzy_token="store-token",
+                    current_user={"role": "operator"},
+                )
+
+        self.assertEqual(raised.exception.status_code, 504)
+        self.assertIn("took too long", str(raised.exception.detail).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

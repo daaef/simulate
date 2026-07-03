@@ -283,3 +283,29 @@ Verification and troubleshooting:
   - `mapping_disabled`
 - End-to-end success path:
   - upstream deployment completes -> webhook accepted and queued -> simulator run launched -> simulator posts final `simulator/verification` deployment status back to GitHub.
+
+## 14) Shutdown
+
+Workflow file: `.github/workflows/shutdown.yml`
+
+Trigger: manual `workflow_dispatch` only (no push trigger — a deliberate action requires a
+deliberate click). It shares a `concurrency` group with `deploy.yml` so a shutdown and a deploy
+can never run against the host at the same time.
+
+What it does:
+
+- Runs `docker compose -f docker-compose.prod.yml down --remove-orphans` on the deploy host —
+  stops and removes containers and the default network only.
+- **Never passes `-v`/`--volumes`.** The named volumes (`simulator_postgres_data`,
+  `simulator_runs_data`, `simulator_gui_plans_data`, `simulator_webhook_config_data`) — Postgres
+  data, run artifacts, and GUI plans — are left untouched and survive the shutdown.
+
+How to trigger it:
+
+- **Web UI:** repo -> **Actions** tab -> **"Shutdown Simulator (docker compose down)"** in the
+  left sidebar -> **Run workflow** -> set the `confirm` dropdown to `SHUTDOWN` (it defaults to
+  `cancel`, which fails safely without touching the host) -> **Run workflow**.
+- **CLI:** `gh workflow run shutdown.yml -f confirm=SHUTDOWN`, then `gh run watch` to follow it.
+
+How to bring it back up: push to `main`, or manually dispatch `deploy.yml` — no separate "start"
+workflow exists or is needed, since a normal deploy already runs `up -d --remove-orphans`.
