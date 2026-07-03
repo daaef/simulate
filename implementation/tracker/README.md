@@ -10,7 +10,7 @@ Keep simulator behavior operationally truthful while adding a deliberate `place-
 
 ## Current Status
 
-Completed Phase 40 Orders Update Status Tab Polish. The `/orders` implementation now uses simulator API-backed store login with an app-compatible outbound `User-Agent`, persists the LastMile product-auth token required by order lookup/update, uses `sim_actors.json` store selection, supports unified id/reference lookup, exposes full lifecycle status options, shows raw order JSON after lookup, and has a direct `Update Status` tab without store/detail cards. Previous Phase 36 Pending Order Trace Flow is implemented. Verification caveat from the previous workstream: full Python suite had one unrelated midnight-edge schedule test failure, `SchedulesApiTests.test_new_contract_schedule_shifts_into_run_window`.
+Completed Phase 41 Orders Numeric Reference Lookup Fix. The `/orders` lookup path now treats six-or-more-digit numeric input such as `954460` as reference-like and tries `#954460` before database-id lookup, while shorter numeric values keep DB-id-first behavior. Lookup transport failures now map to a clear retryable API error. Previous Phase 40 Orders Update Status Tab Polish is complete.
 
 ## Scope
 
@@ -97,7 +97,7 @@ Completed Phase 40 Orders Update Status Tab Polish. The `/orders` implementation
 1. Read `implementation_plan.md`
 2. Check open items in `tasks.md`
 3. Review the latest entries in `session_log.md`
-4. Continue from the first incomplete task
+4. Continue from Phase 41 in `tasks.md`
 
 ## Validation
 
@@ -118,6 +118,7 @@ Completed Phase 40 Orders Update Status Tab Polish. The `/orders` implementation
 ## Known Blockers / Assumptions
 
 - Orders page v1 uses existing public endpoints already documented by the simulator: `https://fainzy.tech` and `https://lastmile.fainzy.tech`.
+- Six-or-more-digit numeric order references are reference-like in current LastMile data and are resolved as `#<number>` before database-id lookup.
 - Fainzy store-login rejects the default Python urllib client fingerprint with `403 error code: 1010`; the orders service sends a stable app-compatible `User-Agent` and no new env variables.
 - LastMile order lookup/update requires the product-auth `gAAAA...` token from `/v1/biz/product/authentication/?product=rds`; the 64-character token returned by store-login is profile metadata and is not valid for `/v1/core/orders/`.
 - Full lifecycle status updates are intentionally operator-powerful and may fail if the backend rejects an invalid transition for the current order state.
@@ -135,4 +136,4 @@ Completed Phase 40 Orders Update Status Tab Polish. The `/orders` implementation
 
 ## Last Updated
 
-2026-06-03 02:47 WAT
+2026-07-03 11:18 JST

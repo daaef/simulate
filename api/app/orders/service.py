@@ -11,6 +11,7 @@ _LASTMILE_BASE_URL = "https://lastmile.fainzy.tech"
 SIMULATOR_PRODUCT: str = os.getenv("SIMULATOR_PRODUCT", "rds")
 _ORDERS_PATH = "/v1/core/orders/"
 _USER_AGENT = "Fainzy-Simulator/1.0"
+_REFERENCE_LIKE_NUMERIC_MIN_LENGTH = 6
 _JSON_HEADERS = {
     "Accept": "application/json",
     "Content-Type": "application/json; charset=utf-8",
@@ -197,7 +198,12 @@ def fetch_by_reference(ref: str, *, token: str, subentity_id: int | None = None)
     params: dict[str, str] = {"reference_code": normalized}
     if subentity_id is not None:
         params["subentity_id"] = str(subentity_id)
-    payload = _get(params, token=token)
+    try:
+        payload = _get(params, token=token)
+    except urllib_error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
     data = payload.get("data", [])
     if isinstance(data, list):
         return data[0] if data else None
@@ -211,6 +217,11 @@ def fetch_by_query(query: str, *, token: str, subentity_id: int | None = None) -
     if not value:
         return None
     if value.isdigit():
+        if len(value) >= _REFERENCE_LIKE_NUMERIC_MIN_LENGTH:
+            order = fetch_by_reference(f"#{value}", token=token, subentity_id=subentity_id)
+            if order is not None:
+                return order
+            return fetch_by_numeric_id(int(value), token=token)
         order = fetch_by_numeric_id(int(value), token=token)
         if order is not None:
             return order

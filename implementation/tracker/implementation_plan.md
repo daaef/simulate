@@ -1,5 +1,50 @@
 # Implementation Plan
 
+## Active Workstream: Orders Numeric Reference Lookup Fix (2026-07-03)
+
+### Problem Statement
+
+The Orders page accepts either a database order id or an order reference, but a bare six-digit reference such as `954460` is currently treated as a database `order_id` first. When the LastMile DB-id endpoint fails or returns a gateway-style error for that non-ID, the request can fail before the intended `#954460` reference lookup is attempted.
+
+### Target Behavior
+
+- Six-digit numeric references are looked up as `reference_code=#<number>` first, scoped to the selected store.
+- Short numeric database ids keep the DB-id-first lookup behavior.
+- If the reference-first path misses, lookup can still fall back to database id for compatibility.
+- Transport/timeouts during lookup return an operator-readable API error instead of an unhandled backend failure.
+
+### Existing Behavior
+
+- `service.fetch_by_query("954460")` calls `fetch_by_numeric_id(954460)` first.
+- Only a clean no-result response or `404` from the numeric DB-id path triggers fallback to `#954460`.
+- `lookup_order` catches LastMile `HTTPError` but not `URLError`/socket timeout transport failures.
+
+### Proposed Approach
+
+1. Add focused backend tests for six-digit numeric reference routing and lookup transport error mapping.
+2. Update `fetch_by_query` to classify six-digit numeric input as reference-like and try `fetch_by_reference("#...")` before DB id.
+3. Keep existing DB-id-first behavior for shorter numeric input.
+4. Catch lookup transport/timeout exceptions in the route and map them to a clear `504`.
+5. Update README and SIMULATOR_GUIDE Orders docs with the clarified numeric-reference behavior.
+
+### Files to Modify (Workstream)
+
+| File | Purpose of Change |
+|---|---|
+| `api/app/orders/service.py` | Reference-like numeric query routing |
+| `api/app/orders/routes.py` | Lookup transport/timeout error handling |
+| `tests/test_orders_api.py` | Regression coverage for six-digit references and lookup transport errors |
+| `README.md` | Orders page lookup behavior docs |
+| `SIMULATOR_GUIDE.md` | Orders route operational reference |
+
+### Acceptance Criteria (Workstream)
+
+- [x] `954460` is looked up as `#954460` before database `order_id=954460`.
+- [x] Short numeric DB ids still try database lookup first.
+- [x] Reference-first miss can still fall back to database id.
+- [x] Lookup transport failures return a clear timeout/retry message.
+- [x] Focused backend tests pass.
+
 ## Active Workstream: Orders Page Auth and Status Fix (2026-06-03)
 
 ### Problem Statement

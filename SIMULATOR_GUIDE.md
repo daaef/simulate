@@ -255,7 +255,7 @@ Orders is an authenticated operator page for looking up and mutating live Fainzy
 
 - Store selection comes from `sim_actors.json` (`defaults.store_id` and `stores[]`); no new Orders-specific environment variables are needed.
 - Store sign-in calls the simulator API, which fetches the LastMile product-auth `Fainzy-Token` and validates store metadata through the existing Fainzy store-login endpoint (`POST /v1/entities/store/login` with `Store-Request`). The LastMile token is persisted in browser `localStorage`.
-- Lookup accepts either a DB order id or reference (`#156382`). Numeric input first tries DB id, then falls back to reference `#<number>`. Reference lookup is scoped to the signed-in store; if the order belongs to a different store, the UI tells the operator to choose that store and retry.
+- Lookup accepts either a DB order id or reference (`#156382`). Six-or-more-digit numeric input is treated as a reference first (`954460` -> `#954460`) and then falls back to DB id if no reference match is found; shorter numeric input keeps DB-id-first lookup and falls back to reference `#<number>` on a miss. Reference lookup is scoped to the signed-in store; if the order belongs to a different store, the UI tells the operator to choose that store and retry.
 - Both tabs show a read-only raw order JSON pane after lookup.
 - `Order Summary` keeps the summary-details workflow. `Update Status` is the direct status-change tab: below lookup it shows only item names, total price, the lifecycle status selector, and `Update Status`; it does not repeat store details or item-level quantity/price rows.
 - Both tabs submit status updates through the LastMile token path: `PATCH /v1/core/orders/?order_id=<id>` with `Fainzy-Token`.

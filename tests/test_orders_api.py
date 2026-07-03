@@ -4,6 +4,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from typing import Any
 from unittest import mock
 from io import BytesIO
 from urllib import error as urllib_error
@@ -105,16 +106,47 @@ class OrdersServiceTests(unittest.TestCase):
         self.assertIn("Fainzy-Simulator", str(seen[1]["headers"].get("User-agent", "")))
         self.assertIn("/v1/entities/store/login", str(seen[1]["url"]))
 
-    def test_fetch_by_query_falls_back_from_numeric_id_to_numeric_reference(self) -> None:
+    def test_fetch_by_query_falls_back_from_short_numeric_id_to_reference(self) -> None:
         with (
             mock.patch.object(service, "fetch_by_numeric_id", return_value=None) as fetch_id,
-            mock.patch.object(service, "fetch_by_reference", return_value={"id": 42, "order_id": "#156382"}) as fetch_ref,
+            mock.patch.object(service, "fetch_by_reference", return_value={"id": 42, "order_id": "#1889"}) as fetch_ref,
         ):
-            order = service.fetch_by_query("156382", token="store-token", subentity_id=7)
+            order = service.fetch_by_query("1889", token="store-token", subentity_id=7)
 
-        self.assertEqual(order, {"id": 42, "order_id": "#156382"})
-        fetch_id.assert_called_once_with(156382, token="store-token")
-        fetch_ref.assert_called_once_with("#156382", token="store-token", subentity_id=7)
+        self.assertEqual(order, {"id": 42, "order_id": "#1889"})
+        fetch_id.assert_called_once_with(1889, token="store-token")
+        fetch_ref.assert_called_once_with("#1889", token="store-token", subentity_id=7)
+
+    def test_fetch_by_query_prefers_reference_for_six_digit_numeric_reference(self) -> None:
+        with (
+            mock.patch.object(service, "fetch_by_numeric_id", return_value={"id": 954460}) as fetch_id,
+            mock.patch.object(service, "fetch_by_reference", return_value={"id": 42, "order_id": "#954460"}) as fetch_ref,
+        ):
+            order = service.fetch_by_query("954460", token="store-token", subentity_id=7)
+
+        self.assertEqual(order, {"id": 42, "order_id": "#954460"})
+        fetch_ref.assert_called_once_with("#954460", token="store-token", subentity_id=7)
+        fetch_id.assert_not_called()
+
+    def test_fetch_by_query_falls_back_to_numeric_id_when_six_digit_reference_misses(self) -> None:
+        calls: list[tuple[str, object]] = []
+
+        def fake_reference(ref: str, *, token: str, subentity_id: int | None = None) -> dict[str, Any] | None:
+            calls.append(("reference", ref))
+            return None
+
+        def fake_numeric(order_id: int, *, token: str) -> dict[str, Any] | None:
+            calls.append(("numeric", order_id))
+            return {"id": 954460, "order_id": "#123456"}
+
+        with (
+            mock.patch.object(service, "fetch_by_numeric_id", side_effect=fake_numeric),
+            mock.patch.object(service, "fetch_by_reference", side_effect=fake_reference),
+        ):
+            order = service.fetch_by_query("954460", token="store-token", subentity_id=7)
+
+        self.assertEqual(order, {"id": 954460, "order_id": "#123456"})
+        self.assertEqual(calls, [("reference", "#954460"), ("numeric", 954460)])
 
     def test_fetch_by_query_uses_reference_for_hash_input(self) -> None:
         with (
