@@ -1,0 +1,72 @@
+{
+  "useCase": "get_socket_status",
+  "group": "overview",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/overview/socket-status"
+  },
+  "usedIn": {
+    "screen": "Dashboard socket monitor",
+    "chain": [
+      "GET /api/v1/overview/socket-status → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Socket status loads",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:14.016257+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "enabled": true,
+    "status": "up",
+    "checked_at": "2026-07-27T01:34:28.189162+00:00",
+    "target": {
+      "store_id": "FZY_926025",
+      "source": "sim_actors.json defaults.store_id",
+      "base_url": "https://lastmile.fainzy.tech"
+    },
+    "required": [
+      {
+        "key": "store_orders",
+        "label": "Orders",
+        "status": "up",
+        "latency_ms": 1288,
+        "failure_streak": 0,
+        "reason": null
+      },
+      {
+        "key": "store_stats",
+        "label": "Stats",
+        "status": "up",
+        "latency_ms": 1324,
+        "failure_streak": 0,
+        "reason": null
+      }
+    ],
+    "reason": null,
+    "latest_run_evidence": {
+      "status": "unknown",
+      "run_id": 1,
+      "run_status": "running",
+      "matched": 0,
+      "expected": 0,
+      "missed": 0
+    }
+  }
+}

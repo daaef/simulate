@@ -1,0 +1,69 @@
+{
+  "useCase": "checkout_place_order",
+  "group": "orders",
+  "part": "external",
+  "endpoint": {
+    "method": "POST",
+    "host": "lastmile.fainzy.tech",
+    "path": "/v1/core/orders/"
+  },
+  "usedIn": {
+    "screen": "Checkout",
+    "chain": [
+      "user_sim.py:1427-1517 place_order()/place_order_with_payload() -- POST /v1/core/orders/",
+      "user_sim.py:1270 generate_order_payload() builds the order_id/restaurant/location/menu/total_price/status/user body"
+    ]
+  },
+  "trigger": "Place order tapped (simulator: place_order() call after fixtures are loaded)",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "order_id": "#870629",
+      "restaurant": {"id": 6, "name": "Premium Cafe JP", "branch": "Premium Cafe JP", "status": 1, "currency": "jpy", "mobile_number": "+819081811935", "gps_coordinates": {"type": "Point", "coordinates": [136.9663666561246, 35.15494521954757]}},
+      "user": 42,
+      "location": {"id": null, "name": "api_docs capture", "gps_coordinates": {"type": "Point", "coordinates": [136.96636, 35.15494]}},
+      "menu": [{"id": 26, "category": 1, "subentity": 6, "sides": [], "name": "Simulator item 20260519T120922", "price": 100.0, "status": "available"}],
+      "status": "pending",
+      "total_price": 100.0
+    }
+  },
+  "auth": {
+    "header": "Authorization",
+    "value": "0d5d85f121ff3d5a3e9f7e42519c6ed1f8456bfb",
+    "howObtained": "POST /v1/auth/users/auth/ (login) -- \"Token \" prefix"
+  },
+  "sensitivePaths": ["auth.value", "response.data.user", "response.data.user_data"],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-24T06:23:51.180851+01:00",
+    "status": 201,
+    "tool": "reused from last_mile_user/api_docs/orders/checkout_place_order.json (capture_session.py)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "Order successfully sent!",
+    "data": {
+      "id": 5487,
+      "user": {"id": 42, "first_name": "Fainzy", "last_name": "Simulator", "email": "sim-2348166675609@example.test", "phone_number": "+2348166675609"},
+      "code": "rand_code_generator",
+      "order_id": "#870629",
+      "restaurant": {"id": 6, "name": "Premium Cafe JP", "branch": "Premium Cafe JP", "status": 1, "currency": "jpy", "mobile_number": "+819081811935", "gps_coordinates": {"type": "Point", "coordinates": [136.9663666561246, 35.15494521954757]}, "rating": 4.008174386920981, "total_reviews": 367},
+      "location": {"id": null, "name": "api_docs capture", "gps_coordinates": {"type": "Point", "coordinates": [136.96636, 35.15494]}},
+      "menu": [{"id": 26, "category": 1, "subentity": 6, "sides": [], "name": "Simulator item 20260519T120922", "price": 100.0, "status": "available", "discount": 0.0, "discount_price": 0.0}],
+      "total_price": 100.0,
+      "coupon_discount": 0.0,
+      "coupon_code": null,
+      "estimated_eta": 600.0,
+      "cancellation_time": null,
+      "delivery_fee": 0.0,
+      "service_fee": 0.0,
+      "is_free": false,
+      "status": "pending",
+      "created": "2026-07-24T00:23:49.754011-05:00",
+      "user_data": {"id": 42, "first_name": "Fainzy", "last_name": "Simulator", "email": "sim-2348166675609@example.test", "phone_number": "+2348166675609"}
+    }
+  },
+  "note": "Response/params reused verbatim from ../last_mile_user/api_docs/orders/checkout_place_order.json (real live capture, 2026-07-24) rather than a fresh simulate-specific capture -- same real lastmile.fainzy.tech backend, same store (subentity 6, Premium Cafe JP), same POST /v1/core/orders/ endpoint that simulate's own user_sim.py:1488-1517 calls with an identical body shape. Decision: 2026-07-27, avoids placing a second real order purely for documentation purposes when a real, recent, same-endpoint capture already existed. Order 5487 was cancelled immediately after in the source capture (see order_cancel_update.json) -- nothing was left live."
+}

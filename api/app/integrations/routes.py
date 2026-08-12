@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -11,9 +12,25 @@ from .models import (
     IntegrationWebhookProjectRepositoriesRequest,
 )
 from . import service
-from .github_workflow_run import process_github_workflow_run_webhook
+from .github_workflow_run import (
+    automation_enabled,
+    process_github_workflow_run_webhook,
+    record_automation_disabled_trigger,
+)
+from .webhook_config import resolve_project_from_signature
 
 router = APIRouter(tags=["integrations"])
+
+
+def _best_effort_repository(body: bytes) -> str:
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "unknown"
+    repository = payload.get("repository") if isinstance(payload, dict) else None
+    if isinstance(repository, dict):
+        return str(repository.get("full_name") or "unknown")
+    return "unknown"
 
 
 @router.post("/api/v1/integrations/github/deployment-complete")
@@ -27,6 +44,26 @@ async def github_deployment_complete(request: Request) -> dict[str, Any]:
             "ok": True,
             "event": "ping",
             "message": "GitHub webhook ping received.",
+        }
+
+    # Global master switch, checked before any event-specific dispatch or parsing so it
+    # cannot be bypassed by a new event type or a future handler that forgets to check it.
+    if not automation_enabled():
+        signature = headers.get("x-hub-signature-256", "").strip()
+        project = resolve_project_from_signature(body, signature) or "unknown"
+        repository = _best_effort_repository(body)
+        trigger_id = record_automation_disabled_trigger(
+            project=project,
+            event_name=github_event or "unknown",
+            repository=repository,
+        )
+        return {
+            "accepted": False,
+            "trigger_id": trigger_id,
+            "status": "rejected",
+            "reason": "automation_disabled",
+            "project": project,
+            "repository": repository,
         }
 
     if github_event == "workflow_run":

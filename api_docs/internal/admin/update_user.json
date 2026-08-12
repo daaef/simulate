@@ -1,0 +1,54 @@
+{
+  "useCase": "update_user",
+  "group": "admin",
+  "part": "internal",
+  "endpoint": {
+    "method": "PUT",
+    "host": "localhost:8000",
+    "path": "/api/v1/admin/users/{user_id}"
+  },
+  "usedIn": {
+    "screen": "Admin panel",
+    "chain": [
+      "PUT /api/v1/admin/users/{user_id} → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Admin edits user",
+  "params": {
+    "path": {
+      "user_id": 5
+    },
+    "query": {},
+    "body": {
+      "username": "test_api_docs_updated_5",
+      "email": "test-api-docs-updated-5@example.com",
+      "password": "UpdatedPassword123!",
+      "role": "viewer"
+    }
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "PNWaLkygMMHhrdDGVSdBDrEK_MJN6290sSl6_o25Ga6gcMrDFKuTEPeWJEqmUY5e",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:42:39.591482+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "message": "User updated successfully",
+    "user": {
+      "id": 5,
+      "username": "test_api_docs_updated_5",
+      "email": "test-api-docs-updated-5@example.com",
+      "role": "viewer",
+      "is_active": true,
+      "created_at": "2026-07-27T01:42:37.033249Z",
+      "last_login": null
+    }
+  }
+}

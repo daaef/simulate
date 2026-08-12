@@ -1,0 +1,37 @@
+{
+  "useCase": "store_update_status",
+  "group": "stores",
+  "part": "external",
+  "endpoint": {
+    "method": "PATCH",
+    "host": "fainzy.tech",
+    "path": "/v1/entities/subentities/{id}"
+  },
+  "usedIn": {
+    "screen": "Store settings",
+    "chain": [
+      "PATCH /v1/entities/subentities/{id} → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Store status changes",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "Fainzy-Token",
+    "value": null,
+    "howObtained": "fainzy_token"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": null,
+    "status": null,
+    "tool": "capture_external.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Not captured: this is a PATCH (write) against a real store's status on fainzy.tech. Only GET/read-only capture was approved. See API_DOCS_PLAN_2026-07-27.md open item #2."
+}

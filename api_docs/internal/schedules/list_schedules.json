@@ -1,0 +1,38 @@
+{
+  "useCase": "list_schedules",
+  "group": "schedules",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/schedules"
+  },
+  "usedIn": {
+    "screen": "Schedules page",
+    "chain": [
+      "GET /api/v1/schedules → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Schedules page loads",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:13.128781+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "schedules": []
+  }
+}

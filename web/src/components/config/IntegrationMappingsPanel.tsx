@@ -6,17 +6,24 @@ import {
   deleteGitHubIntegrationMapping,
   fetchGitHubIntegrationMappings,
   fetchGitHubIntegrationTriggers,
+  fetchIntegrationAutomationSettings,
   fetchRunProfiles,
+  updateIntegrationAutomationSettings,
   upsertGitHubIntegrationMapping,
   type GitHubIntegrationTrigger,
   type GitHubWebhookRouteBy,
   type IntegrationMapping,
+  type IntegrationTriggerEvent,
   type RunProfile,
 } from "../../lib/api";
 
 const PROJECT_OPTIONS = ["backend", "mobile", "store", "robot", "dashboard", "website"];
 const DEPLOYMENT_ENVIRONMENT_OPTIONS = ["production", "staging", "development", "preview"];
 const BRANCH_OPTIONS = ["main", "master", "dev", "develop", "staging"];
+const TRIGGER_EVENT_OPTIONS: { value: IntegrationTriggerEvent; label: string }[] = [
+  { value: "workflow_run", label: "Workflow run completed" },
+  { value: "deployment_status", label: "Deployment status posted" },
+];
 
 function routingCopy(routeBy: GitHubWebhookRouteBy) {
   if (routeBy === "branch") {
@@ -124,6 +131,9 @@ export default function IntegrationMappingsPanel() {
   const [environment, setEnvironment] = useState("production");
   const [profileId, setProfileId] = useState("");
   const [enabled, setEnabled] = useState(true);
+  const [triggerEvent, setTriggerEvent] = useState<IntegrationTriggerEvent>("workflow_run");
+  const [triggerWorkflow, setTriggerWorkflow] = useState("");
+  const [triggerConclusion, setTriggerConclusion] = useState("success");
 
   const copy = useMemo(() => routingCopy(routeBy), [routeBy]);
 
@@ -132,6 +142,13 @@ export default function IntegrationMappingsPanel() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Master switch: when off, the API rejects every GitHub delivery before any mapping or
+  // trigger spec is even consulted -- nothing below this control can override it.
+  const [automationEnabled, setAutomationEnabled] = useState(true);
+  const [automationLoading, setAutomationLoading] = useState(true);
+  const [automationBusy, setAutomationBusy] = useState(false);
+  const [automationError, setAutomationError] = useState<string | null>(null);
 
   const profileById = useMemo(() => {
     const map = new Map<number, RunProfile>();
@@ -169,8 +186,35 @@ export default function IntegrationMappingsPanel() {
     }
   }
 
+  async function loadAutomation() {
+    setAutomationLoading(true);
+    setAutomationError(null);
+    try {
+      const payload = await fetchIntegrationAutomationSettings();
+      setAutomationEnabled(payload.automation_enabled);
+    } catch (caught) {
+      setAutomationError(formatError(caught));
+    } finally {
+      setAutomationLoading(false);
+    }
+  }
+
+  async function toggleAutomation(nextEnabled: boolean) {
+    setAutomationBusy(true);
+    setAutomationError(null);
+    try {
+      const payload = await updateIntegrationAutomationSettings(nextEnabled);
+      setAutomationEnabled(payload.automation_enabled);
+    } catch (caught) {
+      setAutomationError(formatError(caught));
+    } finally {
+      setAutomationBusy(false);
+    }
+  }
+
   useEffect(() => {
     void loadAll();
+    void loadAutomation();
   }, []);
 
   function resetForm(nextRouteBy: GitHubWebhookRouteBy = routeBy) {
@@ -180,6 +224,9 @@ export default function IntegrationMappingsPanel() {
     setEnvironment(nextCopy.defaultRouteKey);
     setProfileId(profiles[0] ? String(profiles[0].id) : "");
     setEnabled(true);
+    setTriggerEvent("workflow_run");
+    setTriggerWorkflow("");
+    setTriggerConclusion("success");
     setMessage(null);
     setError(null);
   }
@@ -190,6 +237,9 @@ export default function IntegrationMappingsPanel() {
     setEnvironment(mapping.environment);
     setProfileId(String(mapping.profile_id));
     setEnabled(mapping.enabled);
+    setTriggerEvent((mapping.trigger_event as IntegrationTriggerEvent) || "workflow_run");
+    setTriggerWorkflow(mapping.trigger_workflow || "");
+    setTriggerConclusion(mapping.trigger_conclusion || "success");
     setMessage(null);
     setError(null);
   }
@@ -198,9 +248,16 @@ export default function IntegrationMappingsPanel() {
     const normalizedProject = project.trim();
     const normalizedEnvironment = environment.trim();
     const parsedProfileId = Number(profileId);
+    const normalizedWorkflow = triggerWorkflow.trim();
+    const normalizedConclusion = triggerConclusion.trim() || "success";
 
     if (!normalizedProject || !normalizedEnvironment || !Number.isInteger(parsedProfileId) || parsedProfileId < 1) {
       setError(copy.validationError);
+      return;
+    }
+
+    if (triggerEvent === "workflow_run" && !normalizedWorkflow) {
+      setError("Workflow name is required when the trigger event is 'Workflow run completed'.");
       return;
     }
 
@@ -214,6 +271,9 @@ export default function IntegrationMappingsPanel() {
         environment: normalizedEnvironment,
         profile_id: parsedProfileId,
         enabled,
+        trigger_event: triggerEvent,
+        trigger_workflow: triggerEvent === "workflow_run" ? normalizedWorkflow : null,
+        trigger_conclusion: normalizedConclusion,
       });
 
       setMessage(editingId ? "Mapping updated." : "Mapping saved.");
@@ -281,6 +341,40 @@ export default function IntegrationMappingsPanel() {
           Refresh
         </button>
       </div>
+
+      <section
+        className="panel"
+        style={{
+          borderRadius: 12,
+          border: automationEnabled ? undefined : "1px solid var(--status-danger-border)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+          <div className="grid" style={{ gap: 4 }}>
+            <strong style={{ fontSize: 16 }}>Automatic verification and simulation runs</strong>
+            <span className="muted" style={{ fontSize: 13, maxWidth: 620 }}>
+              Master switch for every GitHub-triggered run. Checked before any mapping or trigger rule, for every
+              event type. When off, no GitHub delivery of any kind starts a simulation run.
+            </span>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className={`status-pill ${automationEnabled ? "status-success" : "status-danger"}`}>
+              {automationLoading ? "loading..." : automationEnabled ? "automation on" : "automation off"}
+            </span>
+            <input
+              type="checkbox"
+              checked={automationEnabled}
+              disabled={automationLoading || automationBusy}
+              onChange={(event) => void toggleAutomation(event.target.checked)}
+            />
+          </label>
+        </div>
+        {automationError ? (
+          <div className="error-banner" style={{ padding: "10px 12px", marginTop: 10 }}>
+            {automationError}
+          </div>
+        ) : null}
+      </section>
 
       <div className="grid three">
         <div className="panel" style={{ background: "var(--bg-tertiary)" }}>
@@ -365,6 +459,40 @@ export default function IntegrationMappingsPanel() {
 
           <p id="github-route-key-help" className="form-help" style={{ margin: 0 }}>
             {copy.routeKeyHelp}
+          </p>
+
+          <div className="grid two" style={{ alignItems: "start" }}>
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="muted">Triggers on</span>
+              <select
+                value={triggerEvent}
+                onChange={(event) => setTriggerEvent(event.target.value as IntegrationTriggerEvent)}
+                disabled={busy}
+              >
+                {TRIGGER_EVENT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid" style={{ gap: 6 }}>
+              <span className="muted">Workflow name {triggerEvent === "workflow_run" ? "(required)" : "(n/a)"}</span>
+              <input
+                value={triggerWorkflow}
+                onChange={(event) => setTriggerWorkflow(event.target.value)}
+                placeholder="e.g. RDS_BACKEND"
+                disabled={busy || triggerEvent !== "workflow_run"}
+              />
+            </label>
+          </div>
+
+          <p className="form-help" style={{ margin: 0 }}>
+            {triggerEvent === "workflow_run"
+              ? "Only a workflow_run delivery whose action is \"completed\", whose workflow name exactly matches, and whose conclusion is \"success\" launches this route. Everything else -- including any other workflow in the repo -- is ignored."
+              : "Only a deployment_status delivery whose state is \"success\" launches this route."}{" "}
+            No trigger configured on a mapping means it never launches, even if enabled.
           </p>
 
           <label className="grid" style={{ gap: 6 }}>
@@ -470,9 +598,14 @@ export default function IntegrationMappingsPanel() {
                         <span className="muted">{profile?.name ?? mapping.profile_name ?? `Profile #${mapping.profile_id}`}</span>
                       </div>
 
-                      <span className={`status-pill ${mapping.enabled ? "status-success" : "status-warning"}`}>
-                        {mapping.enabled ? "enabled" : "disabled"}
-                      </span>
+                      <div className="grid" style={{ gap: 4, justifyItems: "flex-end" }}>
+                        <span className={`status-pill ${mapping.enabled ? "status-success" : "status-warning"}`}>
+                          {mapping.enabled ? "enabled" : "disabled"}
+                        </span>
+                        {!mapping.trigger_event ? (
+                          <span className="status-pill status-danger">trigger not configured</span>
+                        ) : null}
+                      </div>
                     </div>
 
                     <div className="pill-list">
@@ -481,6 +614,18 @@ export default function IntegrationMappingsPanel() {
                         {copy.routeChipPrefix}: {mapping.environment}
                       </span>
                       <span className="chip">profile: #{mapping.profile_id}</span>
+                      {mapping.trigger_event ? (
+                        <span className="chip">
+                          trigger: {mapping.trigger_event}
+                          {mapping.trigger_event === "workflow_run" && mapping.trigger_workflow
+                            ? ` · workflow "${mapping.trigger_workflow}"`
+                            : ""}
+                          {" · "}
+                          {mapping.trigger_conclusion || "success"}
+                        </span>
+                      ) : (
+                        <span className="chip">trigger: none -- will never launch</span>
+                      )}
                     </div>
 
                     <div className="row-actions">

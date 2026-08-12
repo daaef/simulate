@@ -1,0 +1,43 @@
+{
+  "useCase": "get_system_email",
+  "group": "system",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/system/email"
+  },
+  "usedIn": {
+    "screen": "Email settings",
+    "chain": [
+      "GET /api/v1/system/email → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Email settings load",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:13.438620+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "email_enabled": false,
+    "email_from_email": "",
+    "email_from_name": "",
+    "email_subject_prefix": "",
+    "email_recipients": [],
+    "email_event_triggers": []
+  }
+}

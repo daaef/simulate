@@ -1,0 +1,327 @@
+{
+  "useCase": "list_simulation_plans",
+  "group": "simulation_plans",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/simulation-plans"
+  },
+  "usedIn": {
+    "screen": "Plans page",
+    "chain": [
+      "GET /api/v1/simulation-plans → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Plans page loads",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:13.346941+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "plans": [
+      {
+        "id": "sim-actors",
+        "name": "sim_actors",
+        "path": "sim_actors.json",
+        "content": {
+          "schema_version": 2,
+          "defaults": {
+            "user_phone": "+2348166675609",
+            "new_user_phone": "+2347030766794",
+            "store_id": "FZY_926025",
+            "location_radius": 1,
+            "coupon_id": null
+          },
+          "runtime_defaults": {
+            "flow": "doctor",
+            "mode": "trace",
+            "trace_suite": "doctor",
+            "trace_scenarios": [
+              "backend_auto_cancel"
+            ],
+            "store_auto_cancel_seconds": 120,
+            "timing_profile": "fast",
+            "users": 1,
+            "orders": 1,
+            "interval_seconds": 30,
+            "reject_rate": 0.1,
+            "continuous": false
+          },
+          "rules": {
+            "strict_plan": false,
+            "run_app_probes": true,
+            "run_store_dashboard_probes": true,
+            "run_post_order_actions": false,
+            "app_autopilot": true,
+            "auto_select_store": true,
+            "auto_select_coupon": true,
+            "auto_provision_fixtures": true,
+            "mutate_store_setup": false,
+            "mutate_menu_setup": false,
+            "auto_toggle_store_status": true,
+            "store_open_status": 1,
+            "store_closed_status": 3
+          },
+          "payment_defaults": {
+            "mode": "stripe",
+            "case": "paid_no_coupon",
+            "free_order_amount": 0,
+            "coupon_id": null,
+            "save_card": false,
+            "test_payment_method": "pm_card_visa"
+          },
+          "fixture_defaults": {
+            "store_setup": {
+              "name": "Fainzy Simulator Store",
+              "branch": "Simulator",
+              "description": "Store profile created by simulator setup flow.",
+              "mobile": "+2348166675609",
+              "start_time": "07:00",
+              "closing_time": "23:59",
+              "status": 1,
+              "address": "Simulator address",
+              "city": "Nagoya",
+              "state": "Aichi",
+              "country": "Japan"
+            },
+            "menu": {
+              "category_name": "Simulator",
+              "name": "Simulator item",
+              "description": "Menu item created by simulator.",
+              "price": 100,
+              "ingredients": "simulator ingredients",
+              "discount": 0,
+              "discount_price": 0
+            }
+          },
+          "review_defaults": {
+            "rating": 4,
+            "comment": "Simulator review"
+          },
+          "new_user_defaults": {
+            "first_name": "Fainzy",
+            "last_name": "Simulator",
+            "email": ""
+          },
+          "users": [
+            {
+              "phone": "+2349077777740",
+              "role": "returning",
+              "email": "sim-2349077777740@example.test",
+              "first_name": "Fainzy",
+              "last_name": "Simulator",
+              "active": true,
+              "created_at": "2026-05-12T12:02:00"
+            },
+            {
+              "phone": "+819081811938",
+              "role": "returning",
+              "email": "judestainz_new@yahoo.com",
+              "first_name": "Jude New",
+              "last_name": "J",
+              "active": true,
+              "created_at": "2025-07-09T06:50:00"
+            },
+            {
+              "phone": "+2348167147819",
+              "role": "returning",
+              "email": "datmumudev@protonmail.com",
+              "first_name": "Emmanuel",
+              "last_name": "Omeogah",
+              "active": true,
+              "created_at": "2025-07-09T06:31:00"
+            },
+            {
+              "phone": "+447427199958",
+              "role": "returning",
+              "email": "mikeledon32@yahoo.com",
+              "first_name": "Michael",
+              "last_name": "Nwadiuto",
+              "active": true,
+              "created_at": "2025-07-09T05:57:00"
+            },
+            {
+              "phone": "+3289403343",
+              "role": "returning",
+              "email": "user@example.com",
+              "first_name": "string",
+              "last_name": "string",
+              "active": true,
+              "created_at": "2025-07-06T07:56:00"
+            },
+            {
+              "phone": "+2348166675609",
+              "role": "returning_default",
+              "email": "sim-2348166675609@example.test",
+              "first_name": "Fainzy",
+              "last_name": "Simulator",
+              "active": true,
+              "created_at": "2026-05-02T17:27:00",
+              "lat": 35.15494521954757,
+              "lng": 136.9663666561246
+            },
+            {
+              "phone": "+2348102894804",
+              "role": "returning",
+              "email": "lazicah@gmail.com",
+              "first_name": "Lazarus",
+              "last_name": "Nwankwo",
+              "active": true,
+              "created_at": "2024-04-22T06:09:00"
+            },
+            {
+              "phone": "+819081811939",
+              "role": "returning",
+              "email": "judestainz@yahoo.com",
+              "first_name": "Jude",
+              "last_name": "Nwadiuto",
+              "active": true,
+              "created_at": "2024-03-31T01:36:00"
+            },
+            {
+              "phone": "+234852142555",
+              "role": "returning",
+              "email": "yajac76834@dpsols.com",
+              "first_name": "New Tester",
+              "last_name": "Tester",
+              "active": true,
+              "created_at": "2023-12-03T05:03:00"
+            },
+            {
+              "phone": "+2349095355158",
+              "role": "returning",
+              "email": "realdangdat@gmail.com",
+              "first_name": "Tester 2",
+              "last_name": "Tester2",
+              "active": true,
+              "created_at": "2023-08-22T03:24:00"
+            },
+            {
+              "phone": "+2347030766794",
+              "role": "new_user",
+              "email": "test@test.com",
+              "first_name": "Foo",
+              "last_name": "Bar",
+              "active": true,
+              "created_at": "2023-06-12T15:32:00"
+            }
+          ],
+          "stores": [
+            {
+              "store_id": "FZY_926025",
+              "subentity_id": 7,
+              "owner": "Mars Tech",
+              "name": "Ask Me Restaurant Jos",
+              "branch": "Ask Me Restaurant Jos",
+              "currency": "jpy",
+              "status": 1,
+              "mobile": "+2348166675609",
+              "last_active_at": "2026-05-10T12:00:00",
+              "created_at": "2026-04-22T22:58:00",
+              "lat": 9.909435720196303,
+              "lng": 8.891228847205639
+            },
+            {
+              "store_id": "FZY_586940",
+              "subentity_id": 6,
+              "owner": "Premium Coffee JP",
+              "name": "Premium Cafe JP",
+              "branch": "Premium Cafe JP",
+              "currency": "jpy",
+              "status": 1,
+              "mobile": "+819081811935",
+              "last_active_at": "2026-05-09T03:13:00",
+              "created_at": "2024-07-15T07:01:00",
+              "lat": 35.15494521954757,
+              "lng": 136.9663666561246
+            }
+          ],
+          "pending_subscription_stores": [
+            {
+              "store_id": "FZY_598615",
+              "owner": "fainzy_admin",
+              "name": "MAGXI TASTY SHAWARMA Jos",
+              "branch": "MAGXI TASTY SHAWARMA Jos",
+              "currency": "jpy",
+              "status": 3,
+              "last_active_at": "2026-04-22T23:39:00",
+              "created_at": "2026-04-22T23:39:00",
+              "subscription_ready": false
+            },
+            {
+              "store_id": "FZY_712646",
+              "owner": "matrix",
+              "name": "Luxe Austa",
+              "branch": "Luxe Austa",
+              "currency": "jpy",
+              "status": 3,
+              "last_active_at": "2024-03-28T11:33:00",
+              "created_at": "2024-03-28T05:31:00"
+            },
+            {
+              "store_id": "FZY_210838",
+              "owner": "test",
+              "name": "Blenco Supermarket",
+              "branch": "Blenco Supermarket",
+              "currency": "jpy",
+              "status": 3,
+              "last_active_at": "2024-03-28T06:27:00",
+              "created_at": "2024-03-25T11:39:00"
+            },
+            {
+              "store_id": "FZY_897908",
+              "owner": "fainzy_admin",
+              "name": "Fainzy Cafe JP - Family Mart Nagoya Uni - ファミリーマート名古屋大学店",
+              "branch": "Fainzy Cafe JP - Family Mart Nagoya Uni",
+              "currency": "jpy",
+              "status": 3,
+              "mobile": "+819081811937",
+              "last_active_at": "2026-04-27T06:01:00",
+              "created_at": "2024-03-26T12:27:00",
+              "subscription_ready": false
+            },
+            {
+              "store_id": "FZY_152932",
+              "owner": "fainzy_admin",
+              "name": "Blenco Supermarket 2",
+              "branch": "Blenco Supermarket 2",
+              "currency": "jpy",
+              "status": 3,
+              "last_active_at": "2026-04-17T04:28:00",
+              "created_at": "2024-03-25T11:40:00",
+              "subscription_ready": false
+            },
+            {
+              "store_id": "FZY_604840",
+              "owner": "fainzy_admin",
+              "name": "Fainzy Cafe JP - Family Mart IB ファミリーマート名古屋大学ＩＢ館店",
+              "branch": "IB 名古屋大学ＩＢ支店",
+              "currency": "jpy",
+              "status": 1,
+              "mobile": "+2348166675609",
+              "last_active_at": "2026-04-28T16:51:00",
+              "created_at": "2024-03-25T07:48:00",
+              "subscription_ready": false
+            }
+          ]
+        },
+        "is_default": true
+      }
+    ]
+  }
+}

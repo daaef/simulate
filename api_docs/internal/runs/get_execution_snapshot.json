@@ -1,0 +1,68 @@
+{
+  "useCase": "get_execution_snapshot",
+  "group": "runs",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/runs/{run_id}/execution-snapshot"
+  },
+  "usedIn": {
+    "screen": "Run detail snapshot",
+    "chain": [
+      "GET /api/v1/runs/{run_id}/execution-snapshot → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Snapshot tab opens",
+  "params": {
+    "path": {
+      "run_id": 2
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:14.643152+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "run_id": 2,
+    "available": true,
+    "snapshot": {
+      "flow": "doctor",
+      "mode": null,
+      "plan": "sim_actors.json",
+      "phone": null,
+      "suite": null,
+      "users": null,
+      "orders": null,
+      "reject": null,
+      "timing": "fast",
+      "command": "python3 -u -m simulate doctor --plan sim_actors.json --timing fast",
+      "version": 2,
+      "interval": null,
+      "store_id": null,
+      "all_users": false,
+      "scenarios": [],
+      "continuous": false,
+      "created_at": "2026-07-27T01:35:14.078279+00:00",
+      "extra_args": [],
+      "strict_plan": false,
+      "timeout_fails": false,
+      "skip_app_probes": false,
+      "no_auto_provision": false,
+      "post_order_actions": null,
+      "enforce_websocket_gates": false,
+      "skip_store_dashboard_probes": false
+    }
+  }
+}

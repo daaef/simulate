@@ -1,0 +1,41 @@
+{
+  "useCase": "list_archived_runs",
+  "group": "archives",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/archives/runs"
+  },
+  "usedIn": {
+    "screen": "Archives runs tab",
+    "chain": [
+      "GET /api/v1/archives/runs → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Archived runs list",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:12.851033+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "runs": [],
+    "total": 0,
+    "limit": 50,
+    "offset": 0
+  }
+}

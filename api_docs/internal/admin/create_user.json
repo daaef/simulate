@@ -1,0 +1,50 @@
+{
+  "useCase": "create_user",
+  "group": "admin",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/admin/users"
+  },
+  "usedIn": {
+    "screen": "Admin panel",
+    "chain": [
+      "POST /api/v1/admin/users → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Admin creates user",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "username": "test_api_docs_1785116310",
+      "email": "test-api-docs-1785116310@example.com",
+      "password": "TestPassword123!",
+      "role": "operator"
+    }
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "yyJgW3VtY36Gtp2WLArghzkLY0Ve3ADkaQVFcBi9CJAUnJZsoI7sNmL9CdJvN1F_",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:38:30.874510+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "message": "User created successfully",
+    "user": {
+      "id": 3,
+      "username": "test_api_docs_1785116310",
+      "email": "test-api-docs-1785116310@example.com",
+      "role": "operator",
+      "created_at": "2026-07-27T01:38:30.864881Z"
+    }
+  }
+}

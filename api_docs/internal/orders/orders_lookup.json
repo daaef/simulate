@@ -1,0 +1,39 @@
+{
+  "useCase": "orders_lookup",
+  "group": "orders",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/orders/lookup"
+  },
+  "usedIn": {
+    "screen": "Orders search",
+    "chain": [
+      "GET /api/v1/orders/lookup → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator searches order",
+  "params": {
+    "path": {},
+    "query": {
+      "order_id": "12345"
+    },
+    "body": {}
+  },
+  "auth": {
+    "header": "x-fainzy-token",
+    "value": "voio1qPNyzcmHEQ2QXfsMQiEaJ3hpu3u5hrveLxDONUnJfsJ5XFMpA6nwNrmtrH2",
+    "howObtained": "Store login token"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:25.322237+01:00",
+    "status": null,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Skipped: Makes real external calls to fainzy.tech/lastmile.fainzy.tech APIs"
+}

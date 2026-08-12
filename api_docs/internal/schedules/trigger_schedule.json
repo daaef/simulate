@@ -1,0 +1,41 @@
+{
+  "useCase": "trigger_schedule",
+  "group": "schedules",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/schedules/{schedule_id}/trigger"
+  },
+  "usedIn": {
+    "screen": "Schedules page",
+    "chain": [
+      "POST /api/v1/schedules/{schedule_id}/trigger → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator triggers schedule",
+  "params": {
+    "path": {
+      "schedule_id": 8
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "wRSnJzzXGx2GPZ5rFiHTGrjC_F8lF2k8x5egXsR3VuzUhtVSZRxc9gRLdgBT6q1e",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:23.821685+01:00",
+    "status": 409,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "detail": "Schedule 8 is deleted."
+  },
+  "expectedNon2xx": true
+}

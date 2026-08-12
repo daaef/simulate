@@ -1,0 +1,47 @@
+{
+  "useCase": "otp_verify",
+  "group": "auth",
+  "part": "external",
+  "endpoint": {
+    "method": "POST",
+    "host": "lastmile.fainzy.tech",
+    "path": "/v1/auth/otp/verify/"
+  },
+  "usedIn": {
+    "screen": "Login/registration",
+    "chain": [
+      "POST /v1/auth/otp/verify/ → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "User enters OTP",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "phone_number": "+819081819999",
+      "otp": "8899"
+    }
+  },
+  "auth": {
+    "header": "n/a",
+    "value": null,
+    "howObtained": "No auth"
+  },
+  "sensitivePaths": ["params.body.phone_number", "params.body.otp"],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T00:05:00+00:00",
+    "status": 200,
+    "tool": "manual (user-executed curl, per user's command-execution policy)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "OTP verified successfully",
+    "data": {
+      "setup_complete": false,
+      "is_active": false,
+      "verified": true
+    }
+  }
+}

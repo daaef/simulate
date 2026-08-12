@@ -1,0 +1,41 @@
+{
+  "useCase": "orders_store_login",
+  "group": "orders",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/orders/store-login"
+  },
+  "usedIn": {
+    "screen": "Orders store selector",
+    "chain": [
+      "POST /api/v1/orders/store-login → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator selects store",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "store_id": "1",
+      "username": "store_user",
+      "password": "store_pass"
+    }
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "voio1qPNyzcmHEQ2QXfsMQiEaJ3hpu3u5hrveLxDONUnJfsJ5XFMpA6nwNrmtrH2",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:25.321711+01:00",
+    "status": null,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Skipped: Makes real external calls to fainzy.tech/lastmile.fainzy.tech APIs"
+}

@@ -1,0 +1,50 @@
+{
+  "useCase": "get_run_metrics",
+  "group": "runs",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/runs/{run_id}/metrics"
+  },
+  "usedIn": {
+    "screen": "Run detail metrics",
+    "chain": [
+      "GET /api/v1/runs/{run_id}/metrics → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Metrics tab opens",
+  "params": {
+    "path": {
+      "run_id": 2
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:14.585002+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "run_id": 2,
+    "available": false,
+    "metrics": {
+      "total_events": 0,
+      "failed_events": 0,
+      "http_calls": 0,
+      "websocket_events": 0,
+      "top_actors": {},
+      "top_actions": {},
+      "action_counts": []
+    }
+  }
+}

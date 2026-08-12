@@ -1,5 +1,16 @@
 # Last Mile System — API Reference & Use Cases
 
+> **Superseded for simulate's own API calls (2026-07-27):** the external-API portion of this
+> document (Fainzy Core API / LastMile Operations API calls simulate makes as a client) has been
+> replaced by [`../api_docs/`](../api_docs/README.md) — per-use-case JSON files with grep-verified
+> code citations, live-captured real responses (unredacted, with eye-toggle masking in
+> [`../api_docs/index.html`](../api_docs/index.html)), and freshness timestamps, instead of this
+> file's narrative descriptions. `api_docs/` also documents simulate's *own* backend API
+> (`api/app/*`, consumed by `web/`) — a surface this file never covered. This file is kept for
+> historical reference and for its `last_mile_user`/`last_mile_store`/`dashboard` coverage, which
+> `api_docs/` does not attempt to replace. See `docs/API_DOCS_PLAN_2026-07-27.md` for the plan
+> that produced `api_docs/`.
+
 **Projects covered:** last_mile_user · last_mile_store · dashboard · simulate  
 **Date:** 2026-06-12  
 **Backends:** Fainzy Core API · LastMile Operations API · Web/CMS API · WebSockets · Google Maps · Stripe · Firebase · Simulator Internal API

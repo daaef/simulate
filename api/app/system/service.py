@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .models import EmailSettingsUpdateRequest, RetentionPolicyUpdateRequest, TimezonePolicyUpdateRequest
+from .models import (
+    EmailSettingsUpdateRequest,
+    IntegrationAutomationUpdateRequest,
+    RetentionPolicyUpdateRequest,
+    TimezonePolicyUpdateRequest,
+)
 
 _runtime: dict[str, Callable[..., Any]] = {}
 
@@ -37,6 +42,14 @@ def set_email_settings(request: EmailSettingsUpdateRequest) -> dict[str, Any]:
 
 def send_test_email() -> dict[str, Any]:
     return _callback("send_test_email")()
+
+
+def get_integration_automation() -> dict[str, Any]:
+    return _callback("get_integration_automation")()
+
+
+def set_integration_automation(request: IntegrationAutomationUpdateRequest) -> dict[str, Any]:
+    return _callback("set_integration_automation")(request)
 
 
 def get_retention_policy() -> dict[str, Any]:

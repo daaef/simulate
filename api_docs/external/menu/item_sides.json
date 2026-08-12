@@ -1,0 +1,42 @@
+{
+  "useCase": "item_sides",
+  "group": "menu",
+  "part": "external",
+  "endpoint": {
+    "method": "GET",
+    "host": "fainzy.tech",
+    "path": "/v1/core/subentities/{id}/menu/{menuId}/sides"
+  },
+  "usedIn": {
+    "screen": "Item details",
+    "chain": [
+      "GET /v1/core/subentities/{id}/menu/{menuId}/sides → call site verified in Stage 1/2",
+      "store_sim.py:838 context — confirmed real host/auth via live capture 2026-07-27: fainzy.tech + Fainzy-Token (skeleton originally said lastmile.fainzy.tech + Authorization)"
+    ]
+  },
+  "trigger": "Item details open",
+  "params": {
+    "path": {"id": 7, "menuId": 3},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "Fainzy-Token",
+    "value": "gAAAAABqZsbj7xKsGDEx01hZ8iRvogIkEfHAXQgdBBLeR_2sOFaSQjN82N6MN9f2EyeJLtpw7TneOxsZUtEMbdpygQDwBoJIiGmk36jqjz0viT3e1vZ-mQrWYnYt1y82eLsypQ7nw42s",
+    "howObtained": "POST /v1/biz/product/authentication/?product=rds"
+  },
+  "sensitivePaths": ["auth.value"],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T00:44:00+00:00",
+    "status": 200,
+    "tool": "manual (user-executed curl, per user's command-execution policy)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "Sides retrieved successfully!",
+    "data": []
+  },
+  "note": "Real, legitimately empty result -- every menu item on subentity 7 (see store_menu.json's captured response) has sides: [], so this store has no side/customization options configured on any item. Not a capture failure."
+}

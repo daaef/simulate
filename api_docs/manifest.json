@@ -1,0 +1,1832 @@
+{
+  "generatedAt": "2026-07-27T04:05:24.467752+01:00",
+  "totalUseCases": 106,
+  "parts": {
+    "external": {
+      "totalUseCases": 16,
+      "groups": [
+        {
+          "group": "auth",
+          "useCaseCount": 4,
+          "useCases": [
+            {
+              "useCase": "login_authenticate_user",
+              "file": "external/auth/login_authenticate_user.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "lastmile.fainzy.tech",
+                "path": "/v1/auth/users/auth/"
+              },
+              "screen": "Login",
+              "trigger": "OTP verified",
+              "verifiedAt": "2026-07-27T00:25:00+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "otp_send",
+              "file": "external/auth/otp_send.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "lastmile.fainzy.tech",
+                "path": "/v1/auth/otp/send/"
+              },
+              "screen": "Login/registration",
+              "trigger": "User submits phone",
+              "verifiedAt": "2026-07-27T00:00:00+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "otp_verify",
+              "file": "external/auth/otp_verify.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "lastmile.fainzy.tech",
+                "path": "/v1/auth/otp/verify/"
+              },
+              "screen": "Login/registration",
+              "trigger": "User enters OTP",
+              "verifiedAt": "2026-07-27T00:05:00+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "signup_create_user",
+              "file": "external/auth/signup_create_user.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "lastmile.fainzy.tech",
+                "path": "/v1/auth/users/create/"
+              },
+              "screen": "Registration",
+              "trigger": "Registration completes",
+              "verifiedAt": "2026-07-27T00:15:00+00:00",
+              "status": 201,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "config",
+          "useCaseCount": 1,
+          "useCases": [
+            {
+              "useCase": "fainzy_token",
+              "file": "external/config/fainzy_token.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "fainzy.tech",
+                "path": "/v1/biz/product/authentication/"
+              },
+              "screen": "Simulator startup",
+              "trigger": "Startup begins",
+              "verifiedAt": "2026-07-27T01:59:28.921610+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "location",
+          "useCaseCount": 1,
+          "useCases": [
+            {
+              "useCase": "map_locations_by_geo",
+              "file": "external/location/map_locations_by_geo.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "fainzy.tech",
+                "path": "/v1/entities/locations/{lng}/{lat}/"
+              },
+              "screen": "Location lookup",
+              "trigger": "User/simulator looks up area",
+              "verifiedAt": "2026-07-27T01:59:29.370797+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "menu",
+          "useCaseCount": 3,
+          "useCases": [
+            {
+              "useCase": "item_sides",
+              "file": "external/menu/item_sides.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "fainzy.tech",
+                "path": "/v1/core/subentities/{id}/menu/{menuId}/sides"
+              },
+              "screen": "Item details",
+              "trigger": "Item details open",
+              "verifiedAt": "2026-07-27T00:44:00+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "store_categories",
+              "file": "external/menu/store_categories.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "fainzy.tech",
+                "path": "/v1/core/subentities/{id}/categories"
+              },
+              "screen": "Store menu",
+              "trigger": "Categories load",
+              "verifiedAt": "2026-07-27T00:42:00+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "store_menu",
+              "file": "external/menu/store_menu.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "fainzy.tech",
+                "path": "/v1/core/subentities/{id}/menu"
+              },
+              "screen": "Store menu",
+              "trigger": "Menu loads",
+              "verifiedAt": "2026-07-27T00:40:00+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": true
+            }
+          ]
+        },
+        {
+          "group": "orders",
+          "useCaseCount": 4,
+          "useCases": [
+            {
+              "useCase": "checkout_place_order",
+              "file": "external/orders/checkout_place_order.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "lastmile.fainzy.tech",
+                "path": "/v1/core/orders/"
+              },
+              "screen": "Checkout",
+              "trigger": "Place order tapped (simulator: place_order() call after fixtures are loaded)",
+              "verifiedAt": "2026-07-24T06:23:51.180851+01:00",
+              "status": 201,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "free_order_complete",
+              "file": "external/orders/free_order_complete.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "lastmile.fainzy.tech",
+                "path": "/v1/core/order/free/"
+              },
+              "screen": "Checkout",
+              "trigger": "Free order placed",
+              "verifiedAt": null,
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "order_cancel_update",
+              "file": "external/orders/order_cancel_update.json",
+              "endpoint": {
+                "method": "PATCH",
+                "host": "lastmile.fainzy.tech",
+                "path": "/v1/core/orders/"
+              },
+              "screen": "Order details",
+              "trigger": "User/simulator cancels order",
+              "verifiedAt": "2026-07-24T06:33:54.515271+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "order_details_poll",
+              "file": "external/orders/order_details_poll.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "lastmile.fainzy.tech",
+                "path": "/v1/core/orders/?order_id="
+              },
+              "screen": "Order details",
+              "trigger": "Order details poll tick / checkout waiting-for-store-acceptance poll",
+              "verifiedAt": "2026-07-24T05:20:09.842900+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "stores",
+          "useCaseCount": 3,
+          "useCases": [
+            {
+              "useCase": "home_stores_by_area",
+              "file": "external/stores/home_stores_by_area.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "fainzy.tech",
+                "path": "/v1/entities/subentities/service-area/{a}/"
+              },
+              "screen": "Home feed",
+              "trigger": "Feed loads stores",
+              "verifiedAt": "2026-07-27T01:59:30.293617+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": true
+            },
+            {
+              "useCase": "store_detail_status_poll",
+              "file": "external/stores/store_detail_status_poll.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "fainzy.tech",
+                "path": "/v1/entities/subentities/{id}"
+              },
+              "screen": "Store page",
+              "trigger": "Store page opens or periodic status poll",
+              "verifiedAt": "2026-07-27T01:59:30.719749+00:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": true
+            },
+            {
+              "useCase": "store_update_status",
+              "file": "external/stores/store_update_status.json",
+              "endpoint": {
+                "method": "PATCH",
+                "host": "fainzy.tech",
+                "path": "/v1/entities/subentities/{id}"
+              },
+              "screen": "Store settings",
+              "trigger": "Store status changes",
+              "verifiedAt": null,
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        }
+      ]
+    },
+    "internal": {
+      "totalUseCases": 90,
+      "groups": [
+        {
+          "group": "admin",
+          "useCaseCount": 5,
+          "useCases": [
+            {
+              "useCase": "create_user",
+              "file": "internal/admin/create_user.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/admin/users"
+              },
+              "screen": "Admin panel",
+              "trigger": "Admin creates user",
+              "verifiedAt": "2026-07-27T02:38:30.874510+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "delete_user",
+              "file": "internal/admin/delete_user.json",
+              "endpoint": {
+                "method": "DELETE",
+                "host": "localhost:8000",
+                "path": "/api/v1/admin/users/{user_id}"
+              },
+              "screen": "Admin panel",
+              "trigger": "Admin deletes user",
+              "verifiedAt": "2026-07-27T02:38:59.444546+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_users",
+              "file": "internal/admin/list_users.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/admin/users"
+              },
+              "screen": "Admin dashboard",
+              "trigger": "Admin dashboard loads",
+              "verifiedAt": "2026-07-27T02:35:14.057111+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "reset_user_password",
+              "file": "internal/admin/reset_user_password.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/admin/users/{user_id}/reset-password"
+              },
+              "screen": "Admin panel",
+              "trigger": "Admin resets password",
+              "verifiedAt": "2026-07-27T02:45:22.686248+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "update_user",
+              "file": "internal/admin/update_user.json",
+              "endpoint": {
+                "method": "PUT",
+                "host": "localhost:8000",
+                "path": "/api/v1/admin/users/{user_id}"
+              },
+              "screen": "Admin panel",
+              "trigger": "Admin edits user",
+              "verifiedAt": "2026-07-27T02:42:39.591482+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "alerts",
+          "useCaseCount": 1,
+          "useCases": [
+            {
+              "useCase": "list_alerts",
+              "file": "internal/alerts/list_alerts.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/alerts"
+              },
+              "screen": "Dashboard alerts",
+              "trigger": "Alerts panel loads",
+              "verifiedAt": "2026-07-27T02:35:13.320239+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "archives",
+          "useCaseCount": 9,
+          "useCases": [
+            {
+              "useCase": "get_archive_summary",
+              "file": "internal/archives/get_archive_summary.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/archives/summary"
+              },
+              "screen": "Archives page",
+              "trigger": "Archives page loads",
+              "verifiedAt": "2026-07-27T02:35:12.791452+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_archived_integration_mappings",
+              "file": "internal/archives/list_archived_integration_mappings.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/archives/integration-mappings"
+              },
+              "screen": "Archives mappings tab",
+              "trigger": "Archived mappings list",
+              "verifiedAt": "2026-07-27T02:35:12.977443+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_archived_profiles",
+              "file": "internal/archives/list_archived_profiles.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/archives/profiles"
+              },
+              "screen": "Archives profiles tab",
+              "trigger": "Archived profiles list",
+              "verifiedAt": "2026-07-27T02:35:12.893898+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_archived_runs",
+              "file": "internal/archives/list_archived_runs.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/archives/runs"
+              },
+              "screen": "Archives runs tab",
+              "trigger": "Archived runs list",
+              "verifiedAt": "2026-07-27T02:35:12.851033+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_archived_schedules",
+              "file": "internal/archives/list_archived_schedules.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/archives/schedules"
+              },
+              "screen": "Archives schedules tab",
+              "trigger": "Archived schedules list",
+              "verifiedAt": "2026-07-27T02:35:12.935247+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "purge_integration_mapping",
+              "file": "internal/archives/purge_integration_mapping.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/archives/integration-mappings/{mapping_id}/purge"
+              },
+              "screen": "Archives mappings",
+              "trigger": "Operator purges mapping",
+              "verifiedAt": "2026-07-27T02:46:25.011309+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "purge_profile",
+              "file": "internal/archives/purge_profile.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/archives/profiles/{profile_id}/purge"
+              },
+              "screen": "Archives profiles",
+              "trigger": "Operator purges profile",
+              "verifiedAt": "2026-07-27T02:46:24.856990+01:00",
+              "status": 409,
+              "badge": null,
+              "expectedNon2xx": true,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "purge_run",
+              "file": "internal/archives/purge_run.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/archives/runs/{run_id}/purge"
+              },
+              "screen": "Archives runs",
+              "trigger": "Operator purges run",
+              "verifiedAt": "2026-07-27T02:46:24.811026+01:00",
+              "status": 409,
+              "badge": null,
+              "expectedNon2xx": true,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "purge_schedule",
+              "file": "internal/archives/purge_schedule.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/archives/schedules/{schedule_id}/purge"
+              },
+              "screen": "Archives schedules",
+              "trigger": "Operator purges schedule",
+              "verifiedAt": "2026-07-27T02:46:24.219103+01:00",
+              "status": 409,
+              "badge": null,
+              "expectedNon2xx": true,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "auth",
+          "useCaseCount": 6,
+          "useCases": [
+            {
+              "useCase": "get_me",
+              "file": "internal/auth/get_me.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/auth/me"
+              },
+              "screen": "Dashboard app load",
+              "trigger": "Dashboard loads user profile",
+              "verifiedAt": "2026-07-27T02:35:12.377850+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_session",
+              "file": "internal/auth/get_session.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/auth/session"
+              },
+              "screen": "Dashboard app load",
+              "trigger": "Dashboard checks session",
+              "verifiedAt": "2026-07-27T02:35:12.346497+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "login_user",
+              "file": "internal/auth/login_user.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/auth/login"
+              },
+              "screen": "Dashboard login",
+              "trigger": "User submits login form",
+              "verifiedAt": "2026-07-27T02:34:52.933121+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "logout_user",
+              "file": "internal/auth/logout_user.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/auth/logout"
+              },
+              "screen": "Dashboard user menu",
+              "trigger": "User clicks Logout",
+              "verifiedAt": "2026-07-27T02:40:41.435960+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "refresh_token",
+              "file": "internal/auth/refresh_token.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/auth/refresh"
+              },
+              "screen": "Dashboard background",
+              "trigger": "Access token expires",
+              "verifiedAt": "2026-07-27T02:46:17.512049+01:00",
+              "status": 401,
+              "badge": null,
+              "expectedNon2xx": true,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "register_user",
+              "file": "internal/auth/register_user.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/auth/register"
+              },
+              "screen": "Registration page",
+              "trigger": "User attempts registration",
+              "verifiedAt": "2026-07-27T02:46:17.518615+01:00",
+              "status": 403,
+              "badge": null,
+              "expectedNon2xx": true,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "integrations",
+          "useCaseCount": 11,
+          "useCases": [
+            {
+              "useCase": "create_github_mapping",
+              "file": "internal/integrations/create_github_mapping.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/mappings"
+              },
+              "screen": "Integrations page",
+              "trigger": "Admin creates mapping",
+              "verifiedAt": "2026-07-27T02:42:40.196511+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "create_github_project",
+              "file": "internal/integrations/create_github_project.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/projects"
+              },
+              "screen": "Integrations page",
+              "trigger": "Admin registers repo",
+              "verifiedAt": "2026-07-27T02:46:25.326097+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "delete_github_mapping",
+              "file": "internal/integrations/delete_github_mapping.json",
+              "endpoint": {
+                "method": "DELETE",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/mappings/{mapping_id}"
+              },
+              "screen": "Integrations page",
+              "trigger": "Admin deletes mapping",
+              "verifiedAt": "2026-07-27T02:42:40.279924+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "delete_github_project",
+              "file": "internal/integrations/delete_github_project.json",
+              "endpoint": {
+                "method": "DELETE",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/projects/{project}"
+              },
+              "screen": "Integrations page",
+              "trigger": "Admin deletes project",
+              "verifiedAt": "2026-07-27T02:46:25.327556+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "github_deployment_complete_webhook",
+              "file": "internal/integrations/github_deployment_complete_webhook.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/deployment-complete"
+              },
+              "screen": "GitHub webhook",
+              "trigger": "Deployment webhook fires",
+              "verifiedAt": "2026-07-27T02:46:25.328021+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_github_mappings",
+              "file": "internal/integrations/list_github_mappings.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/mappings"
+              },
+              "screen": "Integrations page",
+              "trigger": "Mappings list loads",
+              "verifiedAt": "2026-07-27T02:35:13.532810+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_github_projects",
+              "file": "internal/integrations/list_github_projects.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/projects"
+              },
+              "screen": "Integrations page",
+              "trigger": "Projects list loads",
+              "verifiedAt": "2026-07-27T02:35:13.681205+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_github_triggers",
+              "file": "internal/integrations/list_github_triggers.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/triggers"
+              },
+              "screen": "Integrations page",
+              "trigger": "Triggers list loads",
+              "verifiedAt": "2026-07-27T02:35:13.656222+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "restore_github_mapping",
+              "file": "internal/integrations/restore_github_mapping.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/mappings/{mapping_id}/restore"
+              },
+              "screen": "Archives",
+              "trigger": "Admin restores mapping",
+              "verifiedAt": "2026-07-27T02:42:40.374313+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "rotate_github_project_secret",
+              "file": "internal/integrations/rotate_github_project_secret.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/projects/{project}/rotate-secret"
+              },
+              "screen": "Integrations page",
+              "trigger": "Admin rotates secret",
+              "verifiedAt": "2026-07-27T02:46:25.326631+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "update_github_project_repositories",
+              "file": "internal/integrations/update_github_project_repositories.json",
+              "endpoint": {
+                "method": "PATCH",
+                "host": "localhost:8000",
+                "path": "/api/v1/integrations/github/projects/{project}/repositories"
+              },
+              "screen": "Integrations page",
+              "trigger": "Admin updates repos",
+              "verifiedAt": "2026-07-27T02:46:25.327088+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "orders",
+          "useCaseCount": 10,
+          "useCases": [
+            {
+              "useCase": "orders_auto_login",
+              "file": "internal/orders/orders_auto_login.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/auto-login"
+              },
+              "screen": "Orders panel",
+              "trigger": "Panel opens",
+              "verifiedAt": "2026-07-27T02:37:43.199465+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "orders_customer_search",
+              "file": "internal/orders/orders_customer_search.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/customers/search"
+              },
+              "screen": "Orders search",
+              "trigger": "Customer search runs",
+              "verifiedAt": "2026-07-27T02:46:25.324063+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "orders_customer_stats",
+              "file": "internal/orders/orders_customer_stats.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/customer-stats"
+              },
+              "screen": "Orders stats",
+              "trigger": "Customer stats load",
+              "verifiedAt": "2026-07-27T02:46:25.323613+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "orders_get_config",
+              "file": "internal/orders/orders_get_config.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/config"
+              },
+              "screen": "Orders panel",
+              "trigger": "Panel loads config",
+              "verifiedAt": "2026-07-27T02:35:13.709306+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "orders_list",
+              "file": "internal/orders/orders_list.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/list"
+              },
+              "screen": "Orders list",
+              "trigger": "Order list loads",
+              "verifiedAt": "2026-07-27T02:46:25.322695+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "orders_list_stores",
+              "file": "internal/orders/orders_list_stores.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/stores"
+              },
+              "screen": "Orders store selector",
+              "trigger": "Store dropdown loads",
+              "verifiedAt": "2026-07-27T02:35:13.736257+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "orders_lookup",
+              "file": "internal/orders/orders_lookup.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/lookup"
+              },
+              "screen": "Orders search",
+              "trigger": "Operator searches order",
+              "verifiedAt": "2026-07-27T02:46:25.322237+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "orders_store_login",
+              "file": "internal/orders/orders_store_login.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/store-login"
+              },
+              "screen": "Orders store selector",
+              "trigger": "Operator selects store",
+              "verifiedAt": "2026-07-27T02:46:25.321711+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "orders_store_stats",
+              "file": "internal/orders/orders_store_stats.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/store-stats"
+              },
+              "screen": "Orders stats",
+              "trigger": "Stats tab loads",
+              "verifiedAt": "2026-07-27T02:46:25.323157+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "orders_update_status",
+              "file": "internal/orders/orders_update_status.json",
+              "endpoint": {
+                "method": "PATCH",
+                "host": "localhost:8000",
+                "path": "/api/v1/orders/status"
+              },
+              "screen": "Orders panel",
+              "trigger": "Operator updates status",
+              "verifiedAt": "2026-07-27T02:46:25.324594+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "overview",
+          "useCaseCount": 3,
+          "useCases": [
+            {
+              "useCase": "get_latest_run_overview",
+              "file": "internal/overview/get_latest_run_overview.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/overview/latest-run"
+              },
+              "screen": "Dashboard home",
+              "trigger": "Dashboard loads overview",
+              "verifiedAt": "2026-07-27T02:35:13.904365+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_run_overview",
+              "file": "internal/overview/get_run_overview.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/overview/runs/{run_id}"
+              },
+              "screen": "Run detail overview",
+              "trigger": "Overview loads",
+              "verifiedAt": "2026-07-27T02:35:14.769263+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_socket_status",
+              "file": "internal/overview/get_socket_status.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/overview/socket-status"
+              },
+              "screen": "Dashboard socket monitor",
+              "trigger": "Socket status loads",
+              "verifiedAt": "2026-07-27T02:35:14.016257+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "retention",
+          "useCaseCount": 1,
+          "useCases": [
+            {
+              "useCase": "get_retention_summary",
+              "file": "internal/retention/get_retention_summary.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/retention/summary"
+              },
+              "screen": "Retention settings",
+              "trigger": "Settings page loads",
+              "verifiedAt": "2026-07-27T02:35:13.085473+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "run_profiles",
+          "useCaseCount": 6,
+          "useCases": [
+            {
+              "useCase": "create_run_profile",
+              "file": "internal/run_profiles/create_run_profile.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/run-profiles"
+              },
+              "screen": "Profiles page",
+              "trigger": "Operator saves profile",
+              "verifiedAt": "2026-07-27T02:37:43.665817+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "delete_run_profile",
+              "file": "internal/run_profiles/delete_run_profile.json",
+              "endpoint": {
+                "method": "DELETE",
+                "host": "localhost:8000",
+                "path": "/api/v1/run-profiles/{profile_id}"
+              },
+              "screen": "Profiles page",
+              "trigger": "Operator deletes profile",
+              "verifiedAt": "2026-07-27T02:38:59.100453+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "launch_run_profile",
+              "file": "internal/run_profiles/launch_run_profile.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/run-profiles/{profile_id}/launch"
+              },
+              "screen": "Profiles page",
+              "trigger": "Operator launches profile",
+              "verifiedAt": "2026-07-27T02:38:59.266301+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_run_profiles",
+              "file": "internal/run_profiles/list_run_profiles.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/run-profiles"
+              },
+              "screen": "Profiles page",
+              "trigger": "Profiles page loads",
+              "verifiedAt": "2026-07-27T02:37:41.029056+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "restore_run_profile",
+              "file": "internal/run_profiles/restore_run_profile.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/run-profiles/{profile_id}/restore"
+              },
+              "screen": "Archives",
+              "trigger": "Operator restores profile",
+              "verifiedAt": "2026-07-27T02:38:59.155689+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "update_run_profile",
+              "file": "internal/run_profiles/update_run_profile.json",
+              "endpoint": {
+                "method": "PUT",
+                "host": "localhost:8000",
+                "path": "/api/v1/run-profiles/{profile_id}"
+              },
+              "screen": "Profiles page",
+              "trigger": "Operator edits profile",
+              "verifiedAt": "2026-07-27T02:42:38.071957+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "runs",
+          "useCaseCount": 14,
+          "useCases": [
+            {
+              "useCase": "cancel_run",
+              "file": "internal/runs/cancel_run.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/{run_id}/cancel"
+              },
+              "screen": "Run detail",
+              "trigger": "Operator cancels run",
+              "verifiedAt": "2026-07-27T02:37:44.398405+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "create_run",
+              "file": "internal/runs/create_run.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs"
+              },
+              "screen": "Run creation",
+              "trigger": "Operator starts run",
+              "verifiedAt": "2026-07-27T02:35:14.151945+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "delete_run",
+              "file": "internal/runs/delete_run.json",
+              "endpoint": {
+                "method": "DELETE",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/{run_id}"
+              },
+              "screen": "Runs list",
+              "trigger": "Operator deletes run",
+              "verifiedAt": "2026-07-27T02:37:44.474035+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_dashboard_summary",
+              "file": "internal/runs/get_dashboard_summary.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/dashboard/summary"
+              },
+              "screen": "Dashboard home",
+              "trigger": "Dashboard home loads",
+              "verifiedAt": "2026-07-27T02:35:12.643795+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_execution_snapshot",
+              "file": "internal/runs/get_execution_snapshot.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/{run_id}/execution-snapshot"
+              },
+              "screen": "Run detail snapshot",
+              "trigger": "Snapshot tab opens",
+              "verifiedAt": "2026-07-27T02:35:14.643152+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_run",
+              "file": "internal/runs/get_run.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/{run_id}"
+              },
+              "screen": "Run detail page",
+              "trigger": "Detail page loads",
+              "verifiedAt": "2026-07-27T02:35:14.400170+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_run_artifacts",
+              "file": "internal/runs/get_run_artifacts.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/{run_id}/artifacts/{kind}"
+              },
+              "screen": "Run detail",
+              "trigger": "Report/Story/Events tab",
+              "verifiedAt": "2026-07-27T02:35:14.526355+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_run_log",
+              "file": "internal/runs/get_run_log.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/{run_id}/log"
+              },
+              "screen": "Run detail logs",
+              "trigger": "Logs tab opens",
+              "verifiedAt": "2026-07-27T02:35:14.468779+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_run_metrics",
+              "file": "internal/runs/get_run_metrics.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/{run_id}/metrics"
+              },
+              "screen": "Run detail metrics",
+              "trigger": "Metrics tab opens",
+              "verifiedAt": "2026-07-27T02:35:14.585002+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_runs_count",
+              "file": "internal/runs/get_runs_count.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/count"
+              },
+              "screen": "Dashboard",
+              "trigger": "Dashboard summary loads",
+              "verifiedAt": "2026-07-27T02:35:12.554734+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_flows",
+              "file": "internal/runs/list_flows.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/flows"
+              },
+              "screen": "Run creation form",
+              "trigger": "Form loads flow dropdown",
+              "verifiedAt": "2026-07-27T02:35:12.412899+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_runs",
+              "file": "internal/runs/list_runs.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs"
+              },
+              "screen": "Runs list page",
+              "trigger": "List page loads",
+              "verifiedAt": "2026-07-27T02:35:12.503629+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "replay_run",
+              "file": "internal/runs/replay_run.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/{run_id}/replay"
+              },
+              "screen": "Run detail",
+              "trigger": "Operator replays run",
+              "verifiedAt": "2026-07-27T02:37:44.692376+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "restore_run",
+              "file": "internal/runs/restore_run.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/runs/{run_id}/restore"
+              },
+              "screen": "Archives",
+              "trigger": "Operator restores run",
+              "verifiedAt": "2026-07-27T02:37:44.563759+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "schedules",
+          "useCaseCount": 10,
+          "useCases": [
+            {
+              "useCase": "create_schedule",
+              "file": "internal/schedules/create_schedule.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules"
+              },
+              "screen": "Schedules page",
+              "trigger": "Operator creates schedule",
+              "verifiedAt": "2026-07-27T02:38:57.729766+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "delete_schedule",
+              "file": "internal/schedules/delete_schedule.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules/{schedule_id}/delete"
+              },
+              "screen": "Schedules page",
+              "trigger": "Operator deletes schedule",
+              "verifiedAt": "2026-07-27T02:42:39.089520+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "disable_schedule",
+              "file": "internal/schedules/disable_schedule.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules/{schedule_id}/disable"
+              },
+              "screen": "Schedules page",
+              "trigger": "Operator disables schedule",
+              "verifiedAt": "2026-07-27T02:42:38.988016+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_schedule_summary",
+              "file": "internal/schedules/get_schedule_summary.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules/summary"
+              },
+              "screen": "Dashboard",
+              "trigger": "Dashboard loads summary",
+              "verifiedAt": "2026-07-27T02:35:13.196149+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_schedules",
+              "file": "internal/schedules/list_schedules.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules"
+              },
+              "screen": "Schedules page",
+              "trigger": "Schedules page loads",
+              "verifiedAt": "2026-07-27T02:35:13.128781+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "pause_schedule",
+              "file": "internal/schedules/pause_schedule.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules/{schedule_id}/pause"
+              },
+              "screen": "Schedules page",
+              "trigger": "Operator pauses schedule",
+              "verifiedAt": "2026-07-27T02:42:38.724954+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "restore_schedule",
+              "file": "internal/schedules/restore_schedule.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules/{schedule_id}/restore"
+              },
+              "screen": "Archives",
+              "trigger": "Operator restores schedule",
+              "verifiedAt": "2026-07-27T02:42:39.224622+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "resume_schedule",
+              "file": "internal/schedules/resume_schedule.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules/{schedule_id}/resume"
+              },
+              "screen": "Schedules page",
+              "trigger": "Operator resumes schedule",
+              "verifiedAt": "2026-07-27T02:42:38.879134+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "trigger_schedule",
+              "file": "internal/schedules/trigger_schedule.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules/{schedule_id}/trigger"
+              },
+              "screen": "Schedules page",
+              "trigger": "Operator triggers schedule",
+              "verifiedAt": "2026-07-27T02:46:23.821685+01:00",
+              "status": 409,
+              "badge": null,
+              "expectedNon2xx": true,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "update_schedule",
+              "file": "internal/schedules/update_schedule.json",
+              "endpoint": {
+                "method": "PUT",
+                "host": "localhost:8000",
+                "path": "/api/v1/schedules/{schedule_id}"
+              },
+              "screen": "Schedules page",
+              "trigger": "Operator edits schedule",
+              "verifiedAt": "2026-07-27T02:46:23.775371+01:00",
+              "status": 409,
+              "badge": null,
+              "expectedNon2xx": true,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "simulation_plans",
+          "useCaseCount": 5,
+          "useCases": [
+            {
+              "useCase": "create_simulation_plan",
+              "file": "internal/simulation_plans/create_simulation_plan.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/simulation-plans"
+              },
+              "screen": "Plans page",
+              "trigger": "Operator creates plan",
+              "verifiedAt": "2026-07-27T02:37:43.705578+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "delete_simulation_plan",
+              "file": "internal/simulation_plans/delete_simulation_plan.json",
+              "endpoint": {
+                "method": "DELETE",
+                "host": "localhost:8000",
+                "path": "/api/v1/simulation-plans/{plan_id}"
+              },
+              "screen": "Plans page",
+              "trigger": "Operator deletes plan",
+              "verifiedAt": "2026-07-27T02:38:59.355014+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_simulation_plan",
+              "file": "internal/simulation_plans/get_simulation_plan.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/simulation-plans/{plan_id}"
+              },
+              "screen": "Plans page",
+              "trigger": "Plan detail loads",
+              "verifiedAt": "2026-07-27T02:38:59.296898+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "list_simulation_plans",
+              "file": "internal/simulation_plans/list_simulation_plans.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/simulation-plans"
+              },
+              "screen": "Plans page",
+              "trigger": "Plans page loads",
+              "verifiedAt": "2026-07-27T02:35:13.346941+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "update_simulation_plan",
+              "file": "internal/simulation_plans/update_simulation_plan.json",
+              "endpoint": {
+                "method": "PUT",
+                "host": "localhost:8000",
+                "path": "/api/v1/simulation-plans/{plan_id}"
+              },
+              "screen": "Plans page",
+              "trigger": "Operator edits plan",
+              "verifiedAt": "2026-07-27T02:42:39.423346+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "subentities",
+          "useCaseCount": 2,
+          "useCases": [
+            {
+              "useCase": "list_subentities",
+              "file": "internal/subentities/list_subentities.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/subentities"
+              },
+              "screen": "Orders/simulation config",
+              "trigger": "Store list loads",
+              "verifiedAt": "2026-07-27T02:46:25.325049+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "search_subentities",
+              "file": "internal/subentities/search_subentities.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/subentities/search"
+              },
+              "screen": "Orders/simulation config",
+              "trigger": "Store search runs",
+              "verifiedAt": "2026-07-27T02:46:25.325506+01:00",
+              "status": null,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        },
+        {
+          "group": "system",
+          "useCaseCount": 7,
+          "useCases": [
+            {
+              "useCase": "get_system_email",
+              "file": "internal/system/get_system_email.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/system/email"
+              },
+              "screen": "Email settings",
+              "trigger": "Email settings load",
+              "verifiedAt": "2026-07-27T02:35:13.438620+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_system_retention",
+              "file": "internal/system/get_system_retention.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/system/retention"
+              },
+              "screen": "Retention settings",
+              "trigger": "Settings load",
+              "verifiedAt": "2026-07-27T02:35:13.487960+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "get_system_timezones",
+              "file": "internal/system/get_system_timezones.json",
+              "endpoint": {
+                "method": "GET",
+                "host": "localhost:8000",
+                "path": "/api/v1/system/timezones"
+              },
+              "screen": "System settings",
+              "trigger": "Settings load",
+              "verifiedAt": "2026-07-27T02:35:13.400843+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "test_system_email",
+              "file": "internal/system/test_system_email.json",
+              "endpoint": {
+                "method": "POST",
+                "host": "localhost:8000",
+                "path": "/api/v1/system/email/test"
+              },
+              "screen": "Email settings",
+              "trigger": "Admin sends test",
+              "verifiedAt": "2026-07-27T02:45:23.285050+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "update_system_email",
+              "file": "internal/system/update_system_email.json",
+              "endpoint": {
+                "method": "PUT",
+                "host": "localhost:8000",
+                "path": "/api/v1/system/email"
+              },
+              "screen": "Email settings",
+              "trigger": "Admin updates email",
+              "verifiedAt": "2026-07-27T02:45:23.248320+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "update_system_retention",
+              "file": "internal/system/update_system_retention.json",
+              "endpoint": {
+                "method": "PUT",
+                "host": "localhost:8000",
+                "path": "/api/v1/system/retention"
+              },
+              "screen": "Retention settings",
+              "trigger": "Admin updates policy",
+              "verifiedAt": "2026-07-27T02:45:23.372778+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            },
+            {
+              "useCase": "update_system_timezones",
+              "file": "internal/system/update_system_timezones.json",
+              "endpoint": {
+                "method": "PUT",
+                "host": "localhost:8000",
+                "path": "/api/v1/system/timezones"
+              },
+              "screen": "System settings",
+              "trigger": "Admin updates timezone",
+              "verifiedAt": "2026-07-27T02:45:23.197668+01:00",
+              "status": 200,
+              "badge": null,
+              "expectedNon2xx": false,
+              "hasAlsoTriggeredBy": false
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

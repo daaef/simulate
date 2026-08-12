@@ -1,0 +1,44 @@
+{
+  "useCase": "store_categories",
+  "group": "menu",
+  "part": "external",
+  "endpoint": {
+    "method": "GET",
+    "host": "fainzy.tech",
+    "path": "/v1/core/subentities/{id}/categories"
+  },
+  "usedIn": {
+    "screen": "Store menu",
+    "chain": [
+      "GET /v1/core/subentities/{id}/categories → call site verified in Stage 1/2",
+      "store_sim.py:660-680 fetch_categories() — confirmed real host/auth via live capture 2026-07-27: fainzy.tech + Fainzy-Token (skeleton originally said lastmile.fainzy.tech + Authorization)"
+    ]
+  },
+  "trigger": "Categories load",
+  "params": {
+    "path": {"id": 7},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "Fainzy-Token",
+    "value": "gAAAAABqZsbj7xKsGDEx01hZ8iRvogIkEfHAXQgdBBLeR_2sOFaSQjN82N6MN9f2EyeJLtpw7TneOxsZUtEMbdpygQDwBoJIiGmk36jqjz0viT3e1vZ-mQrWYnYt1y82eLsypQ7nw42s",
+    "howObtained": "POST /v1/biz/product/authentication/?product=rds"
+  },
+  "sensitivePaths": ["auth.value"],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T00:42:00+00:00",
+    "status": 200,
+    "tool": "manual (user-executed curl, per user's command-execution policy)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "Categories retrieved successfully",
+    "data": [
+      {"id": 1, "created": "2026-04-29T04:56:14.755707-05:00", "modified": "2026-04-29T04:56:14.755803-05:00", "name": "Drinks", "subentity": 7},
+      {"id": 2, "created": "2026-05-26T02:22:58.347158-05:00", "modified": "2026-05-26T02:22:58.347197-05:00", "name": "Desserts", "subentity": 7}
+    ]
+  }
+}

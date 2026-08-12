@@ -1,0 +1,48 @@
+{
+  "useCase": "update_schedule",
+  "group": "schedules",
+  "part": "internal",
+  "endpoint": {
+    "method": "PUT",
+    "host": "localhost:8000",
+    "path": "/api/v1/schedules/{schedule_id}"
+  },
+  "usedIn": {
+    "screen": "Schedules page",
+    "chain": [
+      "PUT /api/v1/schedules/{schedule_id} → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator edits schedule",
+  "params": {
+    "path": {
+      "schedule_id": 8
+    },
+    "query": {},
+    "body": {
+      "name": "api_docs_capture_updated",
+      "description": "Updated for API documentation",
+      "schedule_type": "simple",
+      "profile_id": 11,
+      "cadence": "daily",
+      "timezone": "UTC"
+    }
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "wRSnJzzXGx2GPZ5rFiHTGrjC_F8lF2k8x5egXsR3VuzUhtVSZRxc9gRLdgBT6q1e",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:23.775371+01:00",
+    "status": 409,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "detail": "Schedule 8 is archived. Restore it before editing."
+  },
+  "expectedNon2xx": true
+}

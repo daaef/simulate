@@ -1,0 +1,60 @@
+{
+  "useCase": "order_details_poll",
+  "group": "orders",
+  "part": "external",
+  "endpoint": {
+    "method": "GET",
+    "host": "lastmile.fainzy.tech",
+    "path": "/v1/core/orders/?order_id="
+  },
+  "usedIn": {
+    "screen": "Order details",
+    "chain": [
+      "user_sim.py:1578-1616 fetch_order() -- GET /v1/core/orders/?order_id={order_db_id}",
+      "used for both status polling and the checkout-accept wait loop"
+    ]
+  },
+  "trigger": "Order details poll tick / checkout waiting-for-store-acceptance poll",
+  "params": {
+    "path": {},
+    "query": {"order_id": "5486"},
+    "body": {}
+  },
+  "auth": {
+    "header": "Authorization",
+    "value": "0d5d85f121ff3d5a3e9f7e42519c6ed1f8456bfb",
+    "howObtained": "POST /v1/auth/users/auth/ (login) -- \"Token \" prefix"
+  },
+  "sensitivePaths": ["auth.value", "response.data.user", "response.data.user_data"],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-24T05:20:09.842900+01:00",
+    "status": 200,
+    "tool": "reused from last_mile_user/api_docs/orders/order_details_poll.json (capture_session.py)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "Order successfully retrieved!",
+    "data": {
+      "id": 5486,
+      "user": {"id": 42, "first_name": "Fainzy", "last_name": "Simulator", "email": "sim-2348166675609@example.test", "phone_number": "+2348166675609"},
+      "code": "rand_code_generator",
+      "order_id": "#357721",
+      "restaurant": {"id": 6, "name": "Premium Cafe JP", "branch": "Premium Cafe JP", "status": 1, "is_open": true, "currency": "jpy", "mobile_number": "+819081811935", "rating": 4.008174386920981, "total_reviews": 367.0, "gps_coordinates": {"type": "Point", "coordinates": [136.9663666561246, 35.15494521954757]}},
+      "location": {"id": 5, "name": "Nagoya University Library - 名古屋大学図書館", "location_type": "drop_off", "is_default": true, "is_active": true, "gps_coordinates": {"type": "Point", "coordinates": [136.9637369, 35.1550725]}},
+      "menu": [{"id": "5d9b77c0-86d2-11f1-b715-094ac15f63c0", "menuId": 2, "quantity": 1, "price": 239.0, "sides": [], "menu": {"id": 2, "name": "Donut ドーナツ", "price": 399.0, "discount_price": 239.0, "status": "available"}}],
+      "total_price": 239.0,
+      "coupon_discount": 0.0,
+      "coupon_code": null,
+      "estimated_eta": 600.0,
+      "cancellation_time": "2026-07-23T15:25:39.713484-05:00",
+      "delivery_fee": 50.0,
+      "service_fee": 11.0,
+      "is_free": false,
+      "status": "cancelled",
+      "created": "2026-07-23T15:10:36.394077-05:00"
+    }
+  },
+  "note": "Response/params reused verbatim from ../last_mile_user/api_docs/orders/order_details_poll.json (real live capture, 2026-07-24) rather than a fresh simulate-specific capture -- same real lastmile.fainzy.tech backend, same GET /v1/core/orders/?order_id= endpoint that simulate's own user_sim.py:1578-1616 calls. Note the example order here (id 5486, a Donut order with delivery/service fees) is a different real order than checkout_place_order.json's (id 5487) -- both are genuine captures of this endpoint, just from different points in the source project's session. Decision: 2026-07-27, see checkout_place_order.json's note for the reuse rationale."
+}

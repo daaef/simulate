@@ -1,0 +1,43 @@
+{
+  "useCase": "otp_send",
+  "group": "auth",
+  "part": "external",
+  "endpoint": {
+    "method": "POST",
+    "host": "lastmile.fainzy.tech",
+    "path": "/v1/auth/otp/send/"
+  },
+  "usedIn": {
+    "screen": "Login/registration",
+    "chain": [
+      "POST /v1/auth/otp/send/ → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "User submits phone",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "action": "simulator",
+      "phone_number": "+819081819999"
+    }
+  },
+  "auth": {
+    "header": "n/a",
+    "value": null,
+    "howObtained": "No auth"
+  },
+  "sensitivePaths": ["params.body.phone_number", "response.data"],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T00:00:00+00:00",
+    "status": 200,
+    "tool": "manual (user-executed curl, per user's command-execution policy)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "OTP sent successfully",
+    "data": "8899"
+  }
+}

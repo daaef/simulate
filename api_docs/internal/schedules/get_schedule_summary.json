@@ -1,0 +1,48 @@
+{
+  "useCase": "get_schedule_summary",
+  "group": "schedules",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/schedules/summary"
+  },
+  "usedIn": {
+    "screen": "Dashboard",
+    "chain": [
+      "GET /api/v1/schedules/summary → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Dashboard loads summary",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:13.196149+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "total": 0,
+    "status_breakdown": {},
+    "type_breakdown": {},
+    "health": {
+      "active": 0,
+      "paused": 0,
+      "disabled": 0,
+      "degraded_campaigns": 0
+    },
+    "recent_executions": [],
+    "recent_schedule_states": []
+  }
+}

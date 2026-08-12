@@ -1,0 +1,44 @@
+{
+  "useCase": "register_user",
+  "group": "auth",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/auth/register"
+  },
+  "usedIn": {
+    "screen": "Registration page",
+    "chain": [
+      "POST /api/v1/auth/register → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "User attempts registration",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "username": "test_register",
+      "email": "test@example.com",
+      "password": "Test123!",
+      "role": "operator"
+    }
+  },
+  "auth": {
+    "header": "n/a",
+    "value": null,
+    "howObtained": "No auth"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:17.518615+01:00",
+    "status": 403,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "expectedNon2xx": true,
+  "response": {
+    "detail": "Self-service registration is disabled"
+  }
+}

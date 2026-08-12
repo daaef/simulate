@@ -1,0 +1,41 @@
+{
+  "useCase": "cancel_run",
+  "group": "runs",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/runs/{run_id}/cancel"
+  },
+  "usedIn": {
+    "screen": "Run detail",
+    "chain": [
+      "POST /api/v1/runs/{run_id}/cancel → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator cancels run",
+  "params": {
+    "path": {
+      "run_id": 3
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "eDY3abvWRpi1FJ82_GDm_brJgTz1UX0AEVV_hiV2cUyyIKJsD5_oQE84KSRIQ63B",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:37:44.398405+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "run_id": 3,
+    "status": "cancelling"
+  }
+}

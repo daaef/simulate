@@ -1,0 +1,95 @@
+{
+  "useCase": "create_schedule",
+  "group": "schedules",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/schedules"
+  },
+  "usedIn": {
+    "screen": "Schedules page",
+    "chain": [
+      "POST /api/v1/schedules → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator creates schedule",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "name": "api_docs_capture",
+      "description": "Captured for API documentation",
+      "schedule_type": "simple",
+      "profile_id": 5,
+      "cadence": "daily",
+      "timezone": "UTC"
+    }
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "iKHG6_duibmN0n6lo6RbFUHwT_TKL4p3tyEmXtGCxZG4xM0rcZ3BJnuWoT_VS-Fq",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:38:57.729766+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "schedule": {
+      "id": 2,
+      "user_id": 1,
+      "name": "api_docs_capture",
+      "description": "Captured for API documentation",
+      "schedule_type": "campaign",
+      "status": "active",
+      "profile_id": null,
+      "anchor_start_at": null,
+      "period": null,
+      "stop_rule": null,
+      "end_at": null,
+      "duration_seconds": null,
+      "runs_per_period": 1,
+      "repeat": null,
+      "all_day": false,
+      "recurrence_config": {},
+      "run_slots": [],
+      "cadence": "daily",
+      "timezone": "UTC",
+      "active_from": null,
+      "active_until": null,
+      "run_window_start": null,
+      "run_window_end": null,
+      "custom_anchor_at": null,
+      "custom_every_n_days": null,
+      "blackout_dates": [],
+      "failure_policy": "continue",
+      "campaign_steps": [
+        {
+          "profile_id": 5,
+          "repeat_count": 1,
+          "execution_mode": "saved_profile",
+          "failure_policy": "continue",
+          "spacing_seconds": 0,
+          "timeout_seconds": 900
+        }
+      ],
+      "last_triggered_at": null,
+      "next_run_at": "2026-07-28T01:38:57.655541+00:00",
+      "next_run_reason": "computed",
+      "created_at": "2026-07-27T01:38:57.655541+00:00",
+      "updated_at": "2026-07-27T01:38:57.655541+00:00",
+      "catalog_slug": null,
+      "catalog_managed": false,
+      "requested_runs_per_period": 1,
+      "feasible_runs_per_period": 1,
+      "schedule_warnings": [],
+      "current_period_runs": [],
+      "execution_mode_label": "automatic"
+    }
+  }
+}

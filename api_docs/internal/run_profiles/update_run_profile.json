@@ -1,0 +1,79 @@
+{
+  "useCase": "update_run_profile",
+  "group": "run_profiles",
+  "part": "internal",
+  "endpoint": {
+    "method": "PUT",
+    "host": "localhost:8000",
+    "path": "/api/v1/run-profiles/{profile_id}"
+  },
+  "usedIn": {
+    "screen": "Profiles page",
+    "chain": [
+      "PUT /api/v1/run-profiles/{profile_id} → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator edits profile",
+  "params": {
+    "path": {
+      "profile_id": 6
+    },
+    "query": {},
+    "body": {
+      "name": "api_docs_capture_updated",
+      "description": "Updated for API documentation",
+      "flow": "doctor",
+      "plan": "sim_actors.json",
+      "timing": "fast"
+    }
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "PNWaLkygMMHhrdDGVSdBDrEK_MJN6290sSl6_o25Ga6gcMrDFKuTEPeWJEqmUY5e",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:42:38.071957+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "profile": {
+      "id": 6,
+      "user_id": 1,
+      "name": "api_docs_capture_updated",
+      "description": "Updated for API documentation",
+      "flow": "doctor",
+      "plan": "sim_actors.json",
+      "timing": "fast",
+      "mode": null,
+      "suite": null,
+      "scenarios": [],
+      "store_id": null,
+      "phone": null,
+      "all_users": false,
+      "strict_plan": false,
+      "skip_app_probes": false,
+      "skip_store_dashboard_probes": false,
+      "no_auto_provision": false,
+      "enforce_websocket_gates": false,
+      "timeout_fails": false,
+      "post_order_actions": null,
+      "users": null,
+      "orders": null,
+      "interval": null,
+      "reject": null,
+      "continuous": false,
+      "extra_args": [],
+      "status": "active",
+      "archived_at": null,
+      "created_at": "2026-07-27T01:42:36.269728Z",
+      "updated_at": "2026-07-27T01:42:38.018295Z",
+      "catalog_slug": null,
+      "catalog_managed": false
+    }
+  }
+}

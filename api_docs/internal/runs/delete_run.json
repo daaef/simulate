@@ -1,0 +1,43 @@
+{
+  "useCase": "delete_run",
+  "group": "runs",
+  "part": "internal",
+  "endpoint": {
+    "method": "DELETE",
+    "host": "localhost:8000",
+    "path": "/api/v1/runs/{run_id}"
+  },
+  "usedIn": {
+    "screen": "Runs list",
+    "chain": [
+      "DELETE /api/v1/runs/{run_id} → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator deletes run",
+  "params": {
+    "path": {
+      "run_id": 3
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "eDY3abvWRpi1FJ82_GDm_brJgTz1UX0AEVV_hiV2cUyyIKJsD5_oQE84KSRIQ63B",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:37:44.474035+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "run_id": 3,
+    "deleted": true,
+    "archived": true,
+    "message": "Run 3 has been archived."
+  }
+}

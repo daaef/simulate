@@ -1,0 +1,70 @@
+{
+  "useCase": "store_menu",
+  "group": "menu",
+  "part": "external",
+  "endpoint": {
+    "method": "GET",
+    "host": "fainzy.tech",
+    "path": "/v1/core/subentities/{id}/menu"
+  },
+  "usedIn": {
+    "screen": "Store menu",
+    "chain": [
+      "GET /v1/core/subentities/{id}/menu → call site verified in Stage 1/2",
+      "store_sim.py:683-717 fetch_menus() — confirmed real host/auth via live capture 2026-07-27: host is fainzy.tech (not lastmile.fainzy.tech as the Stage 2 skeleton originally claimed), auth is Fainzy-Token (not a user Authorization token)"
+    ]
+  },
+  "trigger": "Menu loads",
+  "params": {
+    "path": {"id": 7},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "Fainzy-Token",
+    "value": "gAAAAABqZsbj7xKsGDEx01hZ8iRvogIkEfHAXQgdBBLeR_2sOFaSQjN82N6MN9f2EyeJLtpw7TneOxsZUtEMbdpygQDwBoJIiGmk36jqjz0viT3e1vZ-mQrWYnYt1y82eLsypQ7nw42s",
+    "howObtained": "POST /v1/biz/product/authentication/?product=rds"
+  },
+  "sensitivePaths": ["auth.value", "response.data[].subentity_details.mobile_number", "response.data[].subentity_details.location_details.subentity.mobile_number"],
+  "alsoTriggeredBy": ["add_to_cart_menu_recheck", "cart_reconcile_menu", "prefetch_menu", "offers_menu (same request shape, per EXTERNAL_USE_CASE_MAP.md menu/ group)"],
+  "capture": {
+    "verifiedAt": "2026-07-27T00:40:00+00:00",
+    "status": 200,
+    "tool": "manual (user-executed curl, per user's command-execution policy)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "Menus retrieved successfully",
+    "note_from_capture": "Real response truncated for this doc file's readability -- the live response repeats a large denormalized subentity_details/location_details block (service area, buildings, floors) inside every single menu item (7 items). Item-level fields (id, category, subentity, sides, name, price, description, ingredients, status, discount, discount_price, images, created, modified) are preserved below per item; the repeated subentity/location block is captured once here since it was byte-identical across all 7 items in the real response.",
+    "data": [
+      {"id": 3, "category": 1, "subentity": 7, "sides": [], "name": "Simulator item 20260519T085954", "price": 100.0, "description": "Menu item created by simulator.", "ingredients": "simulator ingredients", "status": "available", "discount": 0.0, "discount_price": 0.0, "images": [], "created": "2026-05-19T03:59:54.832620-05:00", "modified": "2026-07-26T20:46:39.223246-05:00"},
+      {"id": 8, "category": 2, "subentity": 7, "sides": [], "name": "Mango Sorbet", "price": 520.0, "description": "Chilled mango dessert.", "ingredients": "mango, water, sugar", "status": "available", "discount": 0.0, "discount_price": 0.0, "images": [], "created": "2026-05-26T02:22:58.833537-05:00", "modified": "2026-06-23T08:30:47.019568-05:00"},
+      {"id": 6, "category": 1, "subentity": 7, "sides": [], "name": "Simulator item 20260519T101033", "price": 100.0, "description": "Menu item created by simulator.", "ingredients": "simulator ingredients", "status": "available", "discount": 0.0, "discount_price": 0.0, "images": [], "created": "2026-05-19T05:10:33.901101-05:00", "modified": "2026-06-23T09:30:48.114130-05:00"},
+      {"id": 7, "category": 1, "subentity": 7, "sides": [], "name": "Simulator item 20260520T071957", "price": 100.0, "description": "Menu item created by simulator.", "ingredients": "simulator ingredients", "status": "available", "discount": 0.0, "discount_price": 0.0, "images": [], "created": "2026-05-20T02:19:58.936430-05:00", "modified": "2026-06-23T19:30:47.805031-05:00"},
+      {"id": 5, "category": 1, "subentity": 7, "sides": [], "name": "Simulator item 20260519T100427", "price": 100.0, "description": "Menu item created by simulator.", "ingredients": "simulator ingredients", "status": "available", "discount": 0.0, "discount_price": 0.0, "images": [], "created": "2026-05-19T05:04:27.810085-05:00", "modified": "2026-06-23T20:30:47.596157-05:00"},
+      {"id": 2, "category": 1, "subentity": 7, "sides": [], "name": "Simulator item", "price": 100.0, "description": "Menu item created by simulator.", "ingredients": "", "status": "available", "discount": 0.0, "discount_price": 0.0, "images": [], "created": "2026-04-30T19:23:18.676494-05:00", "modified": "2026-06-23T21:30:46.723263-05:00"},
+      {"id": 4, "category": 1, "subentity": 7, "sides": [], "name": "Simulator item 20260519T090343", "price": 100.0, "description": "Menu item created by simulator.", "ingredients": "simulator ingredients", "status": "available", "discount": 0.0, "discount_price": 0.0, "images": [], "created": "2026-05-19T04:03:43.720109-05:00", "modified": "2026-06-23T22:30:46.726362-05:00"}
+    ],
+    "subentity_details_shared_across_all_items": {
+      "id": 7,
+      "name": "Ask Me Restaurant Jos",
+      "branch": "Ask me restaurant",
+      "store_id": "FZY_926025",
+      "currency": "jpy",
+      "store_category": "lastmile",
+      "store_type": "others",
+      "status": 3,
+      "rating": 4.0,
+      "total_reviews": 387,
+      "opening_days": "mon,tue,wed,thu,fri,sat",
+      "start_time": "07:00",
+      "closing_time": "23:59",
+      "gps_coordinates": {"type": "Point", "coordinates": [8.891228847205639, 9.909435720196303]},
+      "address_city": "Nagoya",
+      "address_state": "Aichi",
+      "address_country": "Japan",
+      "note": "This block is repeated verbatim inside every item's subentity_details/location_details in the real response -- collapsed here to one copy for readability. Every menu item in this store currently has sides: [] (no item on subentity 7 has customization sides configured)."
+    }
+  }
+}

@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulate API Documentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f5f5;
+            --bg-tertiary: #efefef;
+            --text-primary: #1a1a1a;
+            --text-secondary: #666666;
+            --text-tertiary: #999999;
+            --border-color: #e0e0e0;
+            --accent-color: #0066cc;
+            --success-green: #28a745;
+            --warning-amber: #ffc107;
+            --error-red: #dc3545;
+            --neutral-gray: #6c757d;
+            --code-bg: #f8f9fa;
+            --code-text: #212529;
+            --hover-bg: #f0f0f0;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-primary: #1e1e1e;
+                --bg-secondary: #2d2d2d;
+                --bg-tertiary: #3a3a3a;
+                --text-primary: #e0e0e0;
+                --text-secondary: #b0b0b0;
+                --text-tertiary: #808080;
+                --border-color: #404040;
+                --accent-color: #4a9eff;
+                --code-bg: #2d2d2d;
+                --code-text: #e0e0e0;
+                --hover-bg: #3a3a3a;
+            }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .header-controls {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 300px;
+            background-color: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .toggle-buttons {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .toggle-btn {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .toggle-btn.active {
+            background-color: var(--accent-color);
+            color: white;
+            border-color: var(--accent-color);
+        }
+
+        .toggle-btn:hover:not(.active) {
+            background-color: var(--hover-bg);
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+
+        .search-box::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+
+        .group {
+            margin-bottom: 0;
+        }
+
+        .group-header {
+            padding: 10px 16px;
+            font-weight: 600;
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background-color: var(--bg-tertiary);
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .group-header:hover {
+            background-color: var(--hover-bg);
+        }
+
+        .group-header.collapsed::after {
+            content: "▶";
+            font-size: 10px;
+        }
+
+        .group-header:not(.collapsed)::after {
+            content: "▼";
+            font-size: 10px;
+        }
+
+        .group-items {
+            display: none;
+            padding: 4px 0;
+        }
+
+        .group-items.expanded {
+            display: block;
+        }
+
+        .use-case-item {
+            padding: 8px 20px;
+            font-size: 13px;
+            color: var(--text-primary);
+            cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: all 0.2s;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .use-case-item:hover {
+            background-color: var(--hover-bg);
+        }
+
+        .use-case-item.active {
+            background-color: var(--hover-bg);
+            border-left-color: var(--accent-color);
+            color: var(--accent-color);
+            font-weight: 500;
+        }
+
+        .use-case-item.filtered-hidden {
+            display: none;
+        }
+
+        /* Main Panel */
+        .main-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg-primary);
+            overflow: hidden;
+        }
+
+        .panel-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            color: var(--text-tertiary);
+            font-size: 14px;
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+        }
+
+        .content-section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-title.with-toggle {
+            justify-content: space-between;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .badge.verified {
+            background-color: rgba(40, 167, 69, 0.1);
+            color: var(--success-green);
+            border: 1px solid var(--success-green);
+        }
+
+        .badge.not-captured {
+            background-color: rgba(108, 117, 125, 0.1);
+            color: var(--neutral-gray);
+            border: 1px solid var(--neutral-gray);
+        }
+
+        .badge.error {
+            background-color: rgba(220, 53, 69, 0.1);
+            color: var(--error-red);
+            border: 1px solid var(--error-red);
+        }
+
+        .badge.expected-non2xx {
+            background-color: rgba(255, 193, 7, 0.1);
+            color: var(--warning-amber);
+            border: 1px solid var(--warning-amber);
+        }
+
+        .info-row {
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: inline-block;
+            min-width: 100px;
+        }
+
+        .info-value {
+            color: var(--text-primary);
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .method-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin-right: 8px;
+        }
+
+        .method-get {
+            background-color: rgba(70, 130, 180, 0.2);
+            color: rgb(70, 130, 180);
+        }
+
+        .method-post {
+            background-color: rgba(34, 139, 34, 0.2);
+            color: rgb(34, 139, 34);
+        }
+
+        .method-put {
+            background-color: rgba(255, 140, 0, 0.2);
+            color: rgb(255, 140, 0);
+        }
+
+        .method-patch {
+            background-color: rgba(139, 69, 19, 0.2);
+            color: rgb(139, 69, 19);
+        }
+
+        .method-delete {
+            background-color: rgba(220, 53, 69, 0.2);
+            color: var(--error-red);
+        }
+
+        .method-wss {
+            background-color: rgba(108, 117, 125, 0.2);
+            color: var(--neutral-gray);
+        }
+
+        .chain-list {
+            list-style: none;
+            padding-left: 0;
+            margin: 8px 0;
+        }
+
+        .chain-list li {
+            font-size: 13px;
+            margin-bottom: 6px;
+            padding-left: 20px;
+            position: relative;
+            color: var(--text-primary);
+        }
+
+        .chain-list li::before {
+            content: "→";
+            position: absolute;
+            left: 8px;
+            color: var(--text-tertiary);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+
+        th {
+            background-color: var(--bg-tertiary);
+            padding: 10px;
+            text-align: left;
+            font-weight: 600;
+            border: 1px solid var(--border-color);
+            font-size: 12px;
+        }
+
+        td {
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            vertical-align: top;
+            word-break: break-word;
+        }
+
+        .params-table td:first-child {
+            font-weight: 600;
+            width: 150px;
+        }
+
+        pre {
+            background-color: var(--code-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 12px;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            color: var(--code-text);
+            margin-top: 8px;
+        }
+
+        .reveal-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--bg-tertiary);
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text-primary);
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .reveal-toggle:hover {
+            background-color: var(--hover-bg);
+        }
+
+        .masked-value {
+            color: var(--text-tertiary);
+            font-weight: 500;
+        }
+
+        .note-box {
+            background-color: rgba(255, 193, 7, 0.1);
+            border: 1px solid var(--warning-amber);
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 8px;
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        .endpoint-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .eye-icon {
+            cursor: pointer;
+            user-select: none;
+            font-size: 14px;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .eye-icon:hover {
+            opacity: 1;
+        }
+
+        .reveal-all-toggle {
+            padding: 6px 12px;
+            font-size: 12px;
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            color: var(--text-primary);
+            transition: all 0.2s;
+            margin-left: 8px;
+        }
+
+        .reveal-all-toggle:hover {
+            background-color: var(--hover-bg);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-tertiary);
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--accent-color);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .group-header-label {
+            flex: 1;
+        }
+
+        .group-count {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Simulate API Documentation</h1>
+    </header>
+
+    <div class="main-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="toggle-buttons">
+                    <button class="toggle-btn active" data-part="internal">Internal</button>
+                    <button class="toggle-btn" data-part="external">External</button>
+                </div>
+                <input type="text" class="search-box" id="searchInput" placeholder="Search endpoints...">
+            </div>
+            <div class="sidebar-content" id="sidebarContent">
+                <!-- Groups will be inserted here -->
+            </div>
+        </aside>
+
+        <main class="main-panel">
+            <div id="panelContent" class="panel-empty">
+                <div>Select a use case from the sidebar to view details</div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // State
+        let manifest = null;
+        let currentPart = 'internal';
+        let currentUseCase = null;
+        let allUseCases = [];
+        let revealedSensitiveFields = new Set();
+
+        // Load manifest
+        async function loadManifest() {
+            try {
+                const response = await fetch('./manifest.json');
+                manifest = await response.json();
+                initializeSidebar();
+                updateSidebar();
+            } catch (error) {
+                console.error('Failed to load manifest:', error);
+                document.getElementById('sidebarContent').innerHTML = '<div class="loading">Failed to load manifest</div>';
+            }
+        }
+
+        // Initialize sidebar event listeners
+        function initializeSidebar() {
+            // Part toggle buttons
+            document.querySelectorAll('.toggle-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    currentPart = e.target.dataset.part;
+                    updateSidebar();
+                });
+            });
+
+            // Search box
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                filterUseCases(e.target.value.toLowerCase());
+            });
+        }
+
+        // Update sidebar with current part's data
+        function updateSidebar() {
+            const sidebarContent = document.getElementById('sidebarContent');
+            sidebarContent.innerHTML = '';
+
+            const partData = manifest.parts[currentPart];
+            if (!partData || !partData.groups) {
+                sidebarContent.innerHTML = '<div class="loading">No data available</div>';
+                return;
+            }
+
+            allUseCases = [];
+
+            partData.groups.forEach((group, groupIndex) => {
+                const groupEl = document.createElement('div');
+                groupEl.className = 'group';
+
+                const headerEl = document.createElement('div');
+                headerEl.className = 'group-header collapsed';
+                headerEl.innerHTML = `
+                    <span class="group-header-label">${group.group}</span>
+                    <span class="group-count">${group.useCaseCount}</span>
+                `;
+
+                const itemsEl = document.createElement('div');
+                itemsEl.className = 'group-items';
+
+                group.useCases.forEach(useCase => {
+                    allUseCases.push({
+                        part: currentPart,
+                        group: group.group,
+                        ...useCase
+                    });
+
+                    const itemEl = document.createElement('div');
+                    itemEl.className = 'use-case-item';
+                    itemEl.textContent = useCase.useCase;
+                    itemEl.title = useCase.useCase;
+                    itemEl.addEventListener('click', () => {
+                        selectUseCase(useCase.useCase, currentPart, group.group);
+                    });
+
+                    itemsEl.appendChild(itemEl);
+                });
+
+                headerEl.addEventListener('click', () => {
+                    headerEl.classList.toggle('collapsed');
+                    itemsEl.classList.toggle('expanded');
+                });
+
+                groupEl.appendChild(headerEl);
+                groupEl.appendChild(itemsEl);
+                sidebarContent.appendChild(groupEl);
+            });
+        }
+
+        // Filter use cases by search query
+        function filterUseCases(query) {
+            allUseCases.forEach(useCase => {
+                const shouldShow = query === '' ||
+                    useCase.useCase.toLowerCase().includes(query) ||
+                    useCase.group.toLowerCase().includes(query) ||
+                    useCase.screen.toLowerCase().includes(query) ||
+                    useCase.trigger.toLowerCase().includes(query) ||
+                    (useCase.endpoint && useCase.endpoint.path.toLowerCase().includes(query));
+
+                const items = document.querySelectorAll('.use-case-item');
+                items.forEach(item => {
+                    if (item.textContent === useCase.useCase) {
+                        if (shouldShow) {
+                            item.classList.remove('filtered-hidden');
+                            // Auto-expand parent group
+                            const group = item.closest('.group');
+                            if (group) {
+                                const header = group.querySelector('.group-header');
+                                const itemsContainer = group.querySelector('.group-items');
+                                if (header && itemsContainer) {
+                                    header.classList.remove('collapsed');
+                                    itemsContainer.classList.add('expanded');
+                                }
+                            }
+                        } else {
+                            item.classList.add('filtered-hidden');
+                        }
+                    }
+                });
+            });
+        }
+
+        // Select a use case and load its details
+        async function selectUseCase(useCaseName, part, group) {
+            // Update active state in sidebar
+            document.querySelectorAll('.use-case-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.textContent === useCaseName) {
+                    item.classList.add('active');
+                }
+            });
+
+            currentUseCase = { part, group, useCase: useCaseName };
+            revealedSensitiveFields.clear();
+
+            // Load the use case JSON
+            try {
+                const url = `./${part}/${group}/${useCaseName}.json`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                renderUseCaseDetails(data);
+            } catch (error) {
+                console.error('Failed to load use case:', error);
+                document.getElementById('panelContent').innerHTML = `<div class="loading">Failed to load use case: ${error.message}</div>`;
+            }
+        }
+
+        // Render use case details in main panel
+        function renderUseCaseDetails(data) {
+            const content = document.getElementById('panelContent');
+            content.innerHTML = '';
+            content.classList.remove('panel-empty');
+
+            // Create main content div
+            const mainContent = document.createElement('div');
+            mainContent.className = 'panel-content';
+
+            // Title and badge section
+            const titleSection = document.createElement('div');
+            titleSection.className = 'content-section';
+            titleSection.innerHTML = `<h2 style="font-size: 20px; margin-bottom: 12px;">${data.useCase}</h2>`;
+            titleSection.appendChild(createFreshnessBadge(data));
+            mainContent.appendChild(titleSection);
+
+            // Endpoint section
+            if (data.endpoint) {
+                const endpointSection = document.createElement('div');
+                endpointSection.className = 'content-section';
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.textContent = 'Endpoint';
+                endpointSection.appendChild(title);
+
+                const methodBadge = createMethodBadge(data.endpoint.method);
+                const endpointDiv = document.createElement('div');
+                endpointDiv.className = 'endpoint-section';
+
+                const endpointLine = document.createElement('div');
+                endpointLine.style.fontSize = '13px';
+                endpointLine.style.marginBottom = '8px';
+                endpointLine.appendChild(methodBadge);
+                const endpointSpan = document.createElement('span');
+                endpointSpan.textContent = `${data.endpoint.host}${data.endpoint.path}`;
+                endpointSpan.style.fontFamily = "'Monaco', 'Courier New', monospace";
+                endpointSpan.style.fontSize = '12px';
+                endpointLine.appendChild(endpointSpan);
+
+                endpointDiv.appendChild(endpointLine);
+                endpointSection.appendChild(endpointDiv);
+                mainContent.appendChild(endpointSection);
+            }
+
+            // Used In section
+            if (data.usedIn) {
+                const usedInSection = document.createElement('div');
+                usedInSection.className = 'content-section';
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.textContent = 'Used In';
+                usedInSection.appendChild(title);
+
+                const screenInfo = document.createElement('div');
+                screenInfo.className = 'info-row';
+                screenInfo.innerHTML = `<span class="info-label">Screen:</span> <span class="info-value">${data.usedIn.screen}</span>`;
+                usedInSection.appendChild(screenInfo);
+
+                if (data.usedIn.chain && Array.isArray(data.usedIn.chain)) {
+                    const chainLabel = document.createElement('div');
+                    chainLabel.className = 'info-label';
+                    chainLabel.style.marginTop = '8px';
+                    chainLabel.textContent = 'Call Chain:';
+                    usedInSection.appendChild(chainLabel);
+
+                    const chainList = document.createElement('ul');
+                    chainList.className = 'chain-list';
+                    data.usedIn.chain.forEach(item => {
+                        const li = document.createElement('li');
+                        li.textContent = item;
+                        chainList.appendChild(li);
+                    });
+                    usedInSection.appendChild(chainList);
+                }
+
+                mainContent.appendChild(usedInSection);
+            }
+
+            // Trigger section
+            if (data.trigger) {
+                const triggerSection = document.createElement('div');
+                triggerSection.className = 'content-section';
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.textContent = 'Trigger';
+                triggerSection.appendChild(title);
+                const triggerText = document.createElement('div');
+                triggerText.style.fontSize = '13px';
+                triggerText.textContent = data.trigger;
+                triggerSection.appendChild(triggerText);
+                mainContent.appendChild(triggerSection);
+            }
+
+            // Params section
+            if (data.params && (Object.keys(data.params.path).length || Object.keys(data.params.query).length || Object.keys(data.params.body).length)) {
+                const paramsSection = document.createElement('div');
+                paramsSection.className = 'content-section';
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.textContent = 'Parameters';
+                paramsSection.appendChild(title);
+
+                const table = document.createElement('table');
+                table.className = 'params-table';
+                table.innerHTML = '<tr><th>Location</th><th>Name</th><th>Value</th></tr>';
+
+                const addRows = (location, params) => {
+                    Object.entries(params).forEach(([key, value]) => {
+                        const row = table.insertRow();
+                        row.innerHTML = `<td>${location}</td><td>${key}</td><td><code style="background: var(--code-bg); padding: 2px 4px; border-radius: 2px;">${escapeHtml(JSON.stringify(value))}</code></td>`;
+                    });
+                };
+
+                addRows('path', data.params.path);
+                addRows('query', data.params.query);
+                addRows('body', data.params.body);
+
+                paramsSection.appendChild(table);
+                mainContent.appendChild(paramsSection);
+            }
+
+            // Auth section
+            if (data.auth) {
+                const authSection = document.createElement('div');
+                authSection.className = 'content-section';
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.textContent = 'Authentication';
+                authSection.appendChild(title);
+
+                const headerInfo = document.createElement('div');
+                headerInfo.className = 'info-row';
+                headerInfo.innerHTML = `<span class="info-label">Header:</span> <span class="info-value">${escapeHtml(data.auth.header)}</span>`;
+                authSection.appendChild(headerInfo);
+
+                if (data.auth.value) {
+                    const valueContainer = document.createElement('div');
+                    valueContainer.className = 'info-row';
+                    valueContainer.style.marginTop = '12px';
+
+                    const valueLabel = document.createElement('span');
+                    valueLabel.className = 'info-label';
+                    valueLabel.textContent = 'Value:';
+                    valueContainer.appendChild(valueLabel);
+
+                    const toggleBtn = document.createElement('button');
+                    toggleBtn.className = 'reveal-toggle';
+                    toggleBtn.innerHTML = '👁 Show';
+                    toggleBtn.style.marginLeft = '8px';
+
+                    const valueSpan = document.createElement('span');
+                    valueSpan.className = 'masked-value';
+                    valueSpan.textContent = '••••••';
+                    valueSpan.style.marginLeft = '8px';
+                    valueSpan.style.fontFamily = "'Monaco', 'Courier New', monospace";
+                    valueSpan.style.fontSize = '12px';
+
+                    let revealed = false;
+                    toggleBtn.addEventListener('click', () => {
+                        revealed = !revealed;
+                        if (revealed) {
+                            valueSpan.textContent = data.auth.value;
+                            toggleBtn.innerHTML = '👁 Hide';
+                        } else {
+                            valueSpan.textContent = '••••••';
+                            toggleBtn.innerHTML = '👁 Show';
+                        }
+                    });
+
+                    valueContainer.appendChild(toggleBtn);
+                    valueContainer.appendChild(valueSpan);
+                    authSection.appendChild(valueContainer);
+                }
+
+                const howObtainedInfo = document.createElement('div');
+                howObtainedInfo.className = 'info-row';
+                howObtainedInfo.style.marginTop = '12px';
+                howObtainedInfo.innerHTML = `<span class="info-label">How Obtained:</span> <span class="info-value">${escapeHtml(data.auth.howObtained)}</span>`;
+                authSection.appendChild(howObtainedInfo);
+
+                mainContent.appendChild(authSection);
+            }
+
+            // Response section
+            if (data.response !== null) {
+                const responseSection = document.createElement('div');
+                responseSection.className = 'content-section';
+
+                const titleContainer = document.createElement('div');
+                titleContainer.className = 'section-title with-toggle';
+                titleContainer.innerHTML = '<span>Response</span>';
+
+                const revealAllBtn = document.createElement('button');
+                revealAllBtn.className = 'reveal-all-toggle';
+                const hasSensitiveData = data.sensitivePaths && data.sensitivePaths.length > 0;
+                revealAllBtn.innerHTML = hasSensitiveData ? '👁 Reveal All' : 'No sensitive data';
+                revealAllBtn.style.visibility = hasSensitiveData ? 'visible' : 'hidden';
+
+                if (hasSensitiveData) {
+                    let allRevealed = false;
+                    revealAllBtn.addEventListener('click', () => {
+                        allRevealed = !allRevealed;
+                        revealAllBtn.innerHTML = allRevealed ? '👁 Hide All' : '👁 Reveal All';
+
+                        // Toggle all sensitive fields
+                        document.querySelectorAll('.sensitive-field-toggle').forEach(btn => {
+                            const field = btn.parentElement.querySelector('.sensitive-value');
+                            if (field) {
+                                if (allRevealed) {
+                                    btn.innerHTML = '👁';
+                                    field.classList.remove('masked');
+                                } else {
+                                    btn.innerHTML = '👁';
+                                    field.classList.add('masked');
+                                }
+                            }
+                        });
+                    });
+                }
+
+                titleContainer.appendChild(revealAllBtn);
+                responseSection.appendChild(titleContainer);
+
+                const preEl = document.createElement('pre');
+                const jsonStr = JSON.stringify(data.response, null, 2);
+                const highlightedJson = highlightSensitivePaths(jsonStr, data.sensitivePaths);
+                preEl.innerHTML = highlightedJson;
+                responseSection.appendChild(preEl);
+
+                mainContent.appendChild(responseSection);
+            } else if (data.note) {
+                const responseSection = document.createElement('div');
+                responseSection.className = 'content-section';
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.textContent = 'Response';
+                responseSection.appendChild(title);
+                const noteBox = document.createElement('div');
+                noteBox.className = 'note-box';
+                noteBox.innerHTML = '<strong>Not Captured:</strong> ' + escapeHtml(data.note);
+                responseSection.appendChild(noteBox);
+                mainContent.appendChild(responseSection);
+            }
+
+            // Also Triggered By section
+            if (data.alsoTriggeredBy && Array.isArray(data.alsoTriggeredBy)) {
+                const alsoSection = document.createElement('div');
+                alsoSection.className = 'content-section';
+                const title = document.createElement('div');
+                title.className = 'section-title';
+                title.textContent = 'Also Triggered By';
+                alsoSection.appendChild(title);
+
+                const list = document.createElement('ul');
+                list.className = 'chain-list';
+                data.alsoTriggeredBy.forEach(item => {
+                    const li = document.createElement('li');
+                    li.textContent = item;
+                    list.appendChild(li);
+                });
+                alsoSection.appendChild(list);
+                mainContent.appendChild(alsoSection);
+            }
+
+            content.appendChild(mainContent);
+        }
+
+        // Create freshness badge
+        function createFreshnessBadge(data) {
+            const badgeEl = document.createElement('div');
+            badgeEl.style.marginBottom = '12px';
+
+            if (data.capture.status === null && data.note) {
+                const badge = document.createElement('span');
+                badge.className = 'badge not-captured';
+                badge.textContent = 'Gated — See Note';
+                badgeEl.appendChild(badge);
+            } else if (data.capture.status === null) {
+                const badge = document.createElement('span');
+                badge.className = 'badge not-captured';
+                badge.textContent = 'Not Yet Captured';
+                badgeEl.appendChild(badge);
+            } else if (data.capture.status >= 200 && data.capture.status < 300) {
+                const badge = document.createElement('span');
+                badge.className = 'badge verified';
+                const dateObj = new Date(data.capture.verifiedAt);
+                const dateStr = dateObj.toLocaleDateString();
+                badge.textContent = `Verified ${dateStr}`;
+                badgeEl.appendChild(badge);
+            } else if (data.expectedNon2xx) {
+                const badge = document.createElement('span');
+                badge.className = 'badge expected-non2xx';
+                badge.textContent = `Expected Non-2xx (${data.capture.status})`;
+                badgeEl.appendChild(badge);
+            } else {
+                const badge = document.createElement('span');
+                badge.className = 'badge error';
+                badge.textContent = `Error (${data.capture.status})`;
+                badgeEl.appendChild(badge);
+            }
+
+            return badgeEl;
+        }
+
+        // Create method badge
+        function createMethodBadge(method) {
+            const badge = document.createElement('span');
+            badge.className = `method-badge method-${method.toLowerCase()}`;
+            badge.textContent = method;
+            return badge;
+        }
+
+        // Highlight sensitive paths in JSON
+        function highlightSensitivePaths(jsonStr, sensitivePathsArray) {
+            if (!sensitivePathsArray || sensitivePathsArray.length === 0) {
+                return escapeHtml(jsonStr);
+            }
+
+            // For now, use simple approach: escape HTML and mark sensitive values
+            let escaped = escapeHtml(jsonStr);
+
+            // This is a simplified approach - for full implementation we'd parse and traverse
+            // the JSON tree. For now, we'll mark common sensitive patterns.
+            sensitivePathsArray.forEach(path => {
+                const pattern = new RegExp(`("${path.split('.').pop()}":\\s*")([^"]+)(")`);
+                escaped = escaped.replace(pattern, (match, p1, p2, p3) => {
+                    return p1 + '<span class="sensitive-field masked">••••••</span>' + p3;
+                });
+            });
+
+            return escaped;
+        }
+
+        // Utility: Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', loadManifest);
+    </script>
+</body>
+</html>

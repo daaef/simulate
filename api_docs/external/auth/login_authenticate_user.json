@@ -1,0 +1,60 @@
+{
+  "useCase": "login_authenticate_user",
+  "group": "auth",
+  "part": "external",
+  "endpoint": {
+    "method": "POST",
+    "host": "lastmile.fainzy.tech",
+    "path": "/v1/auth/users/auth/"
+  },
+  "usedIn": {
+    "screen": "Login",
+    "chain": [
+      "POST /v1/auth/users/auth/ → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "OTP verified",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "phone_number": "+819081819999"
+    }
+  },
+  "auth": {
+    "header": "n/a",
+    "value": null,
+    "howObtained": "No auth (return includes token); requires the phone to have just passed otp_verify server-side"
+  },
+  "sensitivePaths": [
+    "params.body.phone_number",
+    "response.data.user.phone_number",
+    "response.data.token"
+  ],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T00:25:00+00:00",
+    "status": 200,
+    "tool": "manual (user-executed curl, per user's command-execution policy)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "Welcome!",
+    "data": {
+      "user": {
+        "id": 49,
+        "first_name": "Fainzy",
+        "last_name": "Simulator",
+        "email": "sim-819081819999@example.test",
+        "phone_number": "+819081819999",
+        "notification_id": "a4614587-7dfc-4993-b343-cf0056b5342a",
+        "is_active": true,
+        "setup_complete": true,
+        "profile_picture": "http://res.cloudinary.com/fainzy-technologies/image/upload/v1/users/logoBlack_jayvwl_rgkhgp.png"
+      },
+      "token": "0fedf7bd070158fd61be1c439ad49f457be7c861"
+    }
+  },
+  "note": "Same throwaway account as signup_create_user.json (user id 49); token returned is identical to the one from account creation, confirming it's a stable session token rather than single-use."
+}

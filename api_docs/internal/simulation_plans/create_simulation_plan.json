@@ -1,0 +1,53 @@
+{
+  "useCase": "create_simulation_plan",
+  "group": "simulation_plans",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/simulation-plans"
+  },
+  "usedIn": {
+    "screen": "Plans page",
+    "chain": [
+      "POST /api/v1/simulation-plans → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator creates plan",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "name": "api_docs_capture",
+      "content": {
+        "flow": "doctor",
+        "plan": "sim_actors.json"
+      }
+    }
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "eDY3abvWRpi1FJ82_GDm_brJgTz1UX0AEVV_hiV2cUyyIKJsD5_oQE84KSRIQ63B",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:37:43.705578+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "plan": {
+      "id": "api-docs-capture",
+      "name": "api_docs_capture",
+      "path": "runs/gui-plans/api-docs-capture.json",
+      "content": {
+        "flow": "doctor",
+        "name": "api_docs_capture",
+        "plan": "sim_actors.json"
+      }
+    }
+  }
+}

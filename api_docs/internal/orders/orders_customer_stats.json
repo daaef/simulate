@@ -1,0 +1,37 @@
+{
+  "useCase": "orders_customer_stats",
+  "group": "orders",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/orders/customer-stats"
+  },
+  "usedIn": {
+    "screen": "Orders stats",
+    "chain": [
+      "GET /api/v1/orders/customer-stats → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Customer stats load",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "x-fainzy-token",
+    "value": "voio1qPNyzcmHEQ2QXfsMQiEaJ3hpu3u5hrveLxDONUnJfsJ5XFMpA6nwNrmtrH2",
+    "howObtained": "Store login token"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:25.323613+01:00",
+    "status": null,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Skipped: Makes real external calls to fainzy.tech/lastmile.fainzy.tech APIs"
+}

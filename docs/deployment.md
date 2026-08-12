@@ -269,8 +269,16 @@ Simulator profile routing setup:
 1. Create saved run profiles in simulator (`Runs` page or `/api/v1/run-profiles`).
 2. Upsert mapping rows via:
    - `POST /api/v1/integrations/github/mappings`
-   - body: `{"project":"backend","environment":"production","profile_id":12,"enabled":true}`
+   - body: `{"project":"backend","environment":"production","profile_id":12,"enabled":true,"trigger_event":"deployment_status","trigger_conclusion":"success"}`
+   - for a `workflow_run` mapping, use `"trigger_event":"workflow_run"` and also set `"trigger_workflow"` to the **exact** `name:` of the upstream workflow (e.g. `"RDS_BACKEND"`). This is an allowlist, not a filter: a mapping with no `trigger_event` never launches, even when `enabled` is `true`, and a `workflow_run` mapping only ever matches that one named workflow — any other workflow in the same repo (tests, lint, CodeQL, etc.) finishing successfully does **not** launch it.
+   - `trigger_conclusion` is a single value, default `"success"`. There is deliberately no way to configure more than one.
 3. Verify with `GET /api/v1/integrations/github/mappings`.
+
+Master automation switch:
+
+- `GET` / `PUT /api/v1/system/integration-automation` — body `{"automation_enabled": true|false}`.
+- Checked first, before any event-specific parsing, for every GitHub delivery of any event type. When `false`, nothing launches — no mapping, trigger spec, or event type can bypass it. Absent setting defaults to enabled (the per-mapping trigger spec above is what fails closed).
+- Exposed as the "Automatic verification and simulation runs" toggle at the top of **Config → Integration Mappings**.
 
 Verification and troubleshooting:
 
@@ -278,11 +286,21 @@ Verification and troubleshooting:
 - Common rejection reasons:
   - `repository_not_allowlisted`
   - `invalid_signature`
-  - `non_success_state`
+  - `non_success_state` (`deployment_status` only)
   - `mapping_not_found`
   - `mapping_disabled`
+  - `automation_disabled` — the master switch above is off; nothing else was evaluated.
+  - `trigger_not_configured` — mapping exists but has no `trigger_event` set (this is the default for any mapping created before this field existed; it will not launch until configured).
+  - `event_not_allowed` — the mapping's `trigger_event` doesn't match the event type that was delivered (e.g. a `deployment_status`-only mapping received a `workflow_run` delivery).
+  - `workflow_not_allowed` (`workflow_run` only) — the delivered workflow's `name` doesn't exactly match the mapping's `trigger_workflow`.
+  - `conclusion_not_allowed` (`workflow_run` only) — the delivered `conclusion` doesn't match the mapping's `trigger_conclusion`.
+  - `duplicate_delivery` — GitHub redelivered the same `(repository, workflow_run_id, run_attempt, conclusion)`; the original delivery already ran (or is still being evaluated) and this one is not relaunched.
+  - `launch_failed:<detail>` — the mapped profile could not be launched (for example it was archived or deleted after the mapping was last saved).
+- A `workflow_run` delivery whose `action` is not `completed` (GitHub also sends `requested`/`in_progress`) is not recorded in the audit feed at all — it can never lead to a launch decision, so no row is written for it.
 - End-to-end success path:
   - upstream deployment completes -> webhook accepted and queued -> simulator run launched -> simulator posts final `simulator/verification` deployment status back to GitHub.
+
+**Important caveat for `workflow_run`:** a workflow's `conclusion` is `"success"` whenever no job failed — including when the actual deploy job was *skipped* by an `if:` condition. The `workflow_run` webhook payload carries no job-level detail, so the simulator cannot distinguish "this workflow deployed" from "this workflow ran and skipped the deploy step." If that distinction matters, prefer subscribing to `deployment_status` instead: GitHub only creates a deployment status when something was actually deployed.
 
 ## 14) Shutdown
 

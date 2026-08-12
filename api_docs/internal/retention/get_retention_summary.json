@@ -1,0 +1,68 @@
+{
+  "useCase": "get_retention_summary",
+  "group": "retention",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/retention/summary"
+  },
+  "usedIn": {
+    "screen": "Retention settings",
+    "chain": [
+      "GET /api/v1/retention/summary → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Settings page loads",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:13.085473+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "policies": {
+      "active_days": 30,
+      "archive_days": 180
+    },
+    "queue": {
+      "archive_ready": 0,
+      "purge_ready": 0,
+      "artifact_backed_runs": 1
+    },
+    "lifecycle_states": {
+      "active": 1,
+      "archive_candidate": 0,
+      "raw_purge_candidate": 0
+    },
+    "retained_summary_fields": [
+      "verdict",
+      "flow",
+      "schedule_or_campaign_source",
+      "actor_summary",
+      "duration",
+      "latency",
+      "top_failure_signals",
+      "narrative",
+      "audit_attribution"
+    ],
+    "purge_safety": {
+      "mode": "manual-review",
+      "raw_artifact_purge_enabled": false,
+      "retained_summary_required": true
+    },
+    "status": "observation-only"
+  }
+}

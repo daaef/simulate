@@ -2669,6 +2669,7 @@ class IntegrationsApiTests(unittest.TestCase):
                 "environment": f"archive-{time.time_ns()}",
                 "profile_id": profile_id,
                 "enabled": True,
+                "trigger_event": "deployment_status",
             },
         )
         self.assertEqual(create_mapping.status_code, 200)
@@ -2709,6 +2710,7 @@ class IntegrationsApiTests(unittest.TestCase):
                 "environment": f"archives-mapping-{time.time_ns()}",
                 "profile_id": profile_id,
                 "enabled": True,
+                "trigger_event": "deployment_status",
             },
         )
         self.assertEqual(create_mapping.status_code, 200)
@@ -2759,6 +2761,7 @@ class IntegrationsApiTests(unittest.TestCase):
                 "environment": f"restore-conflict-{time.time_ns()}",
                 "profile_id": profile_id,
                 "enabled": True,
+                "trigger_event": "deployment_status",
             },
         )
         self.assertEqual(create_mapping.status_code, 200)
@@ -2793,6 +2796,7 @@ class IntegrationsApiTests(unittest.TestCase):
                 "environment": "production",
                 "profile_id": profile_id,
                 "enabled": True,
+                "trigger_event": "deployment_status",
             },
         )
         self.assertEqual(mapping_response.status_code, 200)
@@ -2850,6 +2854,8 @@ class IntegrationsApiTests(unittest.TestCase):
                         "environment": "production",
                         "profile_id": profile_id,
                         "enabled": True,
+                        "trigger_event": "workflow_run",
+                        "trigger_workflow": "CI",
                     },
                 )
                 self.assertEqual(mapping_response.status_code, 200)
@@ -2929,6 +2935,8 @@ class IntegrationsApiTests(unittest.TestCase):
                         "environment": "dev",
                         "profile_id": profile_id,
                         "enabled": True,
+                        "trigger_event": "workflow_run",
+                        "trigger_workflow": "CI",
                     },
                 )
                 self.assertEqual(mapping_response.status_code, 200)
@@ -3109,6 +3117,7 @@ class IntegrationWebhookProjectsApiTests(unittest.TestCase):
                 "environment": "production",
                 "profile_id": profile_id,
                 "enabled": True,
+                "trigger_event": "deployment_status",
             },
         )
         self.assertEqual(mapping_response.status_code, 200)
@@ -3134,6 +3143,294 @@ class IntegrationWebhookProjectsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "queued")
         launch_mock.assert_called_once()
+
+    def test_integration_automation_settings_default_and_roundtrip(self) -> None:
+        get_response = self.client.get("/api/v1/system/integration-automation")
+        self.assertEqual(get_response.status_code, 200)
+        self.assertIn("automation_enabled", get_response.json())
+
+        try:
+            put_response = self.client.put(
+                "/api/v1/system/integration-automation",
+                json={"automation_enabled": False},
+            )
+            self.assertEqual(put_response.status_code, 200)
+            self.assertFalse(put_response.json()["automation_enabled"])
+
+            confirm_response = self.client.get("/api/v1/system/integration-automation")
+            self.assertFalse(confirm_response.json()["automation_enabled"])
+        finally:
+            self.client.put("/api/v1/system/integration-automation", json={"automation_enabled": True})
+
+    def test_automation_disabled_blocks_workflow_run_webhook(self) -> None:
+        wf_secret = "wf-secret-automation-off"
+        env_overlay = {
+            "SIMULATOR_WEBHOOK_PROJECT_SECRETS": json.dumps({"wfautomationoff": wf_secret}),
+            "SIMULATOR_WEBHOOK_REPO_ALLOWLIST": json.dumps({"wfautomationoff": ["org/wf-automation-off"]}),
+        }
+        workflow_run_id = time.time_ns()
+        try:
+            off_response = self.client.put(
+                "/api/v1/system/integration-automation",
+                json={"automation_enabled": False},
+            )
+            self.assertEqual(off_response.status_code, 200)
+
+            with mock.patch.dict(os.environ, env_overlay, clear=False):
+                with mock.patch.object(web_api, "_run_simulation", return_value=None):
+                    payload = {
+                        "action": "completed",
+                        "repository": {"full_name": "org/wf-automation-off"},
+                        "workflow_run": {
+                            "id": workflow_run_id,
+                            "run_attempt": 1,
+                            "conclusion": "success",
+                            "status": "completed",
+                            "head_sha": "deadbeef",
+                            "head_branch": "main",
+                            "name": "CI",
+                        },
+                    }
+                    body = json.dumps(payload).encode("utf-8")
+                    response = self.client.post(
+                        "/api/v1/integrations/github/deployment-complete",
+                        data=body,
+                        headers={
+                            "X-GitHub-Event": "workflow_run",
+                            "X-Hub-Signature-256": self._signature(wf_secret, body),
+                            "Content-Type": "application/json",
+                        },
+                    )
+            self.assertEqual(response.status_code, 200)
+            hook = response.json()
+            self.assertFalse(hook.get("accepted"))
+            self.assertEqual(hook.get("reason"), "automation_disabled")
+            self.assertIsNone(hook.get("run_id"))
+        finally:
+            self.client.put("/api/v1/system/integration-automation", json={"automation_enabled": True})
+
+    def test_workflow_run_webhook_rejects_mismatched_workflow_name(self) -> None:
+        wf_secret = "wf-secret-mismatch"
+        env_overlay = {
+            "SIMULATOR_WEBHOOK_PROJECT_SECRETS": json.dumps({"wfmismatch": wf_secret}),
+            "SIMULATOR_WEBHOOK_REPO_ALLOWLIST": json.dumps({"wfmismatch": ["org/wf-mismatch"]}),
+        }
+        workflow_run_id = time.time_ns()
+        with mock.patch.dict(os.environ, env_overlay, clear=False):
+            with mock.patch.object(web_api, "_run_simulation", return_value=None):
+                create_profile = self.client.post(
+                    "/api/v1/run-profiles",
+                    json={
+                        "name": "WF Mismatch Profile",
+                        "flow": "doctor",
+                        "plan": "sim_actors.json",
+                        "timing": "fast",
+                    },
+                )
+                self.assertEqual(create_profile.status_code, 200)
+                profile_id = int(create_profile.json()["profile"]["id"])
+
+                # Mapping is only configured to launch on a workflow named "RDS_BACKEND" --
+                # this is the exact bug being guarded against: some other green workflow in
+                # the same repo (lint, tests, CodeQL...) must not launch it.
+                mapping_response = self.client.post(
+                    "/api/v1/integrations/github/mappings",
+                    json={
+                        "project": "wfmismatch",
+                        "environment": "production",
+                        "profile_id": profile_id,
+                        "enabled": True,
+                        "trigger_event": "workflow_run",
+                        "trigger_workflow": "RDS_BACKEND",
+                    },
+                )
+                self.assertEqual(mapping_response.status_code, 200)
+
+                payload = {
+                    "action": "completed",
+                    "repository": {"full_name": "org/wf-mismatch"},
+                    "workflow_run": {
+                        "id": workflow_run_id,
+                        "run_attempt": 1,
+                        "conclusion": "success",
+                        "status": "completed",
+                        "head_sha": "deadbeef",
+                        "head_branch": "main",
+                        "name": "CodeQL",
+                    },
+                }
+                body = json.dumps(payload).encode("utf-8")
+                response = self.client.post(
+                    "/api/v1/integrations/github/deployment-complete",
+                    data=body,
+                    headers={
+                        "X-GitHub-Event": "workflow_run",
+                        "X-Hub-Signature-256": self._signature(wf_secret, body),
+                        "Content-Type": "application/json",
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        hook = response.json()
+        self.assertFalse(hook.get("accepted"))
+        self.assertEqual(hook.get("reason"), "workflow_not_allowed")
+        self.assertIsNone(hook.get("run_id"))
+
+    def test_workflow_run_webhook_rejects_when_mapping_configured_for_other_event(self) -> None:
+        wf_secret = "wf-secret-event-mismatch"
+        env_overlay = {
+            "SIMULATOR_WEBHOOK_PROJECT_SECRETS": json.dumps({"wfeventmismatch": wf_secret}),
+            "SIMULATOR_WEBHOOK_REPO_ALLOWLIST": json.dumps({"wfeventmismatch": ["org/wf-event-mismatch"]}),
+        }
+        workflow_run_id = time.time_ns()
+        with mock.patch.dict(os.environ, env_overlay, clear=False):
+            with mock.patch.object(web_api, "_run_simulation", return_value=None):
+                create_profile = self.client.post(
+                    "/api/v1/run-profiles",
+                    json={
+                        "name": "WF Event Mismatch Profile",
+                        "flow": "doctor",
+                        "plan": "sim_actors.json",
+                        "timing": "fast",
+                    },
+                )
+                self.assertEqual(create_profile.status_code, 200)
+                profile_id = int(create_profile.json()["profile"]["id"])
+
+                # Mapping is configured to launch on deployment_status only.
+                mapping_response = self.client.post(
+                    "/api/v1/integrations/github/mappings",
+                    json={
+                        "project": "wfeventmismatch",
+                        "environment": "production",
+                        "profile_id": profile_id,
+                        "enabled": True,
+                        "trigger_event": "deployment_status",
+                    },
+                )
+                self.assertEqual(mapping_response.status_code, 200)
+
+                payload = {
+                    "action": "completed",
+                    "repository": {"full_name": "org/wf-event-mismatch"},
+                    "workflow_run": {
+                        "id": workflow_run_id,
+                        "run_attempt": 1,
+                        "conclusion": "success",
+                        "status": "completed",
+                        "head_sha": "deadbeef",
+                        "head_branch": "main",
+                        "name": "CI",
+                    },
+                }
+                body = json.dumps(payload).encode("utf-8")
+                response = self.client.post(
+                    "/api/v1/integrations/github/deployment-complete",
+                    data=body,
+                    headers={
+                        "X-GitHub-Event": "workflow_run",
+                        "X-Hub-Signature-256": self._signature(wf_secret, body),
+                        "Content-Type": "application/json",
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        hook = response.json()
+        self.assertFalse(hook.get("accepted"))
+        self.assertEqual(hook.get("reason"), "event_not_allowed")
+
+    def test_workflow_run_webhook_rejects_duplicate_delivery(self) -> None:
+        wf_secret = "wf-secret-dup"
+        env_overlay = {
+            "SIMULATOR_WEBHOOK_PROJECT_SECRETS": json.dumps({"wfdup": wf_secret}),
+            "SIMULATOR_WEBHOOK_REPO_ALLOWLIST": json.dumps({"wfdup": ["org/wf-dup"]}),
+        }
+        workflow_run_id = time.time_ns()
+        with mock.patch.dict(os.environ, env_overlay, clear=False):
+            with mock.patch.object(web_api, "_run_simulation", return_value=None):
+                create_profile = self.client.post(
+                    "/api/v1/run-profiles",
+                    json={
+                        "name": "WF Duplicate Profile",
+                        "flow": "doctor",
+                        "plan": "sim_actors.json",
+                        "timing": "fast",
+                    },
+                )
+                self.assertEqual(create_profile.status_code, 200)
+                profile_id = int(create_profile.json()["profile"]["id"])
+
+                mapping_response = self.client.post(
+                    "/api/v1/integrations/github/mappings",
+                    json={
+                        "project": "wfdup",
+                        "environment": "production",
+                        "profile_id": profile_id,
+                        "enabled": True,
+                        "trigger_event": "workflow_run",
+                        "trigger_workflow": "CI",
+                    },
+                )
+                self.assertEqual(mapping_response.status_code, 200)
+
+                payload = {
+                    "action": "completed",
+                    "repository": {"full_name": "org/wf-dup"},
+                    "workflow_run": {
+                        "id": workflow_run_id,
+                        "run_attempt": 1,
+                        "conclusion": "success",
+                        "status": "completed",
+                        "head_sha": "deadbeef",
+                        "head_branch": "main",
+                        "name": "CI",
+                    },
+                }
+                body = json.dumps(payload).encode("utf-8")
+                headers = {
+                    "X-GitHub-Event": "workflow_run",
+                    "X-Hub-Signature-256": self._signature(wf_secret, body),
+                    "Content-Type": "application/json",
+                }
+                # GitHub redelivers the identical event on timeout/retry -- same
+                # (repository, workflow_run_id, run_attempt, conclusion).
+                first_response = self.client.post(
+                    "/api/v1/integrations/github/deployment-complete", data=body, headers=headers
+                )
+                second_response = self.client.post(
+                    "/api/v1/integrations/github/deployment-complete", data=body, headers=headers
+                )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertTrue(first_response.json().get("accepted"))
+        self.assertIsNotNone(first_response.json().get("run_id"))
+
+        self.assertEqual(second_response.status_code, 200)
+        second_hook = second_response.json()
+        self.assertFalse(second_hook.get("accepted"))
+        self.assertEqual(second_hook.get("status"), "duplicate")
+        self.assertEqual(second_hook.get("reason"), "duplicate_delivery")
+
+    def test_launch_run_profile_refuses_archived_profile(self) -> None:
+        """Regression guard for the bug this feature set was built to close: an archived
+        profile must never be launchable, from any call path, even if some other guard
+        upstream (a mapping's enabled flag, its trigger spec) is somehow bypassed."""
+        create_profile = self.client.post(
+            "/api/v1/run-profiles",
+            json={
+                "name": "To Be Archived For Launch Guard",
+                "flow": "doctor",
+                "plan": "sim_actors.json",
+                "timing": "fast",
+            },
+        )
+        self.assertEqual(create_profile.status_code, 200)
+        profile_id = int(create_profile.json()["profile"]["id"])
+        self.assertEqual(self.client.delete(f"/api/v1/run-profiles/{profile_id}").status_code, 200)
+
+        with self.assertRaises(web_api.HTTPException) as ctx:
+            web_api._launch_run_profile(profile_id)
+        self.assertEqual(ctx.exception.status_code, 404)
 
 
 class CatalogSeedTests(unittest.TestCase):

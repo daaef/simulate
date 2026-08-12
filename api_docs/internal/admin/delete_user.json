@@ -1,0 +1,40 @@
+{
+  "useCase": "delete_user",
+  "group": "admin",
+  "part": "internal",
+  "endpoint": {
+    "method": "DELETE",
+    "host": "localhost:8000",
+    "path": "/api/v1/admin/users/{user_id}"
+  },
+  "usedIn": {
+    "screen": "Admin panel",
+    "chain": [
+      "DELETE /api/v1/admin/users/{user_id} → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Admin deletes user",
+  "params": {
+    "path": {
+      "user_id": 4
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "iKHG6_duibmN0n6lo6RbFUHwT_TKL4p3tyEmXtGCxZG4xM0rcZ3BJnuWoT_VS-Fq",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:38:59.444546+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "message": "User deleted successfully"
+  }
+}

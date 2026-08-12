@@ -1,0 +1,38 @@
+{
+  "useCase": "orders_auto_login",
+  "group": "orders",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/orders/auto-login"
+  },
+  "usedIn": {
+    "screen": "Orders panel",
+    "chain": [
+      "GET /api/v1/orders/auto-login → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Panel opens",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "eDY3abvWRpi1FJ82_GDm_brJgTz1UX0AEVV_hiV2cUyyIKJsD5_oQE84KSRIQ63B",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:37:43.199465+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "token": "gAAAAABqZrZmdysYsVA6ONpDHenMsfnJb4r7u9Xipojbqndnv2geEVXYHWHJmn1b566dBzv9cLJBdkE83pqYpYgvwQ5Jq8MIy293SA4_q85F1_PF463ADnVWA5PQdnCcfglB-VYOfX26"
+  }
+}

@@ -1,0 +1,187 @@
+{
+  "useCase": "map_locations_by_geo",
+  "group": "location",
+  "part": "external",
+  "endpoint": {
+    "method": "GET",
+    "host": "fainzy.tech",
+    "path": "/v1/entities/locations/{lng}/{lat}/"
+  },
+  "usedIn": {
+    "screen": "Location lookup",
+    "chain": [
+      "user_sim.py:979 -- _find_locations_by_geo()"
+    ]
+  },
+  "trigger": "User/simulator looks up area",
+  "params": {
+    "path": {
+      "lng": 136.9663666561246,
+      "lat": 35.15494521954757
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "Fainzy-Token",
+    "value": "gAAAAABqZruAiCee...",
+    "howObtained": "fainzy_token"
+  },
+  "sensitivePaths": [
+    "auth.value",
+    "response"
+  ],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T01:59:29.370797+00:00",
+    "status": 200,
+    "tool": "capture_external.py",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "Locations retrieved successfully!",
+    "data": [
+      {
+        "id": 5,
+        "created": "2024-03-26T11:53:09.108854-05:00",
+        "modified": "2024-03-26T11:53:09.109015-05:00",
+        "name": "Nagoya University Library - 名古屋大学図書館",
+        "floor_number": "1",
+        "country": "",
+        "post_code": "",
+        "state": "",
+        "city": "",
+        "ward": "",
+        "village": "",
+        "location_type": "drop_off",
+        "gps_coordinates": {
+          "type": "Point",
+          "coordinates": [
+            136.9637369,
+            35.1550725
+          ]
+        },
+        "operation_mode": "outdoor_indoor",
+        "position_location": "outdoor",
+        "ros_x_position": 61.27122116088867,
+        "ros_y_position": -47.38114547729492,
+        "ros_z_position": -0.6168504357337952,
+        "ros_orientation_x": -0.030574549312225193,
+        "ros_orientation_y": -0.014729358722162206,
+        "ros_orientation_z": -0.8500303791656248,
+        "ros_orientation_w": 0.5256392274379188,
+        "address_details": "Japan, 〒464-0814 Aichi, Nagoya, Chikusa Ward, Furōchō, 図書館",
+        "house_details": "gazebo_campus",
+        "is_default": true,
+        "is_active": true,
+        "service_area": 1
+      },
+      {
+        "id": 7,
+        "created": "2024-03-26T12:15:58.282028-05:00",
+        "modified": "2024-03-26T12:15:58.282110-05:00",
+        "name": "Front of Engineering Building II - 名古屋大学工学部２号館の前",
+        "floor_number": "1",
+        "country": "",
+        "post_code": "",
+        "state": "",
+        "city": "",
+        "ward": "",
+        "village": "",
+        "location_type": "drop_off",
+        "gps_coordinates": {
+          "type": "Point",
+          "coordinates": [
+            136.9648372,
+            35.1556615
+          ]
+        },
+        "operation_mode": "outdoor_indoor",
+        "position_location": "outdoor",
+        "ros_x_position": -20.199859619140625,
+        "ros_y_position": 28.678993225097656,
+        "ros_z_position": 0.47399866580963135,
+        "ros_orientation_x": -0.020572429035496886,
+        "ros_orientation_y": 0.004178344389050738,
+        "ros_orientation_z": -0.9933088903336962,
+        "ros_orientation_w": 0.11356392466706462,
+        "address_details": "Engineering Building II, Furōchō, Chikusa Ward, Nagoya, Aichi 464-0814, Japan",
+        "house_details": "gazebo_campus",
+        "is_default": true,
+        "is_active": true,
+        "service_area": 1
+      },
+      {
+        "id": 9,
+        "created": "2024-03-26T12:23:10.522241-05:00",
+        "modified": "2024-03-26T12:23:10.522354-05:00",
+        "name": "Back of Engineering Building II - 名古屋大学工学部２号館の裏口",
+        "floor_number": "1",
+        "country": "",
+        "post_code": "",
+        "state": "",
+        "city": "",
+        "ward": "",
+        "village": "",
+        "location_type": "drop_off",
+        "gps_coordinates": {
+          "type": "Point",
+          "coordinates": [
+            136.9648372,
+            35.1556615
+          ]
+        },
+        "operation_mode": "outdoor_indoor",
+        "position_location": "outdoor",
+        "ros_x_position": -54.24863052368164,
+        "ros_y_position": 43.262428283691406,
+        "ros_z_position": 0.8743029236793518,
+        "ros_orientation_x": 0.0032534892886310037,
+        "ros_orientation_y": 0.007461830279333568,
+        "ros_orientation_z": -0.6453238557891966,
+        "ros_orientation_w": 0.763865732341552,
+        "address_details": "Engineering Building II, Furōchō, Chikusa Ward, Nagoya, Aichi 464-0814, Japan",
+        "house_details": "gazebo_campus",
+        "is_default": true,
+        "is_active": true,
+        "service_area": 1
+      },
+      {
+        "id": 11,
+        "created": "2024-03-26T12:38:39.459101-05:00",
+        "modified": "2024-03-26T12:38:39.459238-05:00",
+        "name": "Front Entrance of GSID - 大学院国際開発研究科の前入口",
+        "floor_number": "1",
+        "country": "",
+        "post_code": "",
+        "state": "",
+        "city": "",
+        "ward": "",
+        "village": "",
+        "location_type": "drop_off",
+        "gps_coordinates": {
+          "type": "Point",
+          "coordinates": [
+            136.9641656,
+            35.15324409999999
+          ]
+        },
+        "operation_mode": "outdoor_indoor",
+        "position_location": "outdoor",
+        "ros_x_position": -116.81067657470703,
+        "ros_y_position": 32.844215393066406,
+        "ros_z_position": 1.3570475578308105,
+        "ros_orientation_x": -0.001914863164997354,
+        "ros_orientation_y": 0.004437748768489513,
+        "ros_orientation_z": -0.5270303109988855,
+        "ros_orientation_w": 0.8498327429402478,
+        "address_details": "Japan, 〒464-0000 Aichi, Nagoya, Chikusa Ward, Miyahigashichō, 大学院国際開発研究科",
+        "house_details": "gazebo_campus",
+        "is_default": true,
+        "is_active": true,
+        "service_area": 1
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "useCase": "orders_update_status",
+  "group": "orders",
+  "part": "internal",
+  "endpoint": {
+    "method": "PATCH",
+    "host": "localhost:8000",
+    "path": "/api/v1/orders/status"
+  },
+  "usedIn": {
+    "screen": "Orders panel",
+    "chain": [
+      "PATCH /api/v1/orders/status → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator updates status",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "order_id": "12345",
+      "status": "completed"
+    }
+  },
+  "auth": {
+    "header": "x-fainzy-token",
+    "value": "voio1qPNyzcmHEQ2QXfsMQiEaJ3hpu3u5hrveLxDONUnJfsJ5XFMpA6nwNrmtrH2",
+    "howObtained": "Store login token"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:25.324594+01:00",
+    "status": null,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Skipped: Makes real external calls to fainzy.tech/lastmile.fainzy.tech APIs"
+}

@@ -1,0 +1,1843 @@
+{
+  "useCase": "home_stores_by_area",
+  "group": "stores",
+  "part": "external",
+  "endpoint": {
+    "method": "GET",
+    "host": "fainzy.tech",
+    "path": "/v1/entities/subentities/service-area/{a}/"
+  },
+  "usedIn": {
+    "screen": "Home feed",
+    "chain": [
+      "user_sim.py:1123 -- _list_stores_in_area()"
+    ]
+  },
+  "trigger": "Feed loads stores",
+  "params": {
+    "path": {
+      "a": 1
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "Fainzy-Token",
+    "value": "gAAAAABqZruAiCee...",
+    "howObtained": "fainzy_token"
+  },
+  "sensitivePaths": [
+    "auth.value",
+    "response"
+  ],
+  "alsoTriggeredBy": [
+    "prefetch_stores_by_area",
+    "activity_stores_refresh"
+  ],
+  "capture": {
+    "verifiedAt": "2026-07-27T01:59:30.293617+00:00",
+    "status": 200,
+    "tool": "capture_external.py",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "Restaurants retrieved successfully via user location",
+    "data": [
+      {
+        "subentity": {
+          "id": 6,
+          "name": "Premium Cafe JP",
+          "setup": true,
+          "branch": "Premium Cafe JP",
+          "store_type": "restaurant",
+          "mobile_number": "+819081811935",
+          "currency": "jpy",
+          "store_category": "lastmile",
+          "description": "The best coffee available",
+          "image": {
+            "id": null,
+            "subentity": 6,
+            "upload": "https://res.cloudinary.com/fainzy-technologies/image/upload/v1/media/misc/0v82vtfainzy_logo_aeecr4"
+          },
+          "rating": 4.0162162162162165,
+          "total_reviews": 370,
+          "status": 1,
+          "start_time": "07:00",
+          "opening_days": "mon,tue,wed,thu,fri,sat",
+          "closing_time": "23:59",
+          "notification_id": "55cd9a07-2bb8-4540-9b18-4afed58715fe",
+          "carousel_uploads": [
+            {
+              "id": 1,
+              "menu": null,
+              "upload": "https://res.cloudinary.com/fainzy-technologies/image/upload/v1/media/menu/Premium%20Cafe%20JP%20-%20None%20-%206/ykq5s7premium_cafe_jp_tjaweu",
+              "created": "2024-08-13T19:42:25.292695+09:00",
+              "modified": "2024-08-13T19:42:25.292766+09:00",
+              "subentity": 6
+            },
+            {
+              "id": 3,
+              "menu": null,
+              "upload": "https://res.cloudinary.com/fainzy-technologies/image/upload/v1/media/menu/Premium%20Cafe%20JP%20-%20Premium%20Cafe%20Gazebo%20Campus%20-%206/c7zyqnblack-coffee-stock_ystvgz",
+              "created": "2024-08-13T20:08:53.308409+09:00",
+              "modified": "2024-08-13T20:08:53.308462+09:00",
+              "subentity": 6
+            },
+            {
+              "id": 4,
+              "menu": null,
+              "upload": "https://res.cloudinary.com/fainzy-technologies/image/upload/v1/media/menu/Premium%20Cafe%20JP%20-%20Premium%20Cafe%20Gazebo%20Campus%20-%206/f4y2d8robot-delivery_ebrfwo",
+              "created": "2024-08-13T20:09:13.321342+09:00",
+              "modified": "2024-08-13T20:09:13.321403+09:00",
+              "subentity": 6
+            }
+          ],
+          "gps_coordinates": {
+            "type": "Point",
+            "coordinates": [
+              136.9663666561246,
+              35.15494521954757
+            ]
+          },
+          "address": {
+            "id": 12,
+            "name": "Premium Cafe JP",
+            "subentity": 6,
+            "floor_number": "1",
+            "country": "Japan",
+            "post_code": "",
+            "state": "Aichi",
+            "city": "Nagoya",
+            "ward": "",
+            "village": "",
+            "service_area": 1,
+            "service_area_details": {
+              "id": 1,
+              "service_center": "gazebo_campus",
+              "gps_coordinates": {
+                "type": "Point",
+                "coordinates": [
+                  0.0,
+                  0.0
+                ]
+              },
+              "operation_mode": "outdoor_indoor",
+              "mapped": false,
+              "village": "Furocho",
+              "ward": "Chikusa-ku",
+              "city": "Nagoya",
+              "state": "State",
+              "country": "Japan",
+              "building": [
+                {
+                  "id": 1,
+                  "name": "Renewed Yamaguchi San 1",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 45,
+                      "created": "2025-04-04T15:02:15.318524-05:00",
+                      "modified": "2025-04-04T15:02:15.318561-05:00",
+                      "number": 1,
+                      "building": 1
+                    },
+                    {
+                      "id": 46,
+                      "created": "2025-04-04T15:03:01.780259-05:00",
+                      "modified": "2025-04-04T15:03:01.780292-05:00",
+                      "number": 2,
+                      "building": 1
+                    },
+                    {
+                      "id": 47,
+                      "created": "2025-04-04T15:03:01.788110-05:00",
+                      "modified": "2025-04-04T15:03:01.788142-05:00",
+                      "number": 3,
+                      "building": 1
+                    },
+                    {
+                      "id": 48,
+                      "created": "2025-04-04T15:03:01.803909-05:00",
+                      "modified": "2025-04-04T15:03:01.803943-05:00",
+                      "number": 4,
+                      "building": 1
+                    }
+                  ],
+                  "created": "2025-04-03T16:08:55.129750-05:00"
+                },
+                {
+                  "id": 2,
+                  "name": "Yamaguchi San 2",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [],
+                  "created": "2025-04-03T16:09:55.765459-05:00"
+                },
+                {
+                  "id": 3,
+                  "name": "Tanaka San",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 1,
+                      "created": "2025-04-03T16:16:26.566144-05:00",
+                      "modified": "2025-04-03T16:16:26.566196-05:00",
+                      "number": 1,
+                      "building": 3
+                    }
+                  ],
+                  "created": "2025-04-03T16:16:26.551366-05:00"
+                },
+                {
+                  "id": 4,
+                  "name": "Nakayama San",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 2,
+                      "created": "2025-04-03T18:51:35.895003-05:00",
+                      "modified": "2025-04-03T18:51:35.895060-05:00",
+                      "number": 1,
+                      "building": 4
+                    }
+                  ],
+                  "created": "2025-04-03T18:51:35.883872-05:00"
+                },
+                {
+                  "id": 5,
+                  "name": "BloomingDale",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 3,
+                      "created": "2025-04-03T18:57:43.719690-05:00",
+                      "modified": "2025-04-03T18:57:43.719728-05:00",
+                      "number": 1,
+                      "building": 5
+                    }
+                  ],
+                  "created": "2025-04-03T18:57:43.703652-05:00"
+                },
+                {
+                  "id": 6,
+                  "name": "BloomingDale Phase 2",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 4,
+                      "created": "2025-04-03T19:02:56.305385-05:00",
+                      "modified": "2025-04-03T19:02:56.305428-05:00",
+                      "number": 1,
+                      "building": 6
+                    }
+                  ],
+                  "created": "2025-04-03T19:02:56.299698-05:00"
+                },
+                {
+                  "id": 7,
+                  "name": "Mesaverte Tower 1",
+                  "address": "Downtown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 5,
+                      "created": "2025-04-03T19:06:04.416937-05:00",
+                      "modified": "2025-04-03T19:06:04.416973-05:00",
+                      "number": 1,
+                      "building": 7
+                    },
+                    {
+                      "id": 6,
+                      "created": "2025-04-03T19:06:04.416999-05:00",
+                      "modified": "2025-04-03T19:06:04.417006-05:00",
+                      "number": 2,
+                      "building": 7
+                    },
+                    {
+                      "id": 7,
+                      "created": "2025-04-03T19:06:04.417016-05:00",
+                      "modified": "2025-04-03T19:06:04.417022-05:00",
+                      "number": 3,
+                      "building": 7
+                    }
+                  ],
+                  "created": "2025-04-03T19:06:04.407552-05:00"
+                },
+                {
+                  "id": 8,
+                  "name": "Mesaverte Tower 2",
+                  "address": "Downtown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 8,
+                      "created": "2025-04-03T19:09:37.024561-05:00",
+                      "modified": "2025-04-03T19:09:37.024637-05:00",
+                      "number": 1,
+                      "building": 8
+                    },
+                    {
+                      "id": 9,
+                      "created": "2025-04-03T19:09:37.024694-05:00",
+                      "modified": "2025-04-03T19:09:37.024702-05:00",
+                      "number": 2,
+                      "building": 8
+                    },
+                    {
+                      "id": 10,
+                      "created": "2025-04-03T19:09:37.024734-05:00",
+                      "modified": "2025-04-03T19:09:37.024743-05:00",
+                      "number": 3,
+                      "building": 8
+                    }
+                  ],
+                  "created": "2025-04-03T19:09:37.017084-05:00"
+                },
+                {
+                  "id": 9,
+                  "name": "Mesaverte Tower 3",
+                  "address": "Downtown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 11,
+                      "created": "2025-04-03T19:10:25.196925-05:00",
+                      "modified": "2025-04-03T19:10:25.196961-05:00",
+                      "number": 1,
+                      "building": 9
+                    },
+                    {
+                      "id": 12,
+                      "created": "2025-04-03T19:10:25.196994-05:00",
+                      "modified": "2025-04-03T19:10:25.197001-05:00",
+                      "number": 2,
+                      "building": 9
+                    },
+                    {
+                      "id": 13,
+                      "created": "2025-04-03T19:10:25.197013-05:00",
+                      "modified": "2025-04-03T19:10:25.197020-05:00",
+                      "number": 3,
+                      "building": 9
+                    },
+                    {
+                      "id": 14,
+                      "created": "2025-04-03T19:10:25.197036-05:00",
+                      "modified": "2025-04-03T19:10:25.197043-05:00",
+                      "number": 4,
+                      "building": 9
+                    },
+                    {
+                      "id": 15,
+                      "created": "2025-04-03T19:10:25.197056-05:00",
+                      "modified": "2025-04-03T19:10:25.197066-05:00",
+                      "number": 5,
+                      "building": 9
+                    }
+                  ],
+                  "created": "2025-04-03T19:10:25.184535-05:00"
+                },
+                {
+                  "id": 10,
+                  "name": "Mesaverte Tower 4",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 16,
+                      "created": "2025-04-03T19:39:35.816191-05:00",
+                      "modified": "2025-04-03T19:39:35.816229-05:00",
+                      "number": 1,
+                      "building": 10
+                    },
+                    {
+                      "id": 17,
+                      "created": "2025-04-03T19:39:35.816263-05:00",
+                      "modified": "2025-04-03T19:39:35.816271-05:00",
+                      "number": 2,
+                      "building": 10
+                    },
+                    {
+                      "id": 18,
+                      "created": "2025-04-03T19:39:35.816286-05:00",
+                      "modified": "2025-04-03T19:39:35.816293-05:00",
+                      "number": 3,
+                      "building": 10
+                    },
+                    {
+                      "id": 19,
+                      "created": "2025-04-03T19:39:35.816308-05:00",
+                      "modified": "2025-04-03T19:39:35.816315-05:00",
+                      "number": 4,
+                      "building": 10
+                    },
+                    {
+                      "id": 20,
+                      "created": "2025-04-03T19:39:35.816328-05:00",
+                      "modified": "2025-04-03T19:39:35.816334-05:00",
+                      "number": 5,
+                      "building": 10
+                    }
+                  ],
+                  "created": "2025-04-03T19:39:35.796095-05:00"
+                },
+                {
+                  "id": 11,
+                  "name": "Mesaverte Tower 5",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 21,
+                      "created": "2025-04-03T19:41:03.500912-05:00",
+                      "modified": "2025-04-03T19:41:03.500974-05:00",
+                      "number": 1,
+                      "building": 11
+                    },
+                    {
+                      "id": 22,
+                      "created": "2025-04-03T19:41:03.501028-05:00",
+                      "modified": "2025-04-03T19:41:03.501038-05:00",
+                      "number": 2,
+                      "building": 11
+                    },
+                    {
+                      "id": 23,
+                      "created": "2025-04-03T19:41:03.501053-05:00",
+                      "modified": "2025-04-03T19:41:03.501062-05:00",
+                      "number": 3,
+                      "building": 11
+                    },
+                    {
+                      "id": 24,
+                      "created": "2025-04-03T19:41:03.501079-05:00",
+                      "modified": "2025-04-03T19:41:03.501086-05:00",
+                      "number": 4,
+                      "building": 11
+                    },
+                    {
+                      "id": 25,
+                      "created": "2025-04-03T19:41:03.501098-05:00",
+                      "modified": "2025-04-03T19:41:03.501104-05:00",
+                      "number": 5,
+                      "building": 11
+                    }
+                  ],
+                  "created": "2025-04-03T19:41:03.481007-05:00"
+                },
+                {
+                  "id": 12,
+                  "name": "Mesaverte Tower 6",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 26,
+                      "created": "2025-04-03T19:42:08.621173-05:00",
+                      "modified": "2025-04-03T19:42:08.621228-05:00",
+                      "number": 1,
+                      "building": 12
+                    },
+                    {
+                      "id": 27,
+                      "created": "2025-04-03T19:42:08.621273-05:00",
+                      "modified": "2025-04-03T19:42:08.621282-05:00",
+                      "number": 2,
+                      "building": 12
+                    },
+                    {
+                      "id": 28,
+                      "created": "2025-04-03T19:42:08.621296-05:00",
+                      "modified": "2025-04-03T19:42:08.621304-05:00",
+                      "number": 3,
+                      "building": 12
+                    },
+                    {
+                      "id": 29,
+                      "created": "2025-04-03T19:42:08.621321-05:00",
+                      "modified": "2025-04-03T19:42:08.621328-05:00",
+                      "number": 4,
+                      "building": 12
+                    },
+                    {
+                      "id": 30,
+                      "created": "2025-04-03T19:42:08.621340-05:00",
+                      "modified": "2025-04-03T19:42:08.621346-05:00",
+                      "number": 5,
+                      "building": 12
+                    }
+                  ],
+                  "created": "2025-04-03T19:42:08.611385-05:00"
+                },
+                {
+                  "id": 13,
+                  "name": "Mesaverte Tower 7",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 31,
+                      "created": "2025-04-03T19:43:27.703022-05:00",
+                      "modified": "2025-04-03T19:43:27.703063-05:00",
+                      "number": 1,
+                      "building": 13
+                    },
+                    {
+                      "id": 32,
+                      "created": "2025-04-03T19:43:27.703100-05:00",
+                      "modified": "2025-04-03T19:43:27.703108-05:00",
+                      "number": 2,
+                      "building": 13
+                    },
+                    {
+                      "id": 33,
+                      "created": "2025-04-03T19:43:27.703121-05:00",
+                      "modified": "2025-04-03T19:43:27.703127-05:00",
+                      "number": 3,
+                      "building": 13
+                    },
+                    {
+                      "id": 34,
+                      "created": "2025-04-03T19:43:27.703142-05:00",
+                      "modified": "2025-04-03T19:43:27.703148-05:00",
+                      "number": 4,
+                      "building": 13
+                    },
+                    {
+                      "id": 35,
+                      "created": "2025-04-03T19:43:27.703160-05:00",
+                      "modified": "2025-04-03T19:43:27.703165-05:00",
+                      "number": 5,
+                      "building": 13
+                    }
+                  ],
+                  "created": "2025-04-03T19:43:27.693071-05:00"
+                },
+                {
+                  "id": 14,
+                  "name": "Mesaverte Tower 8",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 36,
+                      "created": "2025-04-03T19:52:07.924859-05:00",
+                      "modified": "2025-04-03T19:52:07.924897-05:00",
+                      "number": 1,
+                      "building": 14
+                    },
+                    {
+                      "id": 37,
+                      "created": "2025-04-03T19:52:07.924933-05:00",
+                      "modified": "2025-04-03T19:52:07.924941-05:00",
+                      "number": 2,
+                      "building": 14
+                    },
+                    {
+                      "id": 38,
+                      "created": "2025-04-03T19:52:07.924954-05:00",
+                      "modified": "2025-04-03T19:52:07.924961-05:00",
+                      "number": 3,
+                      "building": 14
+                    }
+                  ],
+                  "created": "2025-04-03T19:52:07.918042-05:00"
+                },
+                {
+                  "id": 15,
+                  "name": "Mesaverte Tower 9",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 39,
+                      "created": "2025-04-03T20:06:10.789356-05:00",
+                      "modified": "2025-04-03T20:06:10.789393-05:00",
+                      "number": 1,
+                      "building": 15
+                    },
+                    {
+                      "id": 40,
+                      "created": "2025-04-03T20:06:10.789423-05:00",
+                      "modified": "2025-04-03T20:06:10.789431-05:00",
+                      "number": 2,
+                      "building": 15
+                    },
+                    {
+                      "id": 41,
+                      "created": "2025-04-03T20:06:10.789443-05:00",
+                      "modified": "2025-04-03T20:06:10.789454-05:00",
+                      "number": 3,
+                      "building": 15
+                    }
+                  ],
+                  "created": "2025-04-03T20:06:10.776337-05:00"
+                },
+                {
+                  "id": 16,
+                  "name": "Mesaverte Tower 10",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 42,
+                      "created": "2025-04-03T20:20:28.986076-05:00",
+                      "modified": "2025-04-03T20:20:28.986132-05:00",
+                      "number": 1,
+                      "building": 16
+                    },
+                    {
+                      "id": 43,
+                      "created": "2025-04-03T20:20:28.986165-05:00",
+                      "modified": "2025-04-03T20:20:28.986173-05:00",
+                      "number": 2,
+                      "building": 16
+                    },
+                    {
+                      "id": 44,
+                      "created": "2025-04-03T20:20:28.986186-05:00",
+                      "modified": "2025-04-03T20:20:28.986193-05:00",
+                      "number": 3,
+                      "building": 16
+                    }
+                  ],
+                  "created": "2025-04-03T20:20:28.973718-05:00"
+                },
+                {
+                  "id": 17,
+                  "name": "gazebo_campus",
+                  "address": "Furōchō,  Chikusa Ward,  Nagoya,  〒464-0814 Aichi, Japan",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 49,
+                      "created": "2026-04-22T03:58:59.152666-05:00",
+                      "modified": "2026-04-22T03:58:59.152705-05:00",
+                      "number": 1,
+                      "building": 17
+                    }
+                  ],
+                  "created": "2026-04-22T03:58:59.141686-05:00"
+                }
+              ]
+            },
+            "location_type": "pick_up",
+            "gps_coordinates": {
+              "type": "Point",
+              "coordinates": [
+                136.9663666561246,
+                35.15494521954757
+              ]
+            },
+            "house_details": "",
+            "address_details": "１−４ ファミリーマート名古屋大学ＩＢ館店,  Furōchō,  Chikusa Ward,  Nagoya,  〒464-0814 Aichi, Japan",
+            "operation_mode": "outdoor_indoor",
+            "position_location": "outdoor",
+            "ros_x_position": 2.1443490982055664,
+            "ros_y_position": 23.796672821044922,
+            "ros_z_position": 0.12334537506103516,
+            "ros_orientation_x": 0.0036093533206736418,
+            "ros_orientation_y": 0.003366439599049131,
+            "ros_orientation_z": 0.08976005449309071,
+            "ros_orientation_w": 0.9959511897028036,
+            "is_default": true,
+            "is_active": true
+          }
+        }
+      },
+      {
+        "subentity": {
+          "id": 7,
+          "name": "Ask Me Restaurant Jos",
+          "setup": true,
+          "branch": "Ask me restaurant",
+          "store_type": "others",
+          "mobile_number": "+2348166675609",
+          "currency": "jpy",
+          "store_category": "lastmile",
+          "description": "store offering variety of home made and foreign dishes",
+          "image": {
+            "id": null,
+            "subentity": 7,
+            "upload": "https://res.cloudinary.com/fainzy-technologies/image/upload/v1/media/users/logoBlack_jayvwl_rgkhgp.png"
+          },
+          "rating": 4.0,
+          "total_reviews": 380,
+          "status": 3,
+          "start_time": "07:00",
+          "opening_days": "mon,tue,wed,thu,fri,sat",
+          "closing_time": "23:59",
+          "notification_id": "ebf31c7d-fee9-4355-9202-5082b457ce59",
+          "carousel_uploads": [
+            {
+              "id": 1,
+              "menu": null,
+              "upload": "https://res.cloudinary.com/fainzy-technologies/image/upload/v1711820824/media/default/Screenshot_from_2024-03-31_02-46-35_yswc0f.png",
+              "created": null,
+              "modified": null,
+              "subentity": 1
+            },
+            {
+              "id": 3,
+              "menu": null,
+              "upload": "https://res.cloudinary.com/fainzy-technologies/image/upload/v1/media/menu/Ask%20Me%20Restaurant%20Jos%20-%20None%20-%207/qsqr3cabstract-technology-background-futuristic-user-interface-3d-rendering-ai-generated-photo_khzfoc",
+              "created": "2026-04-29T04:51:15.535760-05:00",
+              "modified": "2026-04-29T04:51:15.535837-05:00",
+              "subentity": 7
+            }
+          ],
+          "gps_coordinates": {
+            "type": "Point",
+            "coordinates": [
+              8.891228847205639,
+              9.909435720196303
+            ]
+          },
+          "address": {
+            "id": 13,
+            "name": "Ask Me Restaurant Jos",
+            "subentity": 7,
+            "floor_number": "1",
+            "country": "Japan",
+            "post_code": "",
+            "state": "Aichi",
+            "city": "Nagoya",
+            "ward": "",
+            "village": "",
+            "service_area": 1,
+            "service_area_details": {
+              "id": 1,
+              "service_center": "gazebo_campus",
+              "gps_coordinates": {
+                "type": "Point",
+                "coordinates": [
+                  0.0,
+                  0.0
+                ]
+              },
+              "operation_mode": "outdoor_indoor",
+              "mapped": false,
+              "village": "Furocho",
+              "ward": "Chikusa-ku",
+              "city": "Nagoya",
+              "state": "State",
+              "country": "Japan",
+              "building": [
+                {
+                  "id": 1,
+                  "name": "Renewed Yamaguchi San 1",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 45,
+                      "created": "2025-04-04T15:02:15.318524-05:00",
+                      "modified": "2025-04-04T15:02:15.318561-05:00",
+                      "number": 1,
+                      "building": 1
+                    },
+                    {
+                      "id": 46,
+                      "created": "2025-04-04T15:03:01.780259-05:00",
+                      "modified": "2025-04-04T15:03:01.780292-05:00",
+                      "number": 2,
+                      "building": 1
+                    },
+                    {
+                      "id": 47,
+                      "created": "2025-04-04T15:03:01.788110-05:00",
+                      "modified": "2025-04-04T15:03:01.788142-05:00",
+                      "number": 3,
+                      "building": 1
+                    },
+                    {
+                      "id": 48,
+                      "created": "2025-04-04T15:03:01.803909-05:00",
+                      "modified": "2025-04-04T15:03:01.803943-05:00",
+                      "number": 4,
+                      "building": 1
+                    }
+                  ],
+                  "created": "2025-04-03T16:08:55.129750-05:00"
+                },
+                {
+                  "id": 2,
+                  "name": "Yamaguchi San 2",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [],
+                  "created": "2025-04-03T16:09:55.765459-05:00"
+                },
+                {
+                  "id": 3,
+                  "name": "Tanaka San",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 1,
+                      "created": "2025-04-03T16:16:26.566144-05:00",
+                      "modified": "2025-04-03T16:16:26.566196-05:00",
+                      "number": 1,
+                      "building": 3
+                    }
+                  ],
+                  "created": "2025-04-03T16:16:26.551366-05:00"
+                },
+                {
+                  "id": 4,
+                  "name": "Nakayama San",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 2,
+                      "created": "2025-04-03T18:51:35.895003-05:00",
+                      "modified": "2025-04-03T18:51:35.895060-05:00",
+                      "number": 1,
+                      "building": 4
+                    }
+                  ],
+                  "created": "2025-04-03T18:51:35.883872-05:00"
+                },
+                {
+                  "id": 5,
+                  "name": "BloomingDale",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 3,
+                      "created": "2025-04-03T18:57:43.719690-05:00",
+                      "modified": "2025-04-03T18:57:43.719728-05:00",
+                      "number": 1,
+                      "building": 5
+                    }
+                  ],
+                  "created": "2025-04-03T18:57:43.703652-05:00"
+                },
+                {
+                  "id": 6,
+                  "name": "BloomingDale Phase 2",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 4,
+                      "created": "2025-04-03T19:02:56.305385-05:00",
+                      "modified": "2025-04-03T19:02:56.305428-05:00",
+                      "number": 1,
+                      "building": 6
+                    }
+                  ],
+                  "created": "2025-04-03T19:02:56.299698-05:00"
+                },
+                {
+                  "id": 7,
+                  "name": "Mesaverte Tower 1",
+                  "address": "Downtown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 5,
+                      "created": "2025-04-03T19:06:04.416937-05:00",
+                      "modified": "2025-04-03T19:06:04.416973-05:00",
+                      "number": 1,
+                      "building": 7
+                    },
+                    {
+                      "id": 6,
+                      "created": "2025-04-03T19:06:04.416999-05:00",
+                      "modified": "2025-04-03T19:06:04.417006-05:00",
+                      "number": 2,
+                      "building": 7
+                    },
+                    {
+                      "id": 7,
+                      "created": "2025-04-03T19:06:04.417016-05:00",
+                      "modified": "2025-04-03T19:06:04.417022-05:00",
+                      "number": 3,
+                      "building": 7
+                    }
+                  ],
+                  "created": "2025-04-03T19:06:04.407552-05:00"
+                },
+                {
+                  "id": 8,
+                  "name": "Mesaverte Tower 2",
+                  "address": "Downtown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 8,
+                      "created": "2025-04-03T19:09:37.024561-05:00",
+                      "modified": "2025-04-03T19:09:37.024637-05:00",
+                      "number": 1,
+                      "building": 8
+                    },
+                    {
+                      "id": 9,
+                      "created": "2025-04-03T19:09:37.024694-05:00",
+                      "modified": "2025-04-03T19:09:37.024702-05:00",
+                      "number": 2,
+                      "building": 8
+                    },
+                    {
+                      "id": 10,
+                      "created": "2025-04-03T19:09:37.024734-05:00",
+                      "modified": "2025-04-03T19:09:37.024743-05:00",
+                      "number": 3,
+                      "building": 8
+                    }
+                  ],
+                  "created": "2025-04-03T19:09:37.017084-05:00"
+                },
+                {
+                  "id": 9,
+                  "name": "Mesaverte Tower 3",
+                  "address": "Downtown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 11,
+                      "created": "2025-04-03T19:10:25.196925-05:00",
+                      "modified": "2025-04-03T19:10:25.196961-05:00",
+                      "number": 1,
+                      "building": 9
+                    },
+                    {
+                      "id": 12,
+                      "created": "2025-04-03T19:10:25.196994-05:00",
+                      "modified": "2025-04-03T19:10:25.197001-05:00",
+                      "number": 2,
+                      "building": 9
+                    },
+                    {
+                      "id": 13,
+                      "created": "2025-04-03T19:10:25.197013-05:00",
+                      "modified": "2025-04-03T19:10:25.197020-05:00",
+                      "number": 3,
+                      "building": 9
+                    },
+                    {
+                      "id": 14,
+                      "created": "2025-04-03T19:10:25.197036-05:00",
+                      "modified": "2025-04-03T19:10:25.197043-05:00",
+                      "number": 4,
+                      "building": 9
+                    },
+                    {
+                      "id": 15,
+                      "created": "2025-04-03T19:10:25.197056-05:00",
+                      "modified": "2025-04-03T19:10:25.197066-05:00",
+                      "number": 5,
+                      "building": 9
+                    }
+                  ],
+                  "created": "2025-04-03T19:10:25.184535-05:00"
+                },
+                {
+                  "id": 10,
+                  "name": "Mesaverte Tower 4",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 16,
+                      "created": "2025-04-03T19:39:35.816191-05:00",
+                      "modified": "2025-04-03T19:39:35.816229-05:00",
+                      "number": 1,
+                      "building": 10
+                    },
+                    {
+                      "id": 17,
+                      "created": "2025-04-03T19:39:35.816263-05:00",
+                      "modified": "2025-04-03T19:39:35.816271-05:00",
+                      "number": 2,
+                      "building": 10
+                    },
+                    {
+                      "id": 18,
+                      "created": "2025-04-03T19:39:35.816286-05:00",
+                      "modified": "2025-04-03T19:39:35.816293-05:00",
+                      "number": 3,
+                      "building": 10
+                    },
+                    {
+                      "id": 19,
+                      "created": "2025-04-03T19:39:35.816308-05:00",
+                      "modified": "2025-04-03T19:39:35.816315-05:00",
+                      "number": 4,
+                      "building": 10
+                    },
+                    {
+                      "id": 20,
+                      "created": "2025-04-03T19:39:35.816328-05:00",
+                      "modified": "2025-04-03T19:39:35.816334-05:00",
+                      "number": 5,
+                      "building": 10
+                    }
+                  ],
+                  "created": "2025-04-03T19:39:35.796095-05:00"
+                },
+                {
+                  "id": 11,
+                  "name": "Mesaverte Tower 5",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 21,
+                      "created": "2025-04-03T19:41:03.500912-05:00",
+                      "modified": "2025-04-03T19:41:03.500974-05:00",
+                      "number": 1,
+                      "building": 11
+                    },
+                    {
+                      "id": 22,
+                      "created": "2025-04-03T19:41:03.501028-05:00",
+                      "modified": "2025-04-03T19:41:03.501038-05:00",
+                      "number": 2,
+                      "building": 11
+                    },
+                    {
+                      "id": 23,
+                      "created": "2025-04-03T19:41:03.501053-05:00",
+                      "modified": "2025-04-03T19:41:03.501062-05:00",
+                      "number": 3,
+                      "building": 11
+                    },
+                    {
+                      "id": 24,
+                      "created": "2025-04-03T19:41:03.501079-05:00",
+                      "modified": "2025-04-03T19:41:03.501086-05:00",
+                      "number": 4,
+                      "building": 11
+                    },
+                    {
+                      "id": 25,
+                      "created": "2025-04-03T19:41:03.501098-05:00",
+                      "modified": "2025-04-03T19:41:03.501104-05:00",
+                      "number": 5,
+                      "building": 11
+                    }
+                  ],
+                  "created": "2025-04-03T19:41:03.481007-05:00"
+                },
+                {
+                  "id": 12,
+                  "name": "Mesaverte Tower 6",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 26,
+                      "created": "2025-04-03T19:42:08.621173-05:00",
+                      "modified": "2025-04-03T19:42:08.621228-05:00",
+                      "number": 1,
+                      "building": 12
+                    },
+                    {
+                      "id": 27,
+                      "created": "2025-04-03T19:42:08.621273-05:00",
+                      "modified": "2025-04-03T19:42:08.621282-05:00",
+                      "number": 2,
+                      "building": 12
+                    },
+                    {
+                      "id": 28,
+                      "created": "2025-04-03T19:42:08.621296-05:00",
+                      "modified": "2025-04-03T19:42:08.621304-05:00",
+                      "number": 3,
+                      "building": 12
+                    },
+                    {
+                      "id": 29,
+                      "created": "2025-04-03T19:42:08.621321-05:00",
+                      "modified": "2025-04-03T19:42:08.621328-05:00",
+                      "number": 4,
+                      "building": 12
+                    },
+                    {
+                      "id": 30,
+                      "created": "2025-04-03T19:42:08.621340-05:00",
+                      "modified": "2025-04-03T19:42:08.621346-05:00",
+                      "number": 5,
+                      "building": 12
+                    }
+                  ],
+                  "created": "2025-04-03T19:42:08.611385-05:00"
+                },
+                {
+                  "id": 13,
+                  "name": "Mesaverte Tower 7",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 31,
+                      "created": "2025-04-03T19:43:27.703022-05:00",
+                      "modified": "2025-04-03T19:43:27.703063-05:00",
+                      "number": 1,
+                      "building": 13
+                    },
+                    {
+                      "id": 32,
+                      "created": "2025-04-03T19:43:27.703100-05:00",
+                      "modified": "2025-04-03T19:43:27.703108-05:00",
+                      "number": 2,
+                      "building": 13
+                    },
+                    {
+                      "id": 33,
+                      "created": "2025-04-03T19:43:27.703121-05:00",
+                      "modified": "2025-04-03T19:43:27.703127-05:00",
+                      "number": 3,
+                      "building": 13
+                    },
+                    {
+                      "id": 34,
+                      "created": "2025-04-03T19:43:27.703142-05:00",
+                      "modified": "2025-04-03T19:43:27.703148-05:00",
+                      "number": 4,
+                      "building": 13
+                    },
+                    {
+                      "id": 35,
+                      "created": "2025-04-03T19:43:27.703160-05:00",
+                      "modified": "2025-04-03T19:43:27.703165-05:00",
+                      "number": 5,
+                      "building": 13
+                    }
+                  ],
+                  "created": "2025-04-03T19:43:27.693071-05:00"
+                },
+                {
+                  "id": 14,
+                  "name": "Mesaverte Tower 8",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 36,
+                      "created": "2025-04-03T19:52:07.924859-05:00",
+                      "modified": "2025-04-03T19:52:07.924897-05:00",
+                      "number": 1,
+                      "building": 14
+                    },
+                    {
+                      "id": 37,
+                      "created": "2025-04-03T19:52:07.924933-05:00",
+                      "modified": "2025-04-03T19:52:07.924941-05:00",
+                      "number": 2,
+                      "building": 14
+                    },
+                    {
+                      "id": 38,
+                      "created": "2025-04-03T19:52:07.924954-05:00",
+                      "modified": "2025-04-03T19:52:07.924961-05:00",
+                      "number": 3,
+                      "building": 14
+                    }
+                  ],
+                  "created": "2025-04-03T19:52:07.918042-05:00"
+                },
+                {
+                  "id": 15,
+                  "name": "Mesaverte Tower 9",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 39,
+                      "created": "2025-04-03T20:06:10.789356-05:00",
+                      "modified": "2025-04-03T20:06:10.789393-05:00",
+                      "number": 1,
+                      "building": 15
+                    },
+                    {
+                      "id": 40,
+                      "created": "2025-04-03T20:06:10.789423-05:00",
+                      "modified": "2025-04-03T20:06:10.789431-05:00",
+                      "number": 2,
+                      "building": 15
+                    },
+                    {
+                      "id": 41,
+                      "created": "2025-04-03T20:06:10.789443-05:00",
+                      "modified": "2025-04-03T20:06:10.789454-05:00",
+                      "number": 3,
+                      "building": 15
+                    }
+                  ],
+                  "created": "2025-04-03T20:06:10.776337-05:00"
+                },
+                {
+                  "id": 16,
+                  "name": "Mesaverte Tower 10",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 42,
+                      "created": "2025-04-03T20:20:28.986076-05:00",
+                      "modified": "2025-04-03T20:20:28.986132-05:00",
+                      "number": 1,
+                      "building": 16
+                    },
+                    {
+                      "id": 43,
+                      "created": "2025-04-03T20:20:28.986165-05:00",
+                      "modified": "2025-04-03T20:20:28.986173-05:00",
+                      "number": 2,
+                      "building": 16
+                    },
+                    {
+                      "id": 44,
+                      "created": "2025-04-03T20:20:28.986186-05:00",
+                      "modified": "2025-04-03T20:20:28.986193-05:00",
+                      "number": 3,
+                      "building": 16
+                    }
+                  ],
+                  "created": "2025-04-03T20:20:28.973718-05:00"
+                },
+                {
+                  "id": 17,
+                  "name": "gazebo_campus",
+                  "address": "Furōchō,  Chikusa Ward,  Nagoya,  〒464-0814 Aichi, Japan",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 49,
+                      "created": "2026-04-22T03:58:59.152666-05:00",
+                      "modified": "2026-04-22T03:58:59.152705-05:00",
+                      "number": 1,
+                      "building": 17
+                    }
+                  ],
+                  "created": "2026-04-22T03:58:59.141686-05:00"
+                }
+              ]
+            },
+            "location_type": "pick_up",
+            "gps_coordinates": {
+              "type": "Point",
+              "coordinates": [
+                8.891228847205639,
+                9.909435720196303
+              ]
+            },
+            "house_details": "gazebo_campus",
+            "address_details": "Simulator address",
+            "operation_mode": "outdoor_indoor",
+            "position_location": "outdoor",
+            "ros_x_position": 23.569950103759766,
+            "ros_y_position": -18.475221633911133,
+            "ros_z_position": -0.01987304911017418,
+            "ros_orientation_x": -0.0056178457398536625,
+            "ros_orientation_y": 0.0013549788953366496,
+            "ros_orientation_z": -0.3143835051389897,
+            "ros_orientation_w": 0.9492784646171666,
+            "is_default": true,
+            "is_active": true
+          }
+        }
+      },
+      {
+        "subentity": {
+          "id": 8,
+          "name": "MAGXI TASTY SHAWARMA Jos",
+          "setup": false,
+          "branch": null,
+          "store_type": "others",
+          "mobile_number": null,
+          "currency": "jpy",
+          "store_category": "lastmile",
+          "description": null,
+          "image": {
+            "id": null,
+            "subentity": 8,
+            "upload": "https://res.cloudinary.com/fainzy-technologies/image/upload/v1/media/users/logoBlack_jayvwl_rgkhgp.png"
+          },
+          "rating": 0,
+          "total_reviews": 0,
+          "status": 3,
+          "start_time": "07:00",
+          "opening_days": null,
+          "closing_time": "23:59",
+          "notification_id": "c4dd9f08-992c-45b0-822e-9e8fc7344ecb",
+          "carousel_uploads": [
+            {
+              "id": 1,
+              "upload": "https://res.cloudinary.com/fainzy-technologies/image/upload/v1711820824/media/default/Screenshot_from_2024-03-31_02-46-35_yswc0f.png",
+              "subentity": 1
+            }
+          ],
+          "gps_coordinates": {
+            "type": "Point",
+            "coordinates": [
+              8.8845852,
+              9.930964
+            ]
+          },
+          "address": {
+            "id": 14,
+            "name": "MAGXI TASTY SHAWARMA Jos",
+            "subentity": 8,
+            "floor_number": "1",
+            "country": "",
+            "post_code": "",
+            "state": "",
+            "city": "",
+            "ward": "",
+            "village": "",
+            "service_area": 1,
+            "service_area_details": {
+              "id": 1,
+              "service_center": "gazebo_campus",
+              "gps_coordinates": {
+                "type": "Point",
+                "coordinates": [
+                  0.0,
+                  0.0
+                ]
+              },
+              "operation_mode": "outdoor_indoor",
+              "mapped": false,
+              "village": "Furocho",
+              "ward": "Chikusa-ku",
+              "city": "Nagoya",
+              "state": "State",
+              "country": "Japan",
+              "building": [
+                {
+                  "id": 1,
+                  "name": "Renewed Yamaguchi San 1",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 45,
+                      "created": "2025-04-04T15:02:15.318524-05:00",
+                      "modified": "2025-04-04T15:02:15.318561-05:00",
+                      "number": 1,
+                      "building": 1
+                    },
+                    {
+                      "id": 46,
+                      "created": "2025-04-04T15:03:01.780259-05:00",
+                      "modified": "2025-04-04T15:03:01.780292-05:00",
+                      "number": 2,
+                      "building": 1
+                    },
+                    {
+                      "id": 47,
+                      "created": "2025-04-04T15:03:01.788110-05:00",
+                      "modified": "2025-04-04T15:03:01.788142-05:00",
+                      "number": 3,
+                      "building": 1
+                    },
+                    {
+                      "id": 48,
+                      "created": "2025-04-04T15:03:01.803909-05:00",
+                      "modified": "2025-04-04T15:03:01.803943-05:00",
+                      "number": 4,
+                      "building": 1
+                    }
+                  ],
+                  "created": "2025-04-03T16:08:55.129750-05:00"
+                },
+                {
+                  "id": 2,
+                  "name": "Yamaguchi San 2",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [],
+                  "created": "2025-04-03T16:09:55.765459-05:00"
+                },
+                {
+                  "id": 3,
+                  "name": "Tanaka San",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 1,
+                      "created": "2025-04-03T16:16:26.566144-05:00",
+                      "modified": "2025-04-03T16:16:26.566196-05:00",
+                      "number": 1,
+                      "building": 3
+                    }
+                  ],
+                  "created": "2025-04-03T16:16:26.551366-05:00"
+                },
+                {
+                  "id": 4,
+                  "name": "Nakayama San",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 2,
+                      "created": "2025-04-03T18:51:35.895003-05:00",
+                      "modified": "2025-04-03T18:51:35.895060-05:00",
+                      "number": 1,
+                      "building": 4
+                    }
+                  ],
+                  "created": "2025-04-03T18:51:35.883872-05:00"
+                },
+                {
+                  "id": 5,
+                  "name": "BloomingDale",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 3,
+                      "created": "2025-04-03T18:57:43.719690-05:00",
+                      "modified": "2025-04-03T18:57:43.719728-05:00",
+                      "number": 1,
+                      "building": 5
+                    }
+                  ],
+                  "created": "2025-04-03T18:57:43.703652-05:00"
+                },
+                {
+                  "id": 6,
+                  "name": "BloomingDale Phase 2",
+                  "address": "Ixne, ixne",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 4,
+                      "created": "2025-04-03T19:02:56.305385-05:00",
+                      "modified": "2025-04-03T19:02:56.305428-05:00",
+                      "number": 1,
+                      "building": 6
+                    }
+                  ],
+                  "created": "2025-04-03T19:02:56.299698-05:00"
+                },
+                {
+                  "id": 7,
+                  "name": "Mesaverte Tower 1",
+                  "address": "Downtown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 5,
+                      "created": "2025-04-03T19:06:04.416937-05:00",
+                      "modified": "2025-04-03T19:06:04.416973-05:00",
+                      "number": 1,
+                      "building": 7
+                    },
+                    {
+                      "id": 6,
+                      "created": "2025-04-03T19:06:04.416999-05:00",
+                      "modified": "2025-04-03T19:06:04.417006-05:00",
+                      "number": 2,
+                      "building": 7
+                    },
+                    {
+                      "id": 7,
+                      "created": "2025-04-03T19:06:04.417016-05:00",
+                      "modified": "2025-04-03T19:06:04.417022-05:00",
+                      "number": 3,
+                      "building": 7
+                    }
+                  ],
+                  "created": "2025-04-03T19:06:04.407552-05:00"
+                },
+                {
+                  "id": 8,
+                  "name": "Mesaverte Tower 2",
+                  "address": "Downtown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 8,
+                      "created": "2025-04-03T19:09:37.024561-05:00",
+                      "modified": "2025-04-03T19:09:37.024637-05:00",
+                      "number": 1,
+                      "building": 8
+                    },
+                    {
+                      "id": 9,
+                      "created": "2025-04-03T19:09:37.024694-05:00",
+                      "modified": "2025-04-03T19:09:37.024702-05:00",
+                      "number": 2,
+                      "building": 8
+                    },
+                    {
+                      "id": 10,
+                      "created": "2025-04-03T19:09:37.024734-05:00",
+                      "modified": "2025-04-03T19:09:37.024743-05:00",
+                      "number": 3,
+                      "building": 8
+                    }
+                  ],
+                  "created": "2025-04-03T19:09:37.017084-05:00"
+                },
+                {
+                  "id": 9,
+                  "name": "Mesaverte Tower 3",
+                  "address": "Downtown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 11,
+                      "created": "2025-04-03T19:10:25.196925-05:00",
+                      "modified": "2025-04-03T19:10:25.196961-05:00",
+                      "number": 1,
+                      "building": 9
+                    },
+                    {
+                      "id": 12,
+                      "created": "2025-04-03T19:10:25.196994-05:00",
+                      "modified": "2025-04-03T19:10:25.197001-05:00",
+                      "number": 2,
+                      "building": 9
+                    },
+                    {
+                      "id": 13,
+                      "created": "2025-04-03T19:10:25.197013-05:00",
+                      "modified": "2025-04-03T19:10:25.197020-05:00",
+                      "number": 3,
+                      "building": 9
+                    },
+                    {
+                      "id": 14,
+                      "created": "2025-04-03T19:10:25.197036-05:00",
+                      "modified": "2025-04-03T19:10:25.197043-05:00",
+                      "number": 4,
+                      "building": 9
+                    },
+                    {
+                      "id": 15,
+                      "created": "2025-04-03T19:10:25.197056-05:00",
+                      "modified": "2025-04-03T19:10:25.197066-05:00",
+                      "number": 5,
+                      "building": 9
+                    }
+                  ],
+                  "created": "2025-04-03T19:10:25.184535-05:00"
+                },
+                {
+                  "id": 10,
+                  "name": "Mesaverte Tower 4",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 16,
+                      "created": "2025-04-03T19:39:35.816191-05:00",
+                      "modified": "2025-04-03T19:39:35.816229-05:00",
+                      "number": 1,
+                      "building": 10
+                    },
+                    {
+                      "id": 17,
+                      "created": "2025-04-03T19:39:35.816263-05:00",
+                      "modified": "2025-04-03T19:39:35.816271-05:00",
+                      "number": 2,
+                      "building": 10
+                    },
+                    {
+                      "id": 18,
+                      "created": "2025-04-03T19:39:35.816286-05:00",
+                      "modified": "2025-04-03T19:39:35.816293-05:00",
+                      "number": 3,
+                      "building": 10
+                    },
+                    {
+                      "id": 19,
+                      "created": "2025-04-03T19:39:35.816308-05:00",
+                      "modified": "2025-04-03T19:39:35.816315-05:00",
+                      "number": 4,
+                      "building": 10
+                    },
+                    {
+                      "id": 20,
+                      "created": "2025-04-03T19:39:35.816328-05:00",
+                      "modified": "2025-04-03T19:39:35.816334-05:00",
+                      "number": 5,
+                      "building": 10
+                    }
+                  ],
+                  "created": "2025-04-03T19:39:35.796095-05:00"
+                },
+                {
+                  "id": 11,
+                  "name": "Mesaverte Tower 5",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 21,
+                      "created": "2025-04-03T19:41:03.500912-05:00",
+                      "modified": "2025-04-03T19:41:03.500974-05:00",
+                      "number": 1,
+                      "building": 11
+                    },
+                    {
+                      "id": 22,
+                      "created": "2025-04-03T19:41:03.501028-05:00",
+                      "modified": "2025-04-03T19:41:03.501038-05:00",
+                      "number": 2,
+                      "building": 11
+                    },
+                    {
+                      "id": 23,
+                      "created": "2025-04-03T19:41:03.501053-05:00",
+                      "modified": "2025-04-03T19:41:03.501062-05:00",
+                      "number": 3,
+                      "building": 11
+                    },
+                    {
+                      "id": 24,
+                      "created": "2025-04-03T19:41:03.501079-05:00",
+                      "modified": "2025-04-03T19:41:03.501086-05:00",
+                      "number": 4,
+                      "building": 11
+                    },
+                    {
+                      "id": 25,
+                      "created": "2025-04-03T19:41:03.501098-05:00",
+                      "modified": "2025-04-03T19:41:03.501104-05:00",
+                      "number": 5,
+                      "building": 11
+                    }
+                  ],
+                  "created": "2025-04-03T19:41:03.481007-05:00"
+                },
+                {
+                  "id": 12,
+                  "name": "Mesaverte Tower 6",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 26,
+                      "created": "2025-04-03T19:42:08.621173-05:00",
+                      "modified": "2025-04-03T19:42:08.621228-05:00",
+                      "number": 1,
+                      "building": 12
+                    },
+                    {
+                      "id": 27,
+                      "created": "2025-04-03T19:42:08.621273-05:00",
+                      "modified": "2025-04-03T19:42:08.621282-05:00",
+                      "number": 2,
+                      "building": 12
+                    },
+                    {
+                      "id": 28,
+                      "created": "2025-04-03T19:42:08.621296-05:00",
+                      "modified": "2025-04-03T19:42:08.621304-05:00",
+                      "number": 3,
+                      "building": 12
+                    },
+                    {
+                      "id": 29,
+                      "created": "2025-04-03T19:42:08.621321-05:00",
+                      "modified": "2025-04-03T19:42:08.621328-05:00",
+                      "number": 4,
+                      "building": 12
+                    },
+                    {
+                      "id": 30,
+                      "created": "2025-04-03T19:42:08.621340-05:00",
+                      "modified": "2025-04-03T19:42:08.621346-05:00",
+                      "number": 5,
+                      "building": 12
+                    }
+                  ],
+                  "created": "2025-04-03T19:42:08.611385-05:00"
+                },
+                {
+                  "id": 13,
+                  "name": "Mesaverte Tower 7",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 31,
+                      "created": "2025-04-03T19:43:27.703022-05:00",
+                      "modified": "2025-04-03T19:43:27.703063-05:00",
+                      "number": 1,
+                      "building": 13
+                    },
+                    {
+                      "id": 32,
+                      "created": "2025-04-03T19:43:27.703100-05:00",
+                      "modified": "2025-04-03T19:43:27.703108-05:00",
+                      "number": 2,
+                      "building": 13
+                    },
+                    {
+                      "id": 33,
+                      "created": "2025-04-03T19:43:27.703121-05:00",
+                      "modified": "2025-04-03T19:43:27.703127-05:00",
+                      "number": 3,
+                      "building": 13
+                    },
+                    {
+                      "id": 34,
+                      "created": "2025-04-03T19:43:27.703142-05:00",
+                      "modified": "2025-04-03T19:43:27.703148-05:00",
+                      "number": 4,
+                      "building": 13
+                    },
+                    {
+                      "id": 35,
+                      "created": "2025-04-03T19:43:27.703160-05:00",
+                      "modified": "2025-04-03T19:43:27.703165-05:00",
+                      "number": 5,
+                      "building": 13
+                    }
+                  ],
+                  "created": "2025-04-03T19:43:27.693071-05:00"
+                },
+                {
+                  "id": 14,
+                  "name": "Mesaverte Tower 8",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 36,
+                      "created": "2025-04-03T19:52:07.924859-05:00",
+                      "modified": "2025-04-03T19:52:07.924897-05:00",
+                      "number": 1,
+                      "building": 14
+                    },
+                    {
+                      "id": 37,
+                      "created": "2025-04-03T19:52:07.924933-05:00",
+                      "modified": "2025-04-03T19:52:07.924941-05:00",
+                      "number": 2,
+                      "building": 14
+                    },
+                    {
+                      "id": 38,
+                      "created": "2025-04-03T19:52:07.924954-05:00",
+                      "modified": "2025-04-03T19:52:07.924961-05:00",
+                      "number": 3,
+                      "building": 14
+                    }
+                  ],
+                  "created": "2025-04-03T19:52:07.918042-05:00"
+                },
+                {
+                  "id": 15,
+                  "name": "Mesaverte Tower 9",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 39,
+                      "created": "2025-04-03T20:06:10.789356-05:00",
+                      "modified": "2025-04-03T20:06:10.789393-05:00",
+                      "number": 1,
+                      "building": 15
+                    },
+                    {
+                      "id": 40,
+                      "created": "2025-04-03T20:06:10.789423-05:00",
+                      "modified": "2025-04-03T20:06:10.789431-05:00",
+                      "number": 2,
+                      "building": 15
+                    },
+                    {
+                      "id": 41,
+                      "created": "2025-04-03T20:06:10.789443-05:00",
+                      "modified": "2025-04-03T20:06:10.789454-05:00",
+                      "number": 3,
+                      "building": 15
+                    }
+                  ],
+                  "created": "2025-04-03T20:06:10.776337-05:00"
+                },
+                {
+                  "id": 16,
+                  "name": "Mesaverte Tower 10",
+                  "address": "Uptown",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 42,
+                      "created": "2025-04-03T20:20:28.986076-05:00",
+                      "modified": "2025-04-03T20:20:28.986132-05:00",
+                      "number": 1,
+                      "building": 16
+                    },
+                    {
+                      "id": 43,
+                      "created": "2025-04-03T20:20:28.986165-05:00",
+                      "modified": "2025-04-03T20:20:28.986173-05:00",
+                      "number": 2,
+                      "building": 16
+                    },
+                    {
+                      "id": 44,
+                      "created": "2025-04-03T20:20:28.986186-05:00",
+                      "modified": "2025-04-03T20:20:28.986193-05:00",
+                      "number": 3,
+                      "building": 16
+                    }
+                  ],
+                  "created": "2025-04-03T20:20:28.973718-05:00"
+                },
+                {
+                  "id": 17,
+                  "name": "gazebo_campus",
+                  "address": "Furōchō,  Chikusa Ward,  Nagoya,  〒464-0814 Aichi, Japan",
+                  "service_area": 1,
+                  "floor_details": [
+                    {
+                      "id": 49,
+                      "created": "2026-04-22T03:58:59.152666-05:00",
+                      "modified": "2026-04-22T03:58:59.152705-05:00",
+                      "number": 1,
+                      "building": 17
+                    }
+                  ],
+                  "created": "2026-04-22T03:58:59.141686-05:00"
+                }
+              ]
+            },
+            "location_type": "pick_up",
+            "gps_coordinates": {
+              "type": "Point",
+              "coordinates": [
+                8.8845852,
+                9.930964
+              ]
+            },
+            "house_details": "gazebo_campus",
+            "address_details": "MAGXI TASTY SHAWARMA, 8 Afodume St, Jos 930105, Plateau, Nigeria",
+            "operation_mode": "outdoor_indoor",
+            "position_location": "outdoor",
+            "ros_x_position": 80.5074691772461,
+            "ros_y_position": -17.73175048828125,
+            "ros_z_position": -0.43778088688850403,
+            "ros_orientation_x": -0.007920648181968212,
+            "ros_orientation_y": 0.025706432623362453,
+            "ros_orientation_z": -0.5214191086398133,
+            "ros_orientation_w": 0.8528766291498097,
+            "is_default": true,
+            "is_active": true
+          }
+        }
+      }
+    ]
+  }
+}

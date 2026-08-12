@@ -544,6 +544,8 @@ export type SimulationPlanUpsertRequest = {
   content: SimulationPlanContent;
 };
 
+export type IntegrationTriggerEvent = "workflow_run" | "deployment_status";
+
 export type IntegrationMapping = {
   id: number;
   project: string;
@@ -556,6 +558,12 @@ export type IntegrationMapping = {
   updated_at?: string | null;
   status?: "active" | "archived" | string;
   archived_at?: string | null;
+  /** Null on mappings created before the trigger spec existed -- those never launch until set. */
+  trigger_event?: IntegrationTriggerEvent | null;
+  /** Exact workflow_run.name match, required when trigger_event is "workflow_run". */
+  trigger_workflow?: string | null;
+  /** Single value this mapping launches on (default "success"), not a list. */
+  trigger_conclusion?: string | null;
   [key: string]: unknown;
 };
 
@@ -564,6 +572,13 @@ export type IntegrationMappingUpsertRequest = {
   environment: string;
   profile_id: number;
   enabled: boolean;
+  trigger_event: IntegrationTriggerEvent;
+  trigger_workflow?: string | null;
+  trigger_conclusion?: string;
+};
+
+export type IntegrationAutomationSettings = {
+  automation_enabled: boolean;
 };
 
 export type GitHubWebhookRouteBy = "branch" | "environment";
@@ -992,6 +1007,26 @@ export async function updateSystemEmailSettings(request: {
       body: JSON.stringify(request),
     }),
     "system-email-update"
+  );
+}
+
+export async function fetchIntegrationAutomationSettings(): Promise<IntegrationAutomationSettings> {
+  return unwrap<IntegrationAutomationSettings>(
+    await fetch("/api/v1/system/integration-automation", withSession()),
+    "system-integration-automation"
+  );
+}
+
+export async function updateIntegrationAutomationSettings(
+  automationEnabled: boolean
+): Promise<IntegrationAutomationSettings> {
+  return unwrap<IntegrationAutomationSettings>(
+    await fetch("/api/v1/system/integration-automation", {
+      method: "PUT",
+      ...withSession(),
+      body: JSON.stringify({ automation_enabled: automationEnabled }),
+    }),
+    "system-integration-automation-update"
   );
 }
 

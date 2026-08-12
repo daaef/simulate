@@ -1,0 +1,107 @@
+{
+  "useCase": "list_run_profiles",
+  "group": "run_profiles",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/run-profiles"
+  },
+  "usedIn": {
+    "screen": "Profiles page",
+    "chain": [
+      "GET /api/v1/run-profiles → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Profiles page loads",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "eDY3abvWRpi1FJ82_GDm_brJgTz1UX0AEVV_hiV2cUyyIKJsD5_oQE84KSRIQ63B",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:37:41.029056+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "profiles": [
+      {
+        "id": 2,
+        "user_id": 1,
+        "name": "api_docs_capture",
+        "description": "Captured for API documentation",
+        "flow": "doctor",
+        "plan": "sim_actors.json",
+        "timing": "fast",
+        "mode": null,
+        "suite": null,
+        "scenarios": [],
+        "store_id": null,
+        "phone": null,
+        "all_users": false,
+        "strict_plan": false,
+        "skip_app_probes": false,
+        "skip_store_dashboard_probes": false,
+        "no_auto_provision": false,
+        "enforce_websocket_gates": false,
+        "timeout_fails": false,
+        "post_order_actions": null,
+        "users": null,
+        "orders": null,
+        "interval": null,
+        "reject": null,
+        "continuous": false,
+        "extra_args": [],
+        "status": "active",
+        "archived_at": null,
+        "created_at": "2026-07-27T01:35:14.175817Z",
+        "updated_at": "2026-07-27T01:35:14.175817Z",
+        "catalog_slug": null,
+        "catalog_managed": false
+      },
+      {
+        "id": 1,
+        "user_id": 1,
+        "name": "api_docs_capture",
+        "description": "Captured for API documentation",
+        "flow": "doctor",
+        "plan": "sim_actors.json",
+        "timing": "fast",
+        "mode": null,
+        "suite": null,
+        "scenarios": [],
+        "store_id": null,
+        "phone": null,
+        "all_users": false,
+        "strict_plan": false,
+        "skip_app_probes": false,
+        "skip_store_dashboard_probes": false,
+        "no_auto_provision": false,
+        "enforce_websocket_gates": false,
+        "timeout_fails": false,
+        "post_order_actions": null,
+        "users": null,
+        "orders": null,
+        "interval": null,
+        "reject": null,
+        "continuous": false,
+        "extra_args": [],
+        "status": "active",
+        "archived_at": null,
+        "created_at": "2026-07-27T01:34:54.538353Z",
+        "updated_at": "2026-07-27T01:34:54.538353Z",
+        "catalog_slug": null,
+        "catalog_managed": false
+      }
+    ]
+  }
+}

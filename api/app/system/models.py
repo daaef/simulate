@@ -37,3 +37,11 @@ class EmailSettingsUpdateRequest(BaseModel):
     email_subject_prefix: str = ""
     email_recipients: Union[List[str], str] = Field(default_factory=list)
     email_event_triggers: List[EmailEventTrigger] = Field(default_factory=list)
+
+
+class IntegrationAutomationSettings(BaseModel):
+    automation_enabled: bool = True
+
+
+class IntegrationAutomationUpdateRequest(BaseModel):
+    automation_enabled: bool = True

@@ -1,0 +1,50 @@
+{
+  "useCase": "update_system_email",
+  "group": "system",
+  "part": "internal",
+  "endpoint": {
+    "method": "PUT",
+    "host": "localhost:8000",
+    "path": "/api/v1/system/email"
+  },
+  "usedIn": {
+    "screen": "Email settings",
+    "chain": [
+      "PUT /api/v1/system/email → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Admin updates email",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "smtp_host": "localhost",
+      "smtp_port": 1025,
+      "smtp_username": "test",
+      "smtp_password": "test",
+      "sender_email": "test@example.com"
+    }
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "Uz9l6-TPTneTgFdtQHWbFjaqKrv2rgEEmB-pzes-JAF7x7iAGdC-yK-8trUpD2Ry",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:45:23.248320+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "email_enabled": false,
+    "email_from_email": "",
+    "email_from_name": "",
+    "email_subject_prefix": "",
+    "email_recipients": [],
+    "email_event_triggers": []
+  },
+  "note": "Skipped: Requires higher permission level or special configuration"
+}

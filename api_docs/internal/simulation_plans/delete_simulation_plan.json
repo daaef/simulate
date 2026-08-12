@@ -1,0 +1,41 @@
+{
+  "useCase": "delete_simulation_plan",
+  "group": "simulation_plans",
+  "part": "internal",
+  "endpoint": {
+    "method": "DELETE",
+    "host": "localhost:8000",
+    "path": "/api/v1/simulation-plans/{plan_id}"
+  },
+  "usedIn": {
+    "screen": "Plans page",
+    "chain": [
+      "DELETE /api/v1/simulation-plans/{plan_id} → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Operator deletes plan",
+  "params": {
+    "path": {
+      "plan_id": "api-docs-capture-2"
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "iKHG6_duibmN0n6lo6RbFUHwT_TKL4p3tyEmXtGCxZG4xM0rcZ3BJnuWoT_VS-Fq",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:38:59.355014+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "plan_id": "api-docs-capture-2",
+    "deleted": true
+  }
+}

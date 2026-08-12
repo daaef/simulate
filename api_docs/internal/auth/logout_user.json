@@ -1,0 +1,38 @@
+{
+  "useCase": "logout_user",
+  "group": "auth",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/auth/logout"
+  },
+  "usedIn": {
+    "screen": "Dashboard user menu",
+    "chain": [
+      "POST /api/v1/auth/logout → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "User clicks Logout",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "voio1qPNyzcmHEQ2QXfsMQiEaJ3hpu3u5hrveLxDONUnJfsJ5XFMpA6nwNrmtrH2",
+    "howObtained": "Session cookie from login"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:40:41.435960+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "message": "Logged out successfully"
+  }
+}

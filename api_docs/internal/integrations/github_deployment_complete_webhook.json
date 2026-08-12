@@ -1,0 +1,37 @@
+{
+  "useCase": "github_deployment_complete_webhook",
+  "group": "integrations",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/integrations/github/deployment-complete"
+  },
+  "usedIn": {
+    "screen": "GitHub webhook",
+    "chain": [
+      "POST /api/v1/integrations/github/deployment-complete → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Deployment webhook fires",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "n/a",
+    "value": null,
+    "howObtained": "GitHub webhook signature"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:25.328021+01:00",
+    "status": null,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Skipped: webhook endpoint that requires GitHub webhook headers and payload"
+}

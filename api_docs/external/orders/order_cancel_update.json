@@ -1,0 +1,61 @@
+{
+  "useCase": "order_cancel_update",
+  "group": "orders",
+  "part": "external",
+  "endpoint": {
+    "method": "PATCH",
+    "host": "lastmile.fainzy.tech",
+    "path": "/v1/core/orders/"
+  },
+  "usedIn": {
+    "screen": "Order details",
+    "chain": [
+      "user_sim.py:1706 context (_cancel_order) / store_sim.py:1215 _update_order_status() -- PATCH /v1/core/orders/?order_id={id} body {\"status\": \"cancelled\"}"
+    ]
+  },
+  "trigger": "User/simulator cancels order",
+  "params": {
+    "path": {},
+    "query": {"order_id": "5487"},
+    "body": {"status": "cancelled"}
+  },
+  "auth": {
+    "header": "Authorization",
+    "value": "0d5d85f121ff3d5a3e9f7e42519c6ed1f8456bfb",
+    "howObtained": "POST /v1/auth/users/auth/ (login) -- \"Token \" prefix"
+  },
+  "sensitivePaths": ["auth.value", "response.data.user", "response.data.user_data"],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-24T06:33:54.515271+01:00",
+    "status": 200,
+    "tool": "reused from last_mile_user/api_docs/orders/order_cancel_update.json (capture_session.py)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "Order successfully updated!",
+    "data": {
+      "id": 5487,
+      "user": {"id": 42, "first_name": "Fainzy", "last_name": "Simulator", "email": "sim-2348166675609@example.test", "phone_number": "+2348166675609"},
+      "code": "rand_code_generator",
+      "order_id": "#870629",
+      "restaurant": {"id": 6, "name": "Premium Cafe JP", "branch": "Premium Cafe JP", "status": 1, "currency": "jpy", "mobile_number": "+819081811935", "gps_coordinates": {"type": "Point", "coordinates": [136.9663666561246, 35.15494521954757]}},
+      "location": {"id": null, "name": "api_docs capture", "gps_coordinates": {"type": "Point", "coordinates": [136.96636, 35.15494]}},
+      "menu": [{"id": 26, "category": 1, "subentity": 6, "sides": [], "name": "Simulator item 20260519T120922", "price": 100.0, "status": "available"}],
+      "total_price": 100.0,
+      "coupon_discount": 0.0,
+      "coupon_code": null,
+      "estimated_eta": 600.0,
+      "cancellation_time": null,
+      "delivery_fee": 0.0,
+      "service_fee": 0.0,
+      "is_free": false,
+      "status": "cancelled",
+      "created": "2026-07-24T00:23:49.754011-05:00",
+      "user_data": {"id": 42, "first_name": "Fainzy", "last_name": "Simulator", "email": "sim-2348166675609@example.test", "phone_number": "+2348166675609"},
+      "message": "Order successfully updated!"
+    }
+  },
+  "note": "Response/params reused verbatim from ../last_mile_user/api_docs/orders/order_cancel_update.json (real live capture, 2026-07-24) rather than a fresh simulate-specific capture -- same real lastmile.fainzy.tech backend. This is the same order (id 5487) as checkout_place_order.json, cancelled immediately after in the source project's session, so the pair together document a full real place-then-cancel lifecycle with nothing left live. Decision: 2026-07-27, see checkout_place_order.json's note for the reuse rationale."
+}

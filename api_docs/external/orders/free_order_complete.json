@@ -1,0 +1,37 @@
+{
+  "useCase": "free_order_complete",
+  "group": "orders",
+  "part": "external",
+  "endpoint": {
+    "method": "POST",
+    "host": "lastmile.fainzy.tech",
+    "path": "/v1/core/order/free/"
+  },
+  "usedIn": {
+    "screen": "Checkout",
+    "chain": [
+      "POST /v1/core/order/free/ → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Free order placed",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "Authorization",
+    "value": null,
+    "howObtained": "User login token"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": null,
+    "status": null,
+    "tool": "capture_external.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Gated behind mutation-phase approval. Requires real user OTP/login or order placement. See API_DOCS_PLAN_2026-07-27.md#open-item-2"
+}

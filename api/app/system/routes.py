@@ -5,7 +5,12 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from ..auth.policies import require_permission
-from .models import EmailSettingsUpdateRequest, RetentionPolicyUpdateRequest, TimezonePolicyUpdateRequest
+from .models import (
+    EmailSettingsUpdateRequest,
+    IntegrationAutomationUpdateRequest,
+    RetentionPolicyUpdateRequest,
+    TimezonePolicyUpdateRequest,
+)
 from . import service
 
 router = APIRouter(tags=["system"])
@@ -40,6 +45,19 @@ def set_email_settings(
 @router.post("/api/v1/system/email/test")
 def send_test_email(current_user: dict = Depends(require_permission("system", "configure"))) -> dict[str, Any]:
     return service.send_test_email()
+
+
+@router.get("/api/v1/system/integration-automation")
+def get_integration_automation(current_user: dict = Depends(require_permission("system", "read"))) -> dict[str, Any]:
+    return service.get_integration_automation()
+
+
+@router.put("/api/v1/system/integration-automation")
+def set_integration_automation(
+    request: IntegrationAutomationUpdateRequest,
+    current_user: dict = Depends(require_permission("system", "configure")),
+) -> dict[str, Any]:
+    return service.set_integration_automation(request)
 
 
 @router.get("/api/v1/system/retention")

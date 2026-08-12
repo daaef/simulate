@@ -1,0 +1,39 @@
+{
+  "useCase": "list_github_mappings",
+  "group": "integrations",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/integrations/github/mappings"
+  },
+  "usedIn": {
+    "screen": "Integrations page",
+    "chain": [
+      "GET /api/v1/integrations/github/mappings → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Mappings list loads",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:13.532810+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "mappings": [],
+    "route_by": "environment"
+  }
+}

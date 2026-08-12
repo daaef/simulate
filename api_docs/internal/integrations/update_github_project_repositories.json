@@ -1,0 +1,37 @@
+{
+  "useCase": "update_github_project_repositories",
+  "group": "integrations",
+  "part": "internal",
+  "endpoint": {
+    "method": "PATCH",
+    "host": "localhost:8000",
+    "path": "/api/v1/integrations/github/projects/{project}/repositories"
+  },
+  "usedIn": {
+    "screen": "Integrations page",
+    "chain": [
+      "PATCH /api/v1/integrations/github/projects/{project}/repositories → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Admin updates repos",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": null,
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:25.327088+01:00",
+    "status": null,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Skipped: endpoint makes real external calls to GitHub API (github_webhook_sync.sync_to_github)"
+}

@@ -1,0 +1,41 @@
+{
+  "useCase": "delete_github_mapping",
+  "group": "integrations",
+  "part": "internal",
+  "endpoint": {
+    "method": "DELETE",
+    "host": "localhost:8000",
+    "path": "/api/v1/integrations/github/mappings/{mapping_id}"
+  },
+  "usedIn": {
+    "screen": "Integrations page",
+    "chain": [
+      "DELETE /api/v1/integrations/github/mappings/{mapping_id} → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Admin deletes mapping",
+  "params": {
+    "path": {
+      "mapping_id": 1
+    },
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "PNWaLkygMMHhrdDGVSdBDrEK_MJN6290sSl6_o25Ga6gcMrDFKuTEPeWJEqmUY5e",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:42:40.279924+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "mapping_id": 1,
+    "deleted": true
+  }
+}

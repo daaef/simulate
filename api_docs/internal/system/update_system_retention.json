@@ -1,0 +1,45 @@
+{
+  "useCase": "update_system_retention",
+  "group": "system",
+  "part": "internal",
+  "endpoint": {
+    "method": "PUT",
+    "host": "localhost:8000",
+    "path": "/api/v1/system/retention"
+  },
+  "usedIn": {
+    "screen": "Retention settings",
+    "chain": [
+      "PUT /api/v1/system/retention → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Admin updates policy",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "days": 90,
+      "archive_after_days": 30
+    }
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "Uz9l6-TPTneTgFdtQHWbFjaqKrv2rgEEmB-pzes-JAF7x7iAGdC-yK-8trUpD2Ry",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:45:23.372778+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "active_days": 30,
+    "archive_days": 180,
+    "active_days_default": 30,
+    "archive_days_default": 180
+  },
+  "note": "Skipped: Requires higher permission level or special configuration"
+}

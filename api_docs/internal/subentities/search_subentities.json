@@ -1,0 +1,37 @@
+{
+  "useCase": "search_subentities",
+  "group": "subentities",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/subentities/search"
+  },
+  "usedIn": {
+    "screen": "Orders/simulation config",
+    "chain": [
+      "GET /api/v1/subentities/search → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Store search runs",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "voio1qPNyzcmHEQ2QXfsMQiEaJ3hpu3u5hrveLxDONUnJfsJ5XFMpA6nwNrmtrH2",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:25.325506+01:00",
+    "status": null,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Skipped: Requires x_fainzy_auth_token header and makes external calls to fainzy.tech"
+}

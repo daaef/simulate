@@ -115,7 +115,14 @@ def _insert_trigger(
     status: str,
     reason: str | None,
     payload: dict[str, Any],
-) -> int:
+) -> tuple[int, bool]:
+    """Insert an audit row, check-then-insert on dedupe_key (mirrors
+    main._create_integration_trigger's pattern for the deployment_status path).
+
+    Returns (trigger_id, created). created=False means dedupe_key already existed and this
+    call did not write anything — callers must treat that as a duplicate delivery and must
+    not launch a profile for it.
+    """
     now = _utc_now()
     payload_json = json.dumps(payload, default=str)
 
@@ -123,6 +130,14 @@ def _insert_trigger(
         cursor = conn.cursor()
 
         if USE_POSTGRES:
+            cursor.execute(
+                "SELECT id FROM integration_triggers WHERE dedupe_key = %s",
+                (dedupe_key,),
+            )
+            existing = cursor.fetchone()
+            if existing is not None:
+                return int(existing["id"] if isinstance(existing, dict) else existing[0]), False
+
             cursor.execute(
                 """
                 INSERT INTO integration_triggers (
@@ -146,12 +161,6 @@ def _insert_trigger(
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s::jsonb, NULL, NULL, %s, %s
                 )
-                ON CONFLICT (dedupe_key)
-                DO UPDATE SET
-                    status = EXCLUDED.status,
-                    reason = EXCLUDED.reason,
-                    payload = EXCLUDED.payload,
-                    updated_at = EXCLUDED.updated_at
                 RETURNING id
                 """,
                 (
@@ -171,11 +180,18 @@ def _insert_trigger(
                 ),
             )
             row = cursor.fetchone()
-            return int(row["id"] if isinstance(row, dict) else row[0])
+            return int(row["id"] if isinstance(row, dict) else row[0]), True
+
+        existing = cursor.execute(
+            "SELECT id FROM integration_triggers WHERE dedupe_key = ?",
+            (dedupe_key,),
+        ).fetchone()
+        if existing is not None:
+            return int(existing["id"]), False
 
         cursor.execute(
             """
-            INSERT OR IGNORE INTO integration_triggers (
+            INSERT INTO integration_triggers (
                 project,
                 environment,
                 repository,
@@ -218,7 +234,7 @@ def _insert_trigger(
         row = cursor.fetchone()
         if row is None:
             raise RuntimeError("Failed to create or load integration trigger row.")
-        return int(row["id"])
+        return int(row["id"]), True
 
 
 def _finish_trigger(
@@ -303,6 +319,70 @@ def _bool_value(value: Any) -> bool:
     return False
 
 
+# Must match api.app.main.INTEGRATION_AUTOMATION_SETTINGS_KEY — same system_settings row, read
+# independently here (mirroring how _lookup_mapping below duplicates main.py's mapping lookup)
+# so the webhook path never depends on main.py's callback wiring to enforce the gate.
+_INTEGRATION_AUTOMATION_SETTINGS_KEY = "integration_automation"
+
+
+def automation_enabled() -> bool:
+    """Master switch for GitHub-triggered simulation runs, checked before any event-specific parsing.
+
+    Absent row => automation on (the per-mapping trigger spec below is the fail-closed gate).
+    Any read error => automation off, since this is a safety switch and must fail closed.
+    """
+    try:
+        with _db_connection() as conn:
+            cursor = conn.cursor()
+            if USE_POSTGRES:
+                cursor.execute(
+                    "SELECT value FROM system_settings WHERE key = %s",
+                    (_INTEGRATION_AUTOMATION_SETTINGS_KEY,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT value FROM system_settings WHERE key = ?",
+                    (_INTEGRATION_AUTOMATION_SETTINGS_KEY,),
+                )
+            row = cursor.fetchone()
+    except Exception:
+        return False
+
+    if row is None:
+        return True
+
+    raw = row["value"]
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return False
+    if not isinstance(raw, dict):
+        return False
+    return _bool_value(raw.get("automation_enabled", True))
+
+
+def record_automation_disabled_trigger(*, project: str, event_name: str, repository: str) -> int:
+    """Audit row for a delivery rejected by the global automation switch, before any
+    event-specific parsing (route key, workflow name, conclusion) has happened."""
+    now = _utc_now()
+    dedupe_key = f"automation_disabled:{project}:{repository}:{event_name}:{now}"
+    trigger_id, _created = _insert_trigger(
+        project=project,
+        environment="unknown",
+        repository=repository or "unknown",
+        sha="unknown",
+        deployment_id="unknown",
+        deployment_status_id=None,
+        dedupe_key=dedupe_key,
+        event_name=event_name,
+        status="rejected",
+        reason="automation_disabled",
+        payload={},
+    )
+    return trigger_id
+
+
 def _launch_profile(profile_id: int, *, trigger_overlay: dict[str, Any] | None = None) -> int | None:
     payload = runs_service.launch_profile(profile_id, None, trigger_overlay)
     run = payload.get("run") if isinstance(payload, dict) else None
@@ -353,11 +433,12 @@ def process_github_workflow_run_webhook(
     sha = str(workflow_run.get("head_sha") or repository_payload.get("pushed_at") or "")
     environment = route_key_from_workflow_run(workflow_run)
 
+    workflow_name = str(workflow_run.get("name") or "")
     dedupe_key = f"workflow_run:{repository}:{workflow_run_id}:{run_attempt}:{conclusion or workflow_status}"
     summary = _workflow_payload_summary(payload)
 
     if not repository or not _repo_allowed_for_project(project, repository):
-        trigger_id = _insert_trigger(
+        trigger_id, _created = _insert_trigger(
             project=project,
             environment=environment,
             repository=repository or "unknown",
@@ -381,7 +462,21 @@ def process_github_workflow_run_webhook(
             "meta": summary,
         }
 
-    trigger_id = _insert_trigger(
+    # GitHub also delivers "requested" and "in_progress" workflow_run events for the same
+    # run. Neither can ever lead to a launch decision, so no audit row is written for them
+    # -- only a delivery whose action is "completed" is worth recording.
+    if action != "completed":
+        return {
+            "accepted": False,
+            "status": "ignored",
+            "reason": "workflow_run_not_completed",
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+            "meta": summary,
+        }
+
+    trigger_id, created = _insert_trigger(
         project=project,
         environment=environment,
         repository=repository,
@@ -395,34 +490,14 @@ def process_github_workflow_run_webhook(
         payload=summary,
     )
 
-    if action != "completed":
-        _finish_trigger(
-            trigger_id,
-            status="ignored",
-            reason="workflow_run_not_completed",
-        )
+    if not created:
+        # Same (repository, workflow_run_id, run_attempt, conclusion) delivered again --
+        # GitHub redelivers on timeout/retry. Must not launch a second time for it.
         return {
             "accepted": False,
             "trigger_id": trigger_id,
-            "status": "ignored",
-            "reason": "workflow_run_not_completed",
-            "project": project,
-            "environment": environment,
-            "repository": repository,
-            "meta": summary,
-        }
-
-    if conclusion != "success":
-        _finish_trigger(
-            trigger_id,
-            status="ignored",
-            reason="workflow_run_not_successful",
-        )
-        return {
-            "accepted": False,
-            "trigger_id": trigger_id,
-            "status": "ignored",
-            "reason": "workflow_run_not_successful",
+            "status": "duplicate",
+            "reason": "duplicate_delivery",
             "project": project,
             "environment": environment,
             "repository": repository,
@@ -464,6 +539,80 @@ def process_github_workflow_run_webhook(
             "meta": summary,
         }
 
+    # Positive trigger spec (allowlist, not denylist): a mapping must declare exactly what
+    # launches it. No spec, wrong event type, wrong workflow name, or wrong conclusion all
+    # mean "do not launch" -- there is no default-permit path left below this point.
+    trigger_event = str(mapping.get("trigger_event") or "").strip()
+    if not trigger_event:
+        _finish_trigger(
+            trigger_id,
+            status="rejected",
+            reason="trigger_not_configured",
+        )
+        return {
+            "accepted": False,
+            "trigger_id": trigger_id,
+            "status": "rejected",
+            "reason": "trigger_not_configured",
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+            "meta": summary,
+        }
+
+    if trigger_event != "workflow_run":
+        _finish_trigger(
+            trigger_id,
+            status="rejected",
+            reason="event_not_allowed",
+        )
+        return {
+            "accepted": False,
+            "trigger_id": trigger_id,
+            "status": "rejected",
+            "reason": "event_not_allowed",
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+            "meta": summary,
+        }
+
+    expected_workflow = str(mapping.get("trigger_workflow") or "").strip()
+    if not expected_workflow or expected_workflow != workflow_name:
+        _finish_trigger(
+            trigger_id,
+            status="rejected",
+            reason="workflow_not_allowed",
+        )
+        return {
+            "accepted": False,
+            "trigger_id": trigger_id,
+            "status": "rejected",
+            "reason": "workflow_not_allowed",
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+            "meta": summary,
+        }
+
+    expected_conclusion = str(mapping.get("trigger_conclusion") or "success").strip().lower()
+    if conclusion.strip().lower() != expected_conclusion:
+        _finish_trigger(
+            trigger_id,
+            status="rejected",
+            reason="conclusion_not_allowed",
+        )
+        return {
+            "accepted": False,
+            "trigger_id": trigger_id,
+            "status": "rejected",
+            "reason": "conclusion_not_allowed",
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+            "meta": summary,
+        }
+
     profile_id = int(mapping["profile_id"])
     trigger_overlay: dict[str, Any] = {
         "trigger_source": "github",
@@ -479,7 +628,23 @@ def process_github_workflow_run_webhook(
             "workflow_summary": summary,
         },
     }
-    run_id = _launch_profile(profile_id, trigger_overlay=trigger_overlay)
+
+    try:
+        run_id = _launch_profile(profile_id, trigger_overlay=trigger_overlay)
+    except Exception as exc:  # noqa: BLE001 - a launch failure (e.g. archived profile) must
+        # not crash the webhook endpoint; record it and return a normal rejected response.
+        reason = f"launch_failed:{exc}"
+        _finish_trigger(trigger_id, status="failed", reason=reason)
+        return {
+            "accepted": False,
+            "trigger_id": trigger_id,
+            "status": "failed",
+            "reason": reason,
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+            "meta": summary,
+        }
 
     _finish_trigger(
         trigger_id,

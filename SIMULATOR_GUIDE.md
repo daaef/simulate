@@ -1431,15 +1431,19 @@ Deployment is idempotent (`git fetch` + `git checkout main` + `git reset --hard 
 GitHub deployment webhook automation:
 
 - Inbound endpoint: `POST /api/v1/integrations/github/deployment-complete`.
+- Master automation switch: `GET`/`PUT /api/v1/system/integration-automation` (`{"automation_enabled": bool}`), checked before any event-specific parsing for every event type. When off, every delivery is rejected with `automation_disabled` and nothing downstream runs. Absent setting defaults to enabled — the per-mapping trigger spec below is what fails closed. Toggle it from the "Automatic verification and simulation runs" switch at the top of **Config → Integration Mappings**.
 - Supported events:
   - `deployment_status` with `state=success` (required fields in payload); other states/events are rejected for launches.
   - `workflow_run` with `action=completed` and `workflow_run.conclusion=success`; repository must be allowlisted and `(project, environment)` must map to a profile (same mapping table as deployments). **Runs created from `workflow_run` are stored with `trigger_source=github`**, `trigger_label` `GitHub integration: {project}/{environment}`, merged `trigger_context` (profile name, repository, workflow summary, `github_event: workflow_run`), and `integration_trigger_id` pointing at the `integration_triggers` row—same style as deployment-triggered runs, so the Runs page and overview chips show GitHub rather than a dashboard profile launch.
+- Per-mapping trigger spec (allowlist, not denylist): each mapping declares exactly one `trigger_event` (`workflow_run` or `deployment_status`), and for `workflow_run` also an exact `trigger_workflow` name match against `workflow_run.name`. `trigger_conclusion` is a single value, default `"success"`. A mapping with no `trigger_event` set — every mapping created before this field existed — never launches, regardless of `enabled`, until it is configured. This means a repo with several workflows (CI, lint, CodeQL, deploy) only ever launches on the one named workflow you configured, not on any green workflow in the repo.
 - Security: HMAC verification via `X-Hub-Signature-256` using project-specific signing secrets from the persistent webhook config file (`SIMULATOR_WEBHOOK_PROJECTS_FILE`, default `/workspace/simulate/data/webhook-projects.json`). Manage projects in **Config → Integration → Webhook Projects**; changes auto-sync to GitHub `SIMULATOR_WEBHOOK_PROJECT_SECRETS` when `SIMULATOR_GITHUB_CONFIG_TOKEN` is set on the API.
 - Repository guardrail: repository must match an allowlisted `owner/repo` for the resolved project. Configure repositories in **Webhook Projects** (synced to `SIMULATOR_WEBHOOK_REPO_ALLOWLIST` on the simulator repo).
 - Profile routing: simulator maps `(project, route key)` to a saved run profile through `integration_profile_mappings`. The route key column is named `environment` in the API/DB. By default it is GitHub’s deployment environment (`deployment.environment` on `deployment_status`, or `SIMULATOR_WORKFLOW_RUN_DEFAULT_ENVIRONMENT` / `production` on `workflow_run`). Set `SIMULATOR_WEBHOOK_ROUTE_BY=branch` to route by git ref instead (`workflow_run.head_branch` or `deployment.ref`, normalized to lowercase).
-- Idempotency key: `project + environment + deployment_id + sha`; duplicate webhook deliveries do not launch duplicate runs.
-- Lifecycle states recorded per trigger: `validated`, `queued`, `launched`, `completed`/`failed`, `rejected`, `duplicate`.
+- Idempotency key: `project + environment + deployment_id + sha` for `deployment_status`, `repository + workflow_run_id + run_attempt + conclusion` for `workflow_run`; duplicate webhook deliveries do not launch duplicate runs (`workflow_run` duplicates are rejected with `duplicate_delivery`).
+- Archived/deleted profiles can never be launched, from any path (manual launch, `deployment_status`, or `workflow_run`) — enforced once at the shared launch function, not per-caller.
+- Lifecycle states recorded per trigger: `validated`/`received`, `queued`, `launched`, `completed`/`failed`, `rejected`, `duplicate`. A `workflow_run` delivery whose `action` isn't `completed` (`requested`/`in_progress`) is not recorded at all — it can never affect a launch decision.
 - Callback: when run reaches terminal state, simulator posts deployment status back to GitHub with context `simulator/verification` using `GITHUB_STATUS_TOKEN`.
+- **Caveat:** a `workflow_run`'s `conclusion` is `"success"` even when the actual deploy job inside it was *skipped* by an `if:` condition — the payload carries no job-level detail, so the simulator cannot tell "deployed" from "ran but skipped deploying." Prefer `deployment_status` when that distinction matters, since GitHub only creates one when something actually deployed.
 
 Webhook project setup (GUI):
 
@@ -1460,10 +1464,11 @@ Operational APIs:
 - `PATCH /api/v1/integrations/github/projects/{project}/repositories` (update allowlisted repos)
 - `DELETE /api/v1/integrations/github/projects/{project}` (archive project)
 - `GET /api/v1/integrations/github/mappings?include_archived=<true|false>` (view mapping rows)
-- `POST /api/v1/integrations/github/mappings` (upsert `{project, environment, profile_id, enabled}`)
+- `POST /api/v1/integrations/github/mappings` (upsert `{project, environment, profile_id, enabled, trigger_event, trigger_workflow, trigger_conclusion}`; `trigger_workflow` required when `trigger_event="workflow_run"`)
 - `DELETE /api/v1/integrations/github/mappings/{mapping_id}` (archive)
 - `POST /api/v1/integrations/github/mappings/{mapping_id}/restore`
 - `GET /api/v1/integrations/github/triggers` (audit and debugging feed)
+- `GET`/`PUT /api/v1/system/integration-automation` (master on/off switch, checked before every delivery)
 
 To identify webhook-triggered runs in the GUI, use the **Launch** column on **Runs** (`trigger_source` is `github` and the label shows the integration route). For audit detail, use `GET /api/v1/integrations/github/triggers` and match `run_id` to the run.
 

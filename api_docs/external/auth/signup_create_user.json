@@ -1,0 +1,63 @@
+{
+  "useCase": "signup_create_user",
+  "group": "auth",
+  "part": "external",
+  "endpoint": {
+    "method": "POST",
+    "host": "lastmile.fainzy.tech",
+    "path": "/v1/auth/users/create/"
+  },
+  "usedIn": {
+    "screen": "Registration",
+    "chain": [
+      "POST /v1/auth/users/create/ → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Registration completes",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {
+      "first_name": "Fainzy",
+      "last_name": "Simulator",
+      "password": "Password123!",
+      "email": "sim-819081819999@example.test",
+      "phone_number": "+819081819999"
+    }
+  },
+  "auth": {
+    "header": "n/a",
+    "value": null,
+    "howObtained": "No auth"
+  },
+  "sensitivePaths": [
+    "params.body.password",
+    "params.body.phone_number",
+    "response.data.user.phone_number",
+    "response.data.token"
+  ],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T00:15:00+00:00",
+    "status": 201,
+    "tool": "manual (user-executed curl, per user's command-execution policy)",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "User created successfully!",
+    "data": {
+      "user": {
+        "id": 49,
+        "first_name": "Fainzy",
+        "last_name": "Simulator",
+        "email": "sim-819081819999@example.test",
+        "profile_picture": "http://res.cloudinary.com/fainzy-technologies/image/upload/v1/users/logoBlack_jayvwl_rgkhgp.png",
+        "phone_number": "+819081819999",
+        "notification_id": "a4614587-7dfc-4993-b343-cf0056b5342a"
+      },
+      "token": "0fedf7bd070158fd61be1c439ad49f457be7c861"
+    }
+  },
+  "note": "Throwaway account (user id 49) created for api_docs capture on 2026-07-27; safe to deactivate/delete later."
+}

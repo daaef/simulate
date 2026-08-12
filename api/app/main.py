@@ -46,7 +46,7 @@ from .schedules.models import ScheduleUpsertRequest
 from .schedules.routes import router as schedules_router
 from .schedules.service import configure_runtime as configure_schedules_runtime
 from .system.email_sender import SmtpConfig, send_plain_text_email
-from .system.models import EmailSettingsUpdateRequest, TimezonePolicyUpdateRequest
+from .system.models import EmailSettingsUpdateRequest, IntegrationAutomationUpdateRequest, TimezonePolicyUpdateRequest
 from .system.routes import router as system_router
 from .system.service import configure_runtime as configure_system_runtime
 from .simulation_plans.models import SimulationPlanUpsertRequest
@@ -237,6 +237,8 @@ TERMINAL_RUN_STATUSES = {"succeeded", "failed", "cancelled"}
 PLACE_ORDER_FLOW = "place-order"
 PLACE_ORDER_MAX_ORDERS = 10
 EMAIL_SETTINGS_KEY = "email_notifications"
+INTEGRATION_AUTOMATION_SETTINGS_KEY = "integration_automation"
+INTEGRATION_TRIGGER_EVENTS = {"workflow_run", "deployment_status"}
 EMAIL_EVENT_TRIGGERS = {"run_failed", "schedule_launch_failed", "critical_alert", "socket_failure"}
 SOCKET_MONITOR_NOTIFICATIONS_KEY = "socket_monitor_notifications"
 EMAIL_TEST_COOLDOWN_SECONDS = max(10, int(os.getenv("SIM_EMAIL_TEST_COOLDOWN_SECONDS", "30")))
@@ -433,6 +435,9 @@ def _init_db() -> None:
                 enabled INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL DEFAULT 'active',
                 archived_at TEXT,
+                trigger_event TEXT,
+                trigger_workflow TEXT,
+                trigger_conclusion TEXT NOT NULL DEFAULT 'success',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 UNIQUE(project, environment)
@@ -580,6 +585,14 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE integration_profile_mappings ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
     if mapping_columns and "archived_at" not in mapping_columns:
         conn.execute("ALTER TABLE integration_profile_mappings ADD COLUMN archived_at TEXT")
+    if mapping_columns and "trigger_event" not in mapping_columns:
+        conn.execute("ALTER TABLE integration_profile_mappings ADD COLUMN trigger_event TEXT")
+    if mapping_columns and "trigger_workflow" not in mapping_columns:
+        conn.execute("ALTER TABLE integration_profile_mappings ADD COLUMN trigger_workflow TEXT")
+    if mapping_columns and "trigger_conclusion" not in mapping_columns:
+        conn.execute(
+            "ALTER TABLE integration_profile_mappings ADD COLUMN trigger_conclusion TEXT NOT NULL DEFAULT 'success'"
+        )
     trigger_columns = [row[1] for row in conn.execute("PRAGMA table_info(integration_triggers)").fetchall()]
     if trigger_columns and "deployment_status_id" not in trigger_columns:
         conn.execute("ALTER TABLE integration_triggers ADD COLUMN deployment_status_id TEXT")
@@ -757,6 +770,9 @@ def _migrate_postgres_schema() -> None:
                     enabled BOOLEAN NOT NULL DEFAULT TRUE,
                     status VARCHAR(20) NOT NULL DEFAULT 'active',
                     archived_at TIMESTAMP WITH TIME ZONE,
+                    trigger_event VARCHAR(40),
+                    trigger_workflow VARCHAR(255),
+                    trigger_conclusion VARCHAR(40) NOT NULL DEFAULT 'success',
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
                     UNIQUE(project, environment)
@@ -789,6 +805,11 @@ def _migrate_postgres_schema() -> None:
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE")
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'")
             cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE")
+            cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS trigger_event VARCHAR(40)")
+            cursor.execute("ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS trigger_workflow VARCHAR(255)")
+            cursor.execute(
+                "ALTER TABLE integration_profile_mappings ADD COLUMN IF NOT EXISTS trigger_conclusion VARCHAR(40) NOT NULL DEFAULT 'success'"
+            )
             cursor.execute("ALTER TABLE integration_triggers ADD COLUMN IF NOT EXISTS deployment_status_id VARCHAR(80)")
             cursor.execute("ALTER TABLE integration_triggers ADD COLUMN IF NOT EXISTS github_status_url TEXT")
             cursor.execute("ALTER TABLE run_profiles ADD COLUMN IF NOT EXISTS catalog_slug VARCHAR(80)")
@@ -1208,6 +1229,36 @@ def _save_system_setting_json(key: str, payload: dict[str, Any]) -> None:
             """,
             (key, value, now),
         )
+
+
+def _default_integration_automation_settings() -> dict[str, Any]:
+    """Absent row means automation is on: the per-mapping trigger spec is the fail-closed gate."""
+    return {"automation_enabled": True}
+
+
+def _load_integration_automation_settings() -> dict[str, Any]:
+    raw = _load_system_setting_json(
+        INTEGRATION_AUTOMATION_SETTINGS_KEY,
+        _default_integration_automation_settings(),
+    )
+    return {"automation_enabled": bool(raw.get("automation_enabled", True))}
+
+
+def _set_integration_automation_payload(request: IntegrationAutomationUpdateRequest) -> dict[str, Any]:
+    _save_system_setting_json(
+        INTEGRATION_AUTOMATION_SETTINGS_KEY,
+        {"automation_enabled": bool(request.automation_enabled)},
+    )
+    return _load_integration_automation_settings()
+
+
+def integration_automation_enabled() -> bool:
+    """Master switch for GitHub-triggered simulation runs. Checked before any webhook dispatch."""
+    try:
+        return bool(_load_integration_automation_settings()["automation_enabled"])
+    except Exception:
+        LOGGER.exception("Failed to read integration automation setting; treating automation as disabled.")
+        return False
 
 
 def _get_email_settings_payload() -> dict[str, Any]:
@@ -3399,7 +3450,9 @@ def _launch_run_profile(
     user_id: Optional[int] = None,
     trigger_overlay: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    profile = _get_run_profile(profile_id)
+    # include_archived=False: an archived/deleted profile must never be launchable, manually
+    # or via a webhook — this is the single choke point every launch path goes through.
+    profile = _get_run_profile(profile_id, include_archived=False)
     request = _profile_request_to_run_request(profile)
     request.launched_by_user_id = user_id
     if trigger_overlay:
@@ -3461,13 +3514,35 @@ def _upsert_integration_mapping(request: IntegrationMappingUpsertRequest, user_i
             with conn.cursor(cursor_factory=DictCursor) as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO integration_profile_mappings (project, environment, profile_id, enabled, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO integration_profile_mappings (
+                        project, environment, profile_id, enabled,
+                        trigger_event, trigger_workflow, trigger_conclusion,
+                        created_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (project, environment)
-                    DO UPDATE SET profile_id = EXCLUDED.profile_id, enabled = EXCLUDED.enabled, status = 'active', archived_at = NULL, updated_at = EXCLUDED.updated_at
+                    DO UPDATE SET
+                        profile_id = EXCLUDED.profile_id,
+                        enabled = EXCLUDED.enabled,
+                        trigger_event = EXCLUDED.trigger_event,
+                        trigger_workflow = EXCLUDED.trigger_workflow,
+                        trigger_conclusion = EXCLUDED.trigger_conclusion,
+                        status = 'active',
+                        archived_at = NULL,
+                        updated_at = EXCLUDED.updated_at
                     RETURNING *
                     """,
-                    (project, environment, request.profile_id, request.enabled, now, now),
+                    (
+                        project,
+                        environment,
+                        request.profile_id,
+                        request.enabled,
+                        request.trigger_event,
+                        request.trigger_workflow,
+                        request.trigger_conclusion,
+                        now,
+                        now,
+                    ),
                 )
                 row = cursor.fetchone()
             conn.commit()
@@ -3477,12 +3552,34 @@ def _upsert_integration_mapping(request: IntegrationMappingUpsertRequest, user_i
         with DB_LOCK, _db() as conn:
             conn.execute(
                 """
-                INSERT INTO integration_profile_mappings (project, environment, profile_id, enabled, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO integration_profile_mappings (
+                    project, environment, profile_id, enabled,
+                    trigger_event, trigger_workflow, trigger_conclusion,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(project, environment) DO UPDATE
-                SET profile_id = excluded.profile_id, enabled = excluded.enabled, status = 'active', archived_at = NULL, updated_at = excluded.updated_at
+                SET
+                    profile_id = excluded.profile_id,
+                    enabled = excluded.enabled,
+                    trigger_event = excluded.trigger_event,
+                    trigger_workflow = excluded.trigger_workflow,
+                    trigger_conclusion = excluded.trigger_conclusion,
+                    status = 'active',
+                    archived_at = NULL,
+                    updated_at = excluded.updated_at
                 """,
-                (project, environment, request.profile_id, int(request.enabled), now, now),
+                (
+                    project,
+                    environment,
+                    request.profile_id,
+                    int(request.enabled),
+                    request.trigger_event,
+                    request.trigger_workflow,
+                    request.trigger_conclusion,
+                    now,
+                    now,
+                ),
             )
             row = conn.execute(
                 "SELECT * FROM integration_profile_mappings WHERE project = ? AND environment = ?",
@@ -3923,6 +4020,33 @@ def _process_github_deployment_webhook(body: bytes, headers: dict[str, str]) -> 
             "accepted": False,
             "status": "rejected",
             "reason": "mapping_disabled",
+            "trigger_id": trigger["id"],
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+        }
+
+    # Positive trigger spec (allowlist, not denylist): mirrors the workflow_run path below.
+    # A mapping must declare it launches on deployment_status; no spec or the wrong event
+    # type both mean "do not launch."
+    trigger_event = str(mapping.get("trigger_event") or "").strip()
+    if not trigger_event:
+        _update_integration_trigger(trigger["id"], status="rejected", reason="trigger_not_configured", finished_at=_utc_now())
+        return {
+            "accepted": False,
+            "status": "rejected",
+            "reason": "trigger_not_configured",
+            "trigger_id": trigger["id"],
+            "project": project,
+            "environment": environment,
+            "repository": repository,
+        }
+    if trigger_event != "deployment_status":
+        _update_integration_trigger(trigger["id"], status="rejected", reason="event_not_allowed", finished_at=_utc_now())
+        return {
+            "accepted": False,
+            "status": "rejected",
+            "reason": "event_not_allowed",
             "trigger_id": trigger["id"],
             "project": project,
             "environment": environment,
@@ -6811,6 +6935,8 @@ configure_system_runtime(
     get_email_settings=lambda: _get_email_settings_payload(),
     set_email_settings=lambda request: _set_email_settings_payload(request),
     send_test_email=lambda: _send_test_email_payload(),
+    get_integration_automation=lambda: _load_integration_automation_settings(),
+    set_integration_automation=lambda request: _set_integration_automation_payload(request),
     get_retention_policy=lambda: _retention_policy_payload(),
     set_retention_policy=lambda active_days, archive_days: _set_retention_policy_logic(active_days, archive_days),
 )

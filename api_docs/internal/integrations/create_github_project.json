@@ -1,0 +1,37 @@
+{
+  "useCase": "create_github_project",
+  "group": "integrations",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/integrations/github/projects"
+  },
+  "usedIn": {
+    "screen": "Integrations page",
+    "chain": [
+      "POST /api/v1/integrations/github/projects → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Admin registers repo",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": null,
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:46:25.326097+01:00",
+    "status": null,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": null,
+  "note": "Skipped: endpoint makes real external calls to GitHub API (github_webhook_sync.sync_to_github)"
+}

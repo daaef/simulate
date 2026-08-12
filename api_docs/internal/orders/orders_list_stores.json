@@ -1,0 +1,58 @@
+{
+  "useCase": "orders_list_stores",
+  "group": "orders",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/orders/stores"
+  },
+  "usedIn": {
+    "screen": "Orders store selector",
+    "chain": [
+      "GET /api/v1/orders/stores → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Store dropdown loads",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:13.736257+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "default_store_id": "FZY_926025",
+    "stores": [
+      {
+        "store_id": "FZY_926025",
+        "subentity_id": 7,
+        "name": "Ask Me Restaurant Jos",
+        "branch": "Ask Me Restaurant Jos",
+        "currency": "jpy",
+        "status": 1,
+        "is_default": true
+      },
+      {
+        "store_id": "FZY_586940",
+        "subentity_id": 6,
+        "name": "Premium Cafe JP",
+        "branch": "Premium Cafe JP",
+        "currency": "jpy",
+        "status": 1,
+        "is_default": false
+      }
+    ]
+  }
+}

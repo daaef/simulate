@@ -1,0 +1,40 @@
+{
+  "useCase": "test_system_email",
+  "group": "system",
+  "part": "internal",
+  "endpoint": {
+    "method": "POST",
+    "host": "localhost:8000",
+    "path": "/api/v1/system/email/test"
+  },
+  "usedIn": {
+    "screen": "Email settings",
+    "chain": [
+      "POST /api/v1/system/email/test → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Admin sends test",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "Uz9l6-TPTneTgFdtQHWbFjaqKrv2rgEEmB-pzes-JAF7x7iAGdC-yK-8trUpD2Ry",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:45:23.285050+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "sent": false,
+    "reason": "email_disabled"
+  },
+  "note": "Skipped: Requires higher permission level or special configuration"
+}

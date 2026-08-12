@@ -1,0 +1,45 @@
+{
+  "useCase": "fainzy_token",
+  "group": "config",
+  "part": "external",
+  "endpoint": {
+    "method": "POST",
+    "host": "fainzy.tech",
+    "path": "/v1/biz/product/authentication/"
+  },
+  "usedIn": {
+    "screen": "Simulator startup",
+    "chain": [
+      "store_sim.py:209 -- fetch_store_token()"
+    ]
+  },
+  "trigger": "Startup begins",
+  "params": {
+    "path": {},
+    "query": {
+      "product": "rds"
+    },
+    "body": {}
+  },
+  "auth": {
+    "header": "n/a",
+    "value": null,
+    "howObtained": "API credentials (no auth required)"
+  },
+  "sensitivePaths": [
+    "response.data",
+    "response"
+  ],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T01:59:28.921610+00:00",
+    "status": 200,
+    "tool": "capture_external.py",
+    "flavor": "development"
+  },
+  "response": {
+    "status": "success",
+    "message": "rds authentication successfully",
+    "data": "gAAAAABqZruAU7eR8efqv8J_1C0IXh5kq6vfY3Sbp6OvvW9frAFeH-0XbA5qcHg0ZEde8CeyZr-qQqzlR8Z4_C8DzXxhh97j2I0q7FRJk1pUgtN2IcJA_A75eEGAu3DwNsrjrZuhUxqk"
+  }
+}

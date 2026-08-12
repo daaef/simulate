@@ -1,0 +1,57 @@
+{
+  "useCase": "get_dashboard_summary",
+  "group": "runs",
+  "part": "internal",
+  "endpoint": {
+    "method": "GET",
+    "host": "localhost:8000",
+    "path": "/api/v1/dashboard/summary"
+  },
+  "usedIn": {
+    "screen": "Dashboard home",
+    "chain": [
+      "GET /api/v1/dashboard/summary → call site verified in Stage 1/2"
+    ]
+  },
+  "trigger": "Dashboard home loads",
+  "params": {
+    "path": {},
+    "query": {},
+    "body": {}
+  },
+  "auth": {
+    "header": "simulator_session",
+    "value": "s6WBITeJxjv1EKsEBYq3k0skXKSr5isyyiFqFScHvozQZo5jC1aIGx_fo7a43lmy",
+    "howObtained": "Session cookie"
+  },
+  "sensitivePaths": [],
+  "alsoTriggeredBy": null,
+  "capture": {
+    "verifiedAt": "2026-07-27T02:35:12.643795+01:00",
+    "status": 200,
+    "tool": "capture_internal.py",
+    "flavor": "development"
+  },
+  "response": {
+    "total_runs": 1,
+    "status_breakdown": {
+      "queued": 0,
+      "running": 1,
+      "cancelling": 0,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0
+    },
+    "flow_breakdown": {
+      "doctor": 1
+    },
+    "success_rate": 0.0,
+    "active_runs": 1,
+    "failed_last_24h": 0,
+    "degraded_runs": 0,
+    "archive_backlog": 0,
+    "purge_backlog": 0,
+    "last_successful_run": null,
+    "last_failed_run": null
+  }
+}
